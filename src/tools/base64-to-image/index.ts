@@ -1,9 +1,6 @@
 import "./tool.css";
 import type { Tool } from "../../shell/types";
 
-const SAMPLE =
-  "iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAACXBIWXMAAAsTAAALEwEAmpwYAAABYUlEQVR4nO2WPUoDQRiGn40ETSWksLG0srGwsLAQBLG0sLEQwUKwsLAQBLG0sLAQBLG0sLAQBLG0sLAQBLG0sLAQ7AQRG0EsLAQR8Q4WFhYWFhYW3j4zO7M7m83uzCZh84IfZuabb77vmW9mFv7xx38GUMA9MAYmwBh4Bd6BCVAFZWAZWAQWgHmgGtgAdoEjoA0MgQEwBobAB3AHHANNoApUgVogB6wACSAFJIEUkAYyQBbIAXkgD2SAFJAEEkAcWAJWgFwgB+SAHJAFkkASiANxYBFYBpaABJADckAWSAFJIAHEgUVgCVgEYkAcSACpQBJIAjEgCsSBJWAZWAQWgBVgGUgCMSAKxIBFYBlYBOJAAlgBlgEFREEUiAJxIAEsAYvAEhADokAUiAFLwBKwAESBKBADYsACsAAsAlEgCsSAGLAALAJRIArEgBgQAxaABSAKRP/4FwBKsZqzZ02drQAAAABJRU5ErkJggg==";
-
 function detectMime(b64: string) {
   const sig = b64.slice(0, 16);
   if (sig.startsWith("iVBORw0KGgo")) return { mime: "image/png", ext: "png" };
@@ -32,7 +29,6 @@ const tool: Tool = {
       <div class="container">
         <div class="toolbar">
           <button type="button" class="paste-btn">Paste from clipboard</button>
-          <button type="button" class="sample-btn">Try sample</button>
           <button type="button" class="clear-btn">Clear</button>
           <span class="status"></span>
         </div>
@@ -158,11 +154,6 @@ const tool: Tool = {
       outputArea.style.display = "none";
       clearError();
       status.textContent = "";
-    });
-
-    $(".sample-btn").addEventListener("click", () => {
-      input.value = SAMPLE;
-      convert(SAMPLE);
     });
 
     $(".download-btn").addEventListener("click", () => {

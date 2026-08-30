@@ -361,25 +361,6 @@ function countStats(node: Node, acc: { keys: number; comments: number }) {
 
 /* ---------------- UI ---------------- */
 
-const EXAMPLE = `{
-  // Zoom level for the whole window
-  "window.zoomLevel": 1,
-  /* Formatting rules shared
-     across web languages */
-  "[typescript][json][css][javascript][html][jsonc][typescriptreact]": {
-    "editor.tabSize": 2, // spaces, not tabs
-    "editor.formatOnSave": true
-  },
-  "editor.rulers": [80, 120],
-  // Files to hide in the explorer
-  "files.exclude": {
-    "**/node_modules": true, // huge
-    "**/.git": true
-  },
-  "editor.fontSize": 14
-  // dangling note stays at the bottom of this object
-}`;
-
 const tool: Tool = {
   id: "jsonc-sorter",
   name: "JSONC Key Sorter",
@@ -411,7 +392,6 @@ const tool: Tool = {
           <div class="pane-head">
             <span>input.jsonc</span>
             <span class="spacer"></span>
-            <button class="btn-example" type="button">Load example</button>
             <button class="btn-clear" type="button">Clear</button>
           </div>
           <textarea class="src" spellcheck="false" autocapitalize="off" autocomplete="off"
@@ -436,7 +416,6 @@ const tool: Tool = {
     const $optOrder = el.querySelector(".opt-order") as HTMLSelectElement;
     const $optBrackets = el.querySelector(".opt-brackets") as HTMLInputElement;
     const $btnCopy = el.querySelector(".btn-copy") as HTMLButtonElement;
-    const $btnExample = el.querySelector(".btn-example") as HTMLButtonElement;
     const $btnClear = el.querySelector(".btn-clear") as HTMLButtonElement;
 
     let lastResult = "";
@@ -501,11 +480,6 @@ const tool: Tool = {
       $input.value = "";
       run();
       $input.focus();
-    });
-
-    $btnExample.addEventListener("click", () => {
-      $input.value = EXAMPLE;
-      run();
     });
   },
 };
