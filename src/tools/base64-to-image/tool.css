@@ -28,6 +28,11 @@
   resize: vertical;
 }
 
+.tool-base64-to-image.dragging .b64-input {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
 .tool-base64-to-image .output {
   margin-top: 1.5rem;
   display: none;

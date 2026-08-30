@@ -22,7 +22,7 @@ function formatBytes(n: number) {
 const tool: Tool = {
   id: "base64-to-image",
   name: "Base64 ⇄ Image",
-  subtitle: "Paste a base64 string, or paste an image to get its base64.",
+  subtitle: "Paste a base64 string, or paste/drop an image to get its base64.",
   keywords: ["base64", "image", "decode", "encode", "convert", "data uri", "png", "preview"],
   mount(el) {
     el.innerHTML = `
@@ -32,7 +32,7 @@ const tool: Tool = {
           <button type="button" class="clear-btn">Clear</button>
           <span class="status"></span>
         </div>
-        <textarea class="b64-input" placeholder="Paste your base64 string here. Data URI prefix (data:image/png;base64,...) is fine; it'll be stripped automatically."></textarea>
+        <textarea class="b64-input" placeholder="Paste your base64 string or data URI here, or paste/drop an image to get its base64."></textarea>
         <div class="output">
           <div class="output-header">
             <div class="meta"></div>
@@ -160,6 +160,30 @@ const tool: Tool = {
       } catch {
         showError("Clipboard access denied. Paste manually into the text area instead.");
       }
+    });
+
+    // Drop an image anywhere on the tool
+    let dragDepth = 0;
+    el.addEventListener("dragenter", (e) => {
+      e.preventDefault();
+      dragDepth++;
+      el.classList.add("dragging");
+    });
+    el.addEventListener("dragover", (e) => e.preventDefault());
+    el.addEventListener("dragleave", () => {
+      if (--dragDepth <= 0) {
+        dragDepth = 0;
+        el.classList.remove("dragging");
+      }
+    });
+    el.addEventListener("drop", (e) => {
+      e.preventDefault();
+      dragDepth = 0;
+      el.classList.remove("dragging");
+      const file = e.dataTransfer?.files[0];
+      if (!file) return;
+      if (file.type.startsWith("image/")) loadImageBlob(file);
+      else showError("Dropped file is not an image.");
     });
 
     // Cmd+V anywhere in the tool with an image on the clipboard
