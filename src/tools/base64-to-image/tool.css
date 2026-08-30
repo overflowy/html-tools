@@ -2,6 +2,12 @@
 
 .tool-base64-to-image .container { max-width: 760px; width: 100%; }
 
+.tool-base64-to-image button {
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: var(--radius-sm);
+}
+
 .tool-base64-to-image .toolbar {
   display: flex;
   gap: 8px;
