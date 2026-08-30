@@ -7,7 +7,10 @@ const LAST_KEY = "html-tools:last";
 
 document.body.innerHTML = `
   <aside class="sidebar">
-    <div class="app-name"><span class="accent">{/}</span> html tools</div>
+    <div class="app-name">
+      <svg class="logo" viewBox="0 0 64 64" aria-hidden="true"><text x="32" y="45" font-family="ui-monospace,Menlo,monospace" font-size="32" font-weight="700" text-anchor="middle" fill="#c96442">{/}</text></svg>
+      html tools
+    </div>
     <div class="filter-wrap">
       <input type="search" placeholder="Filter tools" aria-label="Filter tools">
       <kbd>&#8984;K</kbd>

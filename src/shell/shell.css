@@ -15,12 +15,15 @@ body { display: flex; overflow: hidden; }
 }
 
 .app-name {
+  display: flex;
+  align-items: center;
+  gap: 7px;
   font-size: 13px;
   font-weight: 600;
   letter-spacing: 0.04em;
   padding: 0 6px;
 }
-.app-name .accent { color: var(--accent); }
+.app-name .logo { width: 20px; height: 20px; flex-shrink: 0; }
 
 .filter-wrap { position: relative; }
 .filter-wrap input {
