@@ -33,7 +33,7 @@ const tool: Tool = {
             <span class="spacer"></span>
             <button class="btn-paste-enc" type="button">Paste from clipboard</button>
             <button class="btn-clear-enc" type="button">Clear</button>
-            <button class="btn-copy-enc" type="button">Copy</button>
+            <button class="btn-copy-enc primary" type="button">Copy</button>
           </div>
           <textarea class="src enc" spellcheck="false" autocapitalize="off" autocomplete="off"
             placeholder="Paste an LZString-compressed base64 save here to decode it."></textarea>
