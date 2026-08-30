@@ -13,7 +13,6 @@ document.body.innerHTML = `
       <kbd>&#8984;K</kbd>
     </div>
     <nav class="tool-list"></nav>
-    <div class="sidebar-foot">Runs entirely in your browser. Save this file to use offline.</div>
   </aside>
   <div class="content">
     <header class="tool-header">

@@ -69,12 +69,6 @@ body { display: flex; overflow: hidden; }
   padding: 6px 10px;
 }
 
-.sidebar-foot {
-  font-size: 11px;
-  color: var(--text-muted);
-  padding: 0 6px;
-}
-
 /* ---- main pane ---- */
 
 .content {
