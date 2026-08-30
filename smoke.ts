@@ -21,7 +21,7 @@ function check(label: string, ok: boolean, detail = "") {
 
 await page.goto(url);
 const names = await page.locator(".tool-list button").allTextContents();
-check("sidebar lists all tools", names.length === 3, names.join(", "));
+check("sidebar lists all tools", names.length === 4, names.join(", "));
 
 // base64 tool: paste a tiny valid png via direct input.
 await page.goto(url + "#base64-to-image");
@@ -40,6 +40,19 @@ await page.waitForFunction(() =>
   (document.querySelector(".tool-base64-to-image .b64-input") as HTMLTextAreaElement).value.startsWith("data:image/png;base64,"));
 await page.waitForSelector(".tool-base64-to-image .output", { state: "visible" });
 check("pasted image encodes to base64", true);
+
+// image drop -> base64
+await page.locator(".b64-input").fill("");
+await page.evaluate((b64: string) => {
+  const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+  const dt = new DataTransfer();
+  dt.items.add(new File([bytes], "pixel.png", { type: "image/png" }));
+  document.querySelector(".tool-base64-to-image")!
+    .dispatchEvent(new DragEvent("drop", { dataTransfer: dt, bubbles: true, cancelable: true }));
+}, "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==");
+await page.waitForFunction(() =>
+  (document.querySelector(".tool-base64-to-image .b64-input") as HTMLTextAreaElement).value.startsWith("data:image/png;base64,"));
+check("dropped image encodes to base64", true);
 
 // jsonc tool: sort a snippet with a comment.
 await page.goto(url + "#jsonc-sorter");
@@ -73,6 +86,47 @@ await page.waitForSelector(".tool-save-decoder .dec-status.error");
 const decErr = await page.locator(".tool-save-decoder .dec-status .status-text").textContent();
 check("invalid JSON refuses to encode", decErr!.includes("Not valid JSON"), decErr!.slice(0, 60));
 check("encoded pane untouched on bad JSON", (await page.locator(".tool-save-decoder .enc").inputValue()) === encoded);
+
+// image metadata: minimal hand-crafted fixtures, one per container, each with
+// EXIF GPS 52.520008 N, 13.404954 E. Drop each one, expect the GPS highlight,
+// then strip and expect the self-verification to pass.
+// - jpeg: SOI, APP0 JFIF, APP1 EXIF (Orientation 6), COM, DQT/SOF0/DHT/SOS 1x1, EOI, trailing junk
+// - png: 1x1 gray with eXIf + tEXt + tIME chunks
+// - webp: VP8X (EXIF flag) + VP8L stub + EXIF chunk
+// - tiff: 1x1 gray with Software/DateTime tags + GPS IFD
+// - heic: ftyp + meta (hdlr/pitm/iinf/iref/iprp/iloc) + mdat with Exif item
+const FIXTURES: Record<string, string> = {
+  jpeg: "/9j/4AAQSkZJRgABAQAASABIAAD/4QEaRXhpZgAASUkqAAgAAAAGAA8BAgAFAAAAVgAAABABAgAJAAAAXAAAABIBAwABAAAABgAAADIBAgAUAAAAZgAAAGmHBAABAAAAegAAACWIBAABAAAAoAAAAAAAAABBY21lAABDYW0gOTAwMAAAMjAyNDowNTowMSAxMjowMDowMAABAAOQAgAUAAAAjAAAAAAAAAAyMDI0OjA1OjAxIDEyOjAwOjAwAAUAAQACAAIAAABOAAAAAgAFAAMAAADiAAAAAwACAAIAAABFAAAABAAFAAMAAAD6AAAABQABAAEAAAAAAAAAAAAAADQAAAABAAAAHwAAAAEAAADg1QEAECcAAA0AAAABAAAAGAAAAAEAAACouAIAECcAAP/+ABJzaG90IG9uIGEgcG90YXRv/9sAQwABAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB/8AACwgAAQABAQERAP/EABQAAAEAAAAAAAAAAAAAAAAAAAD/xAAUEAABAAAAAAAAAAAAAAAAAAAA/9oACAEBAAA/AA//2VRSQUlMSU5HSlVOSw==",
+  png: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAAAAAA6fptVAAABEmVYSWZJSSoACAAAAAYADwECAAUAAABWAAAAEAECAAkAAABcAAAAEgEDAAEAAAABAAAAMgECABQAAABmAAAAaYcEAAEAAAB6AAAAJYgEAAEAAACgAAAAAAAAAEFjbWUAAENhbSA5MDAwAAAyMDI0OjA1OjAxIDEyOjAwOjAwAAEAA5ACABQAAACMAAAAAAAAADIwMjQ6MDU6MDEgMTI6MDA6MDAABQABAAIAAgAAAE4AAAACAAUAAwAAAOIAAAADAAIAAgAAAEUAAAAEAAUAAwAAAPoAAAAFAAEAAQAAAAAAAAAAAAAANAAAAAEAAAAfAAAAAQAAAODVAQAQJwAADQAAAAEAAAAYAAAAAQAAAKi4AgAQJwAAASqWTAAAABV0RVh0U29mdHdhcmUAbWFkZSBieSBoYW5kDW494gAAAAd0SU1FB+gFAQwAAE+FIj4AAAANSURBVHgBAQIA/f8AgACCAIHDbiXgAAAAAElFTkSuQmCC",
+  webp: "UklGRkABAABXRUJQVlA4WAoAAAAIAAAAAAAAAAAAVlA4TAgAAAAvAAAAAIiICEVYSUYSAQAASUkqAAgAAAAGAA8BAgAFAAAAVgAAABABAgAJAAAAXAAAABIBAwABAAAAAQAAADIBAgAUAAAAZgAAAGmHBAABAAAAegAAACWIBAABAAAAoAAAAAAAAABBY21lAABDYW0gOTAwMAAAMjAyNDowNTowMSAxMjowMDowMAABAAOQAgAUAAAAjAAAAAAAAAAyMDI0OjA1OjAxIDEyOjAwOjAwAAUAAQACAAIAAABOAAAAAgAFAAMAAADiAAAAAwACAAIAAABFAAAABAAFAAMAAAD6AAAABQABAAEAAAAAAAAAAAAAADQAAAABAAAAHwAAAAEAAADg1QEAECcAAA0AAAABAAAAGAAAAAEAAACouAIAECcAAA==",
+  tiff: "SUkqAAgAAAAKAAABAwABAAAAAQAAAAEBAwABAAAAAQAAAAIBAwABAAAACAAAAAMBAwABAAAAAQAAAAYBAwABAAAAAQAAABEBBAABAAAAhgAAABcBBAABAAAAAQAAADEBAgASAAAAiAAAADIBAgAUAAAAmgAAACWIBAABAAAArgAAAAAAAACAAGhhbmRtYWRlIGZpeHR1cmUAADIwMjQ6MDU6MDEgMTI6MDA6MDAABQABAAIAAgAAAE4AAAACAAUAAwAAAPAAAAADAAIAAgAAAEUAAAAEAAUAAwAAAAgBAAAFAAEAAQAAAAAAAAAAAAAANAAAAAEAAAAfAAAAAQAAAODVAQAQJwAADQAAAAEAAAAYAAAAAQAAAKi4AgAQJwAA",
+  heic: "AAAAGGZ0eXBoZWljAAAAAG1pZjFoZWljAAAA8W1ldGEAAAAAAAAAIWhkbHIAAAAAAAAAAHBpY3QAAAAAAAAAAAAAAAAAAAAADnBpdG0AAAAAAAEAAAA4aWluZgAAAAAAAgAAABVpbmZlAgAAAAABAABodmMxAAAAABVpbmZlAgAAAAACAABFeGlmAAAAABppcmVmAAAAAAAAAA5jZHNjAAIAAQABAAAAOGlwcnAAAAAcaXBjbwAAABRpc3BlAAAAAAAAAEAAAAAwAAAAFGlwbWEAAAAAAAAAAQABAYEAAAAsaWxvYwAAAABEAAACAAEAAAABAAABEQAAABAAAgAAAAEAAAEhAAABHAAAATRtZGF0RkFLRUhFVkNQQVlMT0FEIQAAAAZFeGlmAABJSSoACAAAAAYADwECAAUAAABWAAAAEAECAAkAAABcAAAAEgEDAAEAAAABAAAAMgECABQAAABmAAAAaYcEAAEAAAB6AAAAJYgEAAEAAACgAAAAAAAAAEFjbWUAAENhbSA5MDAwAAAyMDI0OjA1OjAxIDEyOjAwOjAwAAEAA5ACABQAAACMAAAAAAAAADIwMjQ6MDU6MDEgMTI6MDA6MDAABQABAAIAAgAAAE4AAAACAAUAAwAAAOIAAAADAAIAAgAAAEUAAAAEAAUAAwAAAPoAAAAFAAEAAQAAAAAAAAAAAAAANAAAAAEAAAAfAAAAAQAAAODVAQAQJwAADQAAAAEAAAAYAAAAAQAAAKi4AgAQJwAA",
+};
+
+await page.goto(url + "#image-metadata");
+for (const [fmt, b64] of Object.entries(FIXTURES)) {
+  await page.evaluate(([n, s]) => {
+    const bytes = Uint8Array.from(atob(s!), (c) => c.charCodeAt(0));
+    const dt = new DataTransfer();
+    dt.items.add(new File([bytes], "fixture." + n, { type: "application/octet-stream" }));
+    document.querySelector(".tool-image-metadata")!
+      .dispatchEvent(new DragEvent("drop", { dataTransfer: dt, bubbles: true, cancelable: true }));
+  }, [fmt, b64]);
+  await page.waitForFunction(
+    (n) => document.querySelector(".tool-image-metadata .status")?.textContent === "fixture." + n, fmt);
+  const gpsText = await page.locator(".tool-image-metadata .hl.gps .hl-val").textContent();
+  check(fmt + " shows GPS coordinates", gpsText!.includes("52.520008") && gpsText!.includes("13.404954"), gpsText!.trim().slice(0, 40));
+  const hlText = await page.locator(".tool-image-metadata .highlights").textContent();
+  check(fmt + " shows dashed date", hlText!.includes("2024-05-01 12:00:00"), hlText!.trim().slice(0, 60));
+  await page.locator(".tool-image-metadata .strip-btn").click();
+  await page.waitForSelector(".tool-image-metadata .strip-ok");
+  const verdict = await page.locator(".tool-image-metadata .strip-ok").textContent();
+  check(fmt + " strips clean", verdict!.startsWith("Re-parsed the stripped copy"), verdict!.slice(0, 70));
+  if (fmt === "jpeg") {
+    // The JPEG fixture has Orientation 6: the strip must keep it and say so.
+    check("jpeg keeps orientation", verdict!.includes("orientation (6)"), verdict!.slice(0, 90));
+  }
+}
 
 check("no page errors", errors.length === 0, errors.join(" | "));
 await browser.close();

@@ -1,0 +1,290 @@
+.tool-image-metadata { padding: 0.25rem 2rem 2rem; }
+
+.tool-image-metadata .container { max-width: 760px; width: 100%; }
+
+.tool-image-metadata button {
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: var(--radius-sm);
+}
+
+.tool-image-metadata .toolbar {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.tool-image-metadata .status {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-left: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 50%;
+}
+
+.tool-image-metadata .empty-hint {
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-lg);
+  padding: 40px 20px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.tool-image-metadata .empty-hint strong { color: var(--text); font-weight: 500; }
+
+.tool-image-metadata .empty-hint span {
+  display: block;
+  margin-top: 6px;
+  font-size: 12.5px;
+}
+
+.tool-image-metadata.dragging .empty-hint,
+.tool-image-metadata.dragging .report {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-lg);
+}
+
+.tool-image-metadata .report { display: none; }
+
+.tool-image-metadata .summary {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.tool-image-metadata .thumb-frame {
+  width: 140px;
+  height: 140px;
+  flex: none;
+  background: var(--surface-2);
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background-image:
+    linear-gradient(45deg, rgba(128, 128, 128, 0.08) 25%, transparent 25%),
+    linear-gradient(-45deg, rgba(128, 128, 128, 0.08) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, rgba(128, 128, 128, 0.08) 75%),
+    linear-gradient(-45deg, transparent 75%, rgba(128, 128, 128, 0.08) 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0px;
+}
+
+.tool-image-metadata .preview {
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: var(--radius-sm);
+}
+
+.tool-image-metadata .thumb-fallback {
+  display: none;
+  color: var(--text-muted);
+  font-size: 12px;
+  text-align: center;
+  white-space: pre-line;
+  align-items: center;
+  justify-content: center;
+}
+
+.tool-image-metadata .facts { min-width: 0; }
+
+.tool-image-metadata .fact-name {
+  font-size: 14px;
+  font-weight: 500;
+  word-break: break-all;
+}
+
+.tool-image-metadata .fact-line {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.tool-image-metadata .note {
+  display: none;
+  margin-top: 12px;
+  padding: 8px 12px;
+  background: var(--surface-2);
+  border-left: 2px solid var(--accent);
+  border-radius: var(--radius-sm);
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+
+.tool-image-metadata .highlights {
+  margin-top: 16px;
+  background: var(--surface);
+  border: 0.5px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 10px 14px;
+}
+
+.tool-image-metadata .hl {
+  display: flex;
+  gap: 12px;
+  font-size: 13px;
+  padding: 3px 0;
+}
+
+.tool-image-metadata .hl-key {
+  flex: none;
+  width: 90px;
+  color: var(--text-muted);
+}
+
+.tool-image-metadata .hl-val a {
+  color: var(--accent);
+  margin-left: 8px;
+}
+
+.tool-image-metadata .sections { margin-top: 16px; }
+
+.tool-image-metadata .sec-title {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+
+.tool-image-metadata .sec {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 13px;
+  padding: 2px 0;
+}
+
+.tool-image-metadata .sec-bytes {
+  color: var(--text-muted);
+  font-size: 12px;
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+
+.tool-image-metadata .sec-kept {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ok);
+  border: 0.5px solid var(--ok);
+  border-radius: 999px;
+  padding: 0 6px;
+}
+
+.tool-image-metadata .strip-panel {
+  margin-top: 16px;
+  padding: 12px 14px;
+  background: var(--surface);
+  border: 0.5px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.tool-image-metadata .strip-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.tool-image-metadata .strip-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.tool-image-metadata .strip-note {
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+
+.tool-image-metadata .strip-result:not(:empty) { margin-top: 12px; }
+
+.tool-image-metadata .strip-sizes {
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.tool-image-metadata .strip-sizes .saved { color: var(--ok); }
+
+.tool-image-metadata .strip-ok {
+  font-size: 12.5px;
+  color: var(--ok);
+  margin-top: 4px;
+}
+
+.tool-image-metadata .strip-fail {
+  font-size: 12.5px;
+  color: var(--danger-text);
+  margin-top: 4px;
+}
+
+.tool-image-metadata .kept-note { color: var(--text-muted); }
+
+.tool-image-metadata .download-link {
+  display: inline-block;
+  margin-top: 10px;
+  color: var(--accent);
+  font-size: 13px;
+}
+
+.tool-image-metadata .tags { margin-top: 20px; }
+
+.tool-image-metadata .tag-group {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  margin: 14px 0 4px;
+}
+
+.tool-image-metadata .tag-row {
+  display: flex;
+  gap: 12px;
+  font-size: 12.5px;
+  padding: 2px 0;
+  border-bottom: 0.5px solid var(--border);
+}
+
+.tool-image-metadata .tag-name {
+  flex: none;
+  width: 200px;
+  color: var(--text-muted);
+}
+
+.tool-image-metadata .tag-val {
+  font-family: var(--mono);
+  font-size: 12px;
+  word-break: break-word;
+  min-width: 0;
+}
+
+.tool-image-metadata .xmp { margin-top: 14px; }
+
+.tool-image-metadata .xmp summary {
+  font-size: 12.5px;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.tool-image-metadata .xmp pre {
+  font-size: 11px;
+  line-height: 1.45;
+  background: var(--surface);
+  border-radius: var(--radius-sm);
+  padding: 10px;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.tool-image-metadata .error-box {
+  margin-top: 12px;
+  display: none;
+}
