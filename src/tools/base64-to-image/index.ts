@@ -34,8 +34,8 @@ const tool: Tool = {
         </div>
         <textarea class="b64-input" placeholder="Paste your base64 string here. Data URI prefix (data:image/png;base64,...) is fine; it'll be stripped automatically."></textarea>
         <div class="drop-zone">
-          Or drop a .txt file containing base64 here
-          <input type="file" accept=".txt,text/plain" hidden>
+          Or drop a text file containing base64 here
+          <input type="file" hidden>
         </div>
         <div class="output">
           <div class="output-header">
