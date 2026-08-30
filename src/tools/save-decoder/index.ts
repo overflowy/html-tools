@@ -29,7 +29,7 @@ const tool: Tool = {
       <div class="panes">
         <section class="pane">
           <div class="pane-head">
-            <span>encoded.txt</span>
+            <span>encoded</span>
             <span class="spacer"></span>
             <button class="btn-paste-enc" type="button">Paste from clipboard</button>
             <button class="btn-clear-enc" type="button">Clear</button>
@@ -41,7 +41,7 @@ const tool: Tool = {
         </section>
         <section class="pane">
           <div class="pane-head">
-            <span>decoded.json</span>
+            <span>decoded</span>
             <span class="spacer"></span>
             <button class="btn-paste-dec" type="button">Paste from clipboard</button>
             <button class="btn-clear-dec" type="button">Clear</button>
