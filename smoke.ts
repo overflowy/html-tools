@@ -52,6 +52,16 @@ await page.locator(".tool-save-decoder .enc").fill("!!!not-a-save!!!");
 await badStatus.waitFor();
 check("invalid save reports error", true);
 
+// invalid JSON in the decoded pane must refuse to encode, keeping the encoded pane intact
+await page.reload();
+await page.locator(".tool-save-decoder .enc").fill(encoded);
+await page.waitForSelector(".tool-save-decoder .enc-status.ok");
+await page.locator(".tool-save-decoder .dec").fill('{\n    resources: "unquoted key"\n}');
+await page.waitForSelector(".tool-save-decoder .dec-status.error");
+const decErr = await page.locator(".tool-save-decoder .dec-status .status-text").textContent();
+check("invalid JSON refuses to encode", decErr!.includes("Not valid JSON"), decErr!.slice(0, 60));
+check("encoded pane untouched on bad JSON", (await page.locator(".tool-save-decoder .enc").inputValue()) === encoded);
+
 check("no page errors", errors.length === 0, errors.join(" | "));
 await browser.close();
 process.exit(failed ? 1 : 0);

@@ -48,7 +48,7 @@ const tool: Tool = {
             <button class="btn-copy-dec primary" type="button">Copy</button>
           </div>
           <textarea class="src dec" spellcheck="false" autocapitalize="off" autocomplete="off"
-            placeholder="Paste JSON (or any text) here to encode it."></textarea>
+            placeholder="Paste or edit JSON here to encode it."></textarea>
           <div class="statusbar dec-status"><span class="dot">&#9679;</span><span class="status-text">Waiting for input</span></div>
         </section>
       </div>`;
@@ -108,17 +108,18 @@ const tool: Tool = {
         setStatus($decStatus, "", "Waiting for input");
         return;
       }
-      let data = raw;
-      let note = "plain text";
+      let data: string;
       try {
         data = JSON.stringify(JSON.parse(raw));
-        note = "JSON, minified";
-      } catch {
-        // not JSON: compress as-is
+      } catch (e) {
+        // Refuse rather than compress broken text: games JSON.parse the
+        // decompressed payload and would surface this error on import.
+        setStatus($decStatus, "error", "Not valid JSON, not encoding. " + (e as Error).message);
+        return;
       }
       const encoded = LZString.compressToBase64(data);
       $enc.value = encoded;
-      setStatus($decStatus, "ok", formatBytes(raw.length) + " encoded to " + formatBytes(encoded.length) + " (" + note + ")");
+      setStatus($decStatus, "ok", formatBytes(raw.length) + " encoded to " + formatBytes(encoded.length) + " (JSON, minified)");
       setStatus($encStatus, "", "Encoded output");
     }
 
