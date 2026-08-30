@@ -21,7 +21,7 @@ function formatBytes(n: number) {
 
 const tool: Tool = {
   id: "base64-to-image",
-  name: "Base64 to Image",
+  name: "Base64 ↔ Image",
   subtitle: "Paste a base64 string, or paste an image to get its base64.",
   keywords: ["base64", "image", "decode", "encode", "convert", "data uri", "png", "preview"],
   mount(el) {
