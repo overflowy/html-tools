@@ -128,6 +128,40 @@ for (const [fmt, b64] of Object.entries(FIXTURES)) {
   }
 }
 
+// Deep links: a tool's state lives in the URL hash and a fresh load restores it.
+await page.goto(url + "#jsonc-sorter");
+await page.locator(".tool-jsonc-sorter .src").fill('{"z": 1, "a": 2}');
+await page.locator(".tool-jsonc-sorter .opt-order").selectOption("desc");
+await page.waitForSelector(".tool-jsonc-sorter .statusbar.ok");
+await page.waitForFunction(() => location.hash.startsWith("#jsonc-sorter/"));
+const jsoncLink = await page.evaluate(() => location.href);
+await page.goto("about:blank");
+await page.goto(jsoncLink);
+await page.waitForSelector(".tool-jsonc-sorter .statusbar.ok");
+check("jsonc deep link restores input", (await page.locator(".tool-jsonc-sorter .src").inputValue()) === '{"z": 1, "a": 2}');
+check("jsonc deep link restores options", (await page.locator(".tool-jsonc-sorter .opt-order").inputValue()) === "desc");
+const sortedOut = await page.locator(".tool-jsonc-sorter .output").textContent();
+check("jsonc deep link sorts on load", sortedOut!.indexOf('"z"') !== -1 && sortedOut!.indexOf('"z"') < sortedOut!.indexOf('"a"'));
+
+// Switching tools via the sidebar keeps each tool's state in its deep link.
+await page.locator(".tool-list button", { hasText: "Base64" }).click();
+await page.waitForFunction(() => location.hash === "#base64-to-image");
+await page.locator(".tool-list button", { hasText: "JSONC" }).click();
+await page.waitForFunction(() => location.hash.startsWith("#jsonc-sorter/"));
+check("switching tools keeps state in the deep link", true);
+
+await page.goto(url + "#save-decoder");
+await page.locator(".tool-save-decoder .dec").fill('{"day": 7}');
+await page.waitForSelector(".tool-save-decoder .dec-status.ok");
+const savedEnc = await page.locator(".tool-save-decoder .enc").inputValue();
+await page.waitForFunction(() => location.hash.startsWith("#save-decoder/"));
+const saveLink = await page.evaluate(() => location.href);
+await page.goto("about:blank");
+await page.goto(saveLink);
+await page.waitForSelector(".tool-save-decoder .enc-status.ok");
+check("save deep link restores encoded pane", (await page.locator(".tool-save-decoder .enc").inputValue()) === savedEnc);
+check("save deep link decodes on load", JSON.parse(await page.locator(".tool-save-decoder .dec").inputValue()).day === 7);
+
 check("no page errors", errors.length === 0, errors.join(" | "));
 await browser.close();
 process.exit(failed ? 1 : 0);

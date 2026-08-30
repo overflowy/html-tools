@@ -33,6 +33,8 @@ const $subtitle = document.querySelector(".tool-header .subtitle") as HTMLElemen
 const $hosts = document.querySelector(".hosts") as HTMLElement;
 
 const hosts = new Map<string, HTMLElement>();
+const payloads = new Map<string, string>();
+const restorers = new Map<string, (payload: string) => void>();
 let current: Tool | null = null;
 let visible: Tool[] = tools.slice();
 let cursor = 0;
@@ -70,12 +72,30 @@ function renderList() {
   });
 }
 
-function selectTool(id: string) {
+/** Deep Link format: `#<tool-id>` or `#<tool-id>/<payload>`. */
+function parseHash(): { id: string; payload: string } {
+  const raw = location.hash.slice(1);
+  const slash = raw.indexOf("/");
+  if (slash === -1) return { id: decodeURIComponent(raw), payload: "" };
+  return { id: decodeURIComponent(raw.slice(0, slash)), payload: raw.slice(slash + 1) };
+}
+
+function writeHash(toolId: string) {
+  const payload = payloads.get(toolId);
+  const hash = "#" + toolId + (payload ? "/" + payload : "");
+  if (location.hash !== hash) history.replaceState(null, "", hash);
+}
+
+function selectTool(id: string, payload = "") {
   const tool = tools.find((t) => t.id === id) ?? tools[0]!;
-  if (location.hash.slice(1) !== tool.id) {
-    history.replaceState(null, "", "#" + tool.id);
-  }
+  // A hash without a payload (sidebar click, hand-typed URL) keeps the
+  // tool's last-known State rather than wiping it. A payload meant for an
+  // unknown tool id is dropped, not applied to the fallback tool.
+  const changed = tool.id === id && payload !== "" && payload !== payloads.get(tool.id);
+  if (changed) payloads.set(tool.id, payload);
+  writeHash(tool.id);
   if (current?.id === tool.id) {
+    if (changed) restorers.get(tool.id)?.(payload);
     renderList();
     return;
   }
@@ -91,15 +111,28 @@ function selectTool(id: string) {
     host.className = "tool-host tool-" + tool.id;
     $hosts.appendChild(host);
     hosts.set(tool.id, host);
-    tool.mount(host);
+    tool.mount(host, {
+      setState(p) {
+        if (p) payloads.set(tool.id, p);
+        else payloads.delete(tool.id);
+        if (current?.id === tool.id) writeHash(tool.id);
+      },
+      onRestore(fn) {
+        restorers.set(tool.id, fn);
+      },
+    });
+    const stored = payloads.get(tool.id);
+    if (stored) restorers.get(tool.id)?.(stored);
+  } else if (changed) {
+    restorers.get(tool.id)?.(payload);
   }
   for (const [id, h] of hosts) h.hidden = id !== tool.id;
   renderList();
 }
 
 window.addEventListener("hashchange", () => {
-  const id = decodeURIComponent(location.hash.slice(1));
-  if (id) selectTool(id);
+  const { id, payload } = parseHash();
+  if (id) selectTool(id, payload);
 });
 
 window.addEventListener("keydown", (e) => {
@@ -152,5 +185,5 @@ $filter.addEventListener("keydown", (e) => {
   }
 });
 
-const requested = decodeURIComponent(location.hash.slice(1)) || localStorage.getItem(LAST_KEY) || "";
-selectTool(requested);
+const initial = parseHash();
+selectTool(initial.id || localStorage.getItem(LAST_KEY) || "", initial.payload);

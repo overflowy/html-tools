@@ -9,12 +9,15 @@ function formatBytes(n: number) {
   return (n / 1024 / 1024).toFixed(2) + " MB";
 }
 
+/** Longest encoded save we are willing to put in the Deep Link. */
+const STATE_CAP = 30000;
+
 const tool: Tool = {
   id: "save-decoder",
   name: "LZString Save Decoder",
   subtitle: "Decode and encode LZString-compressed base64 saves from incremental games.",
   keywords: ["lzstring", "lz-string", "save", "decode", "encode", "base64", "json", "compress", "kittens"],
-  mount(el) {
+  mount(el, ctx) {
     el.innerHTML = `
       <div class="options">
         <label class="opt">indent
@@ -71,8 +74,22 @@ const tool: Tool = {
       return v === "tab" ? "\t" : " ".repeat(Number(v));
     }
 
+    /** State layout: `<indent>.<encoded save, base64 with + and / made URL-safe>`. */
+    function publishState(): boolean {
+      const raw = $enc.value.replace(/\s+/g, "");
+      let packed = "";
+      let fits = true;
+      if (raw && /^[A-Za-z0-9+/=]+$/.test(raw)) {
+        if (raw.length <= STATE_CAP) packed = raw.replace(/\+/g, "-").replace(/\//g, "_");
+        else fits = false;
+      }
+      ctx.setState($optIndent.value + "." + packed);
+      return fits;
+    }
+
     function decode() {
       const raw = $enc.value.replace(/\s+/g, "");
+      const linked = publishState();
       if (!raw) {
         setStatus($encStatus, "", "Waiting for input");
         return;
@@ -98,7 +115,8 @@ const tool: Tool = {
         // not JSON: show the raw decoded string
       }
       $dec.value = out;
-      setStatus($encStatus, "ok", formatBytes(raw.length) + " decoded to " + formatBytes(out.length) + " (" + note + ")");
+      setStatus($encStatus, "ok", formatBytes(raw.length) + " decoded to " + formatBytes(out.length) + " (" + note + ")" +
+        (linked ? "" : " · too large to keep in the URL"));
       setStatus($decStatus, "", "Decoded output");
     }
 
@@ -119,7 +137,9 @@ const tool: Tool = {
       }
       const encoded = LZString.compressToBase64(data);
       $enc.value = encoded;
-      setStatus($decStatus, "ok", formatBytes(raw.length) + " encoded to " + formatBytes(encoded.length) + " (JSON, minified)");
+      const linked = publishState();
+      setStatus($decStatus, "ok", formatBytes(raw.length) + " encoded to " + formatBytes(encoded.length) + " (JSON, minified)" +
+        (linked ? "" : " · too large to keep in the URL"));
       setStatus($encStatus, "", "Encoded output");
     }
 
@@ -132,6 +152,16 @@ const tool: Tool = {
     $enc.addEventListener("input", () => schedule(decode));
     $dec.addEventListener("input", () => schedule(encode));
     $optIndent.addEventListener("change", () => {
+      if ($enc.value.trim()) decode();
+      else publishState();
+    });
+
+    ctx.onRestore((payload) => {
+      const dot = payload.indexOf(".");
+      const indent = dot === -1 ? payload : payload.slice(0, dot);
+      const packed = dot === -1 ? "" : payload.slice(dot + 1);
+      if (["2", "4", "tab", "off"].includes(indent)) $optIndent.value = indent;
+      if (packed) $enc.value = packed.replace(/-/g, "+").replace(/_/g, "/");
       if ($enc.value.trim()) decode();
     });
 
@@ -159,6 +189,7 @@ const tool: Tool = {
     (el.querySelector(".btn-copy-dec") as HTMLButtonElement).addEventListener("click", function () { copyFrom($dec, this); });
     (el.querySelector(".btn-clear-enc") as HTMLButtonElement).addEventListener("click", () => {
       $enc.value = "";
+      publishState();
       setStatus($encStatus, "", "Waiting for input");
       $enc.focus();
     });

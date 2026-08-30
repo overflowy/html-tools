@@ -1,5 +1,9 @@
+import LZString from "lz-string";
 import "./tool.css";
 import type { Tool } from "../../shell/types";
+
+/** Longest compressed input we are willing to put in the Deep Link. */
+const STATE_CAP = 30000;
 
 /* ---------------- tokenizer ---------------- */
 
@@ -366,7 +370,7 @@ const tool: Tool = {
   name: "JSONC Key Sorter",
   subtitle: "Sorts keys, keeps every comment where it belongs.",
   keywords: ["json", "jsonc", "sort", "keys", "comments", "settings", "format"],
-  mount(el) {
+  mount(el, ctx) {
     el.innerHTML = `
       <div class="options">
         <label class="opt">indent
@@ -427,12 +431,27 @@ const tool: Tool = {
       $statusText.textContent = msg;
     }
 
+    /** State layout: `<indent>.<order>.<brackets>.<compressed input>` (input may be empty). */
+    function publishState(): boolean {
+      const src = $input.value;
+      let packed = "";
+      let fits = true;
+      if (src.trim()) {
+        const compressed = LZString.compressToEncodedURIComponent(src);
+        if (compressed.length <= STATE_CAP) packed = compressed;
+        else fits = false;
+      }
+      ctx.setState([$optIndent.value, $optOrder.value, $optBrackets.checked ? "1" : "0", packed].join("."));
+      return fits;
+    }
+
     function run() {
       const src = $input.value;
       if (!src.trim()) {
         $output.innerHTML = "";
         lastResult = "";
         setStatus("", "Waiting for input");
+        publishState();
         return;
       }
       try {
@@ -442,13 +461,30 @@ const tool: Tool = {
         lastResult = serialize(doc, indent);
         $output.innerHTML = highlight(lastResult);
         const s = countStats(doc.root, { keys: 0, comments: 0 });
+        const linked = publishState();
         setStatus("ok", s.keys + " key" + (s.keys === 1 ? "" : "s") + " sorted · " +
-          s.comments + " comment" + (s.comments === 1 ? "" : "s") + " preserved");
+          s.comments + " comment" + (s.comments === 1 ? "" : "s") + " preserved" +
+          (linked ? "" : " · too large to keep in the URL"));
       } catch (e) {
+        publishState();
         setStatus("error", (e as Error).message);
         // keep last good output visible
       }
     }
+
+    ctx.onRestore((payload) => {
+      const parts = payload.split(".");
+      const [indent, order, brackets] = parts;
+      const packed = parts.slice(3).join(".");
+      if (indent === "2" || indent === "4" || indent === "tab") $optIndent.value = indent;
+      if (order === "asc" || order === "desc") $optOrder.value = order;
+      if (brackets === "0" || brackets === "1") $optBrackets.checked = brackets === "1";
+      if (packed) {
+        const text = LZString.decompressFromEncodedURIComponent(packed);
+        if (text) $input.value = text;
+      }
+      run();
+    });
 
     let timer: ReturnType<typeof setTimeout>;
     function schedule() {
