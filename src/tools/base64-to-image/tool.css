@@ -28,23 +28,6 @@
   resize: vertical;
 }
 
-.tool-base64-to-image .drop-zone {
-  margin-top: 12px;
-  padding: 16px;
-  border: 1px dashed var(--border-strong);
-  border-radius: var(--radius-md);
-  text-align: center;
-  font-size: 13px;
-  color: var(--text-muted);
-  cursor: pointer;
-  transition: background 0.15s;
-}
-
-.tool-base64-to-image .drop-zone:hover,
-.tool-base64-to-image .drop-zone.dragging {
-  background: var(--surface-2);
-}
-
 .tool-base64-to-image .output {
   margin-top: 1.5rem;
   display: none;

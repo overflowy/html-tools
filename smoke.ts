@@ -29,13 +29,17 @@ await page.locator(".b64-input").fill("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfF
 await page.waitForSelector(".tool-base64-to-image .output", { state: "visible" });
 check("base64 decodes", (await page.locator(".tool-base64-to-image .meta").textContent())!.includes("image/png"));
 
-// image file -> base64 (encode direction)
-await Bun.write("/tmp/smoke-pixel.png", Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64"));
-await page.locator(".tool-base64-to-image .drop-zone input").setInputFiles("/tmp/smoke-pixel.png");
+// image paste -> base64 (encode direction), via a synthetic clipboard event
+await page.evaluate((b64: string) => {
+  const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+  const dt = new DataTransfer();
+  dt.items.add(new File([bytes], "pixel.png", { type: "image/png" }));
+  document.dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true }));
+}, "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==");
 await page.waitForFunction(() =>
   (document.querySelector(".tool-base64-to-image .b64-input") as HTMLTextAreaElement).value.startsWith("data:image/png;base64,"));
 await page.waitForSelector(".tool-base64-to-image .output", { state: "visible" });
-check("image file encodes to base64", true);
+check("pasted image encodes to base64", true);
 
 // jsonc tool: sort a snippet with a comment.
 await page.goto(url + "#jsonc-sorter");

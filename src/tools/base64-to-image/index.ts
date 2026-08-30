@@ -33,10 +33,6 @@ const tool: Tool = {
           <span class="status"></span>
         </div>
         <textarea class="b64-input" placeholder="Paste your base64 string here. Data URI prefix (data:image/png;base64,...) is fine; it'll be stripped automatically."></textarea>
-        <div class="drop-zone">
-          Or drop an image, or a text file containing base64, here
-          <input type="file" hidden>
-        </div>
         <div class="output">
           <div class="output-header">
             <div class="meta"></div>
@@ -59,8 +55,6 @@ const tool: Tool = {
     const preview = $(".preview") as HTMLImageElement;
     const meta = $(".meta");
     const errorBox = $(".error-box");
-    const dropZone = $(".drop-zone");
-    const fileInput = $(".drop-zone input") as HTMLInputElement;
     const copyBtn = $(".copy-btn");
 
     let currentDataUri = "";
@@ -214,38 +208,6 @@ const tool: Tool = {
       }
     });
 
-    function readFile(file: File) {
-      if (file.type.startsWith("image/")) {
-        loadImageBlob(file);
-        return;
-      }
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const text = String(e.target?.result ?? "");
-        input.value = text;
-        convert(text);
-      };
-      reader.readAsText(file);
-    }
-
-    dropZone.addEventListener("click", (e) => {
-      if (e.target !== fileInput) fileInput.click();
-    });
-    fileInput.addEventListener("change", () => {
-      if (fileInput.files?.[0]) readFile(fileInput.files[0]);
-    });
-    dropZone.addEventListener("dragover", (e) => {
-      e.preventDefault();
-      dropZone.classList.add("dragging");
-    });
-    dropZone.addEventListener("dragleave", () => {
-      dropZone.classList.remove("dragging");
-    });
-    dropZone.addEventListener("drop", (e) => {
-      e.preventDefault();
-      dropZone.classList.remove("dragging");
-      if (e.dataTransfer?.files[0]) readFile(e.dataTransfer.files[0]);
-    });
   },
 };
 
