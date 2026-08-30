@@ -147,7 +147,7 @@ function sectionsFromSpans(insp: Inspection, spans: Span[]) {
     sec.bytes += s.end - s.start;
     agg.set(key, sec);
   }
-  insp.sections = [...agg.values()].sort((a, b) => (a.kept ? 1 : 0) - (b.kept ? 1 : 0) || b.bytes - a.bytes);
+  insp.sections = [...agg.values()].toSorted((a, b) => (a.kept ? 1 : 0) - (b.kept ? 1 : 0) || b.bytes - a.bytes);
   insp.strippableBytes = insp.sections.reduce((n, s) => n + (s.kept ? 0 : s.bytes), 0);
   insp.hasMetadata = insp.sections.some((s) => !s.kept);
 }
@@ -1011,7 +1011,7 @@ function inspectBmff(b: Uint8Array, format: "heic" | "avif"): Inspection {
   insp.width = w.width;
   insp.height = w.height;
   insp.xmp = w.xmp;
-  insp.sections = w.metaSections.sort((a, x) => (a.kept ? 1 : 0) - (x.kept ? 1 : 0) || x.bytes - a.bytes);
+  insp.sections = w.metaSections.toSorted((a, x) => (a.kept ? 1 : 0) - (x.kept ? 1 : 0) || x.bytes - a.bytes);
   insp.strippableBytes = insp.sections.reduce((n, s) => n + (s.kept ? 0 : s.bytes), 0);
   insp.hasMetadata = insp.sections.some((s) => !s.kept);
   tryParseTiff(insp, w.exifTiff);
@@ -1022,7 +1022,7 @@ function inspectBmff(b: Uint8Array, format: "heic" | "avif"): Inspection {
 interface Range { start: number; end: number }
 
 function mergeRanges(ranges: Range[]): Range[] {
-  const sorted = ranges.slice().sort((a, b) => a.start - b.start);
+  const sorted = ranges.toSorted((a, b) => a.start - b.start);
   const out: Range[] = [];
   for (const r of sorted) {
     const last = out[out.length - 1];
@@ -1154,7 +1154,7 @@ function stripBmff(b: Uint8Array): StripResult {
     const idSize = w.iref.version === 0 ? 2 : 4;
     const kept = w.iref.refs
       .filter((r) => !removed.has(r.from))
-      .map((r) => ({ ...r, to: r.to.filter((t) => !removed.has(t)) }))
+      .map((r) => ({ type: r.type, from: r.from, to: r.to.filter((t) => !removed.has(t)) }))
       .filter((r) => r.to.length > 0);
     if (kept.length === 0) return null;
     const bw = new ByteWriter();

@@ -126,7 +126,7 @@ function selectTool(id: string, payload = "") {
   } else if (changed) {
     restorers.get(tool.id)?.(payload);
   }
-  for (const [id, h] of hosts) h.hidden = id !== tool.id;
+  for (const [hostId, h] of hosts) h.hidden = hostId !== tool.id;
   renderList();
 }
 

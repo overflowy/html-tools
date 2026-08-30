@@ -1,5 +1,4 @@
 // Bundles the app and inlines JS + CSS into a single self-contained index.html.
-export {};
 
 const result = await Bun.build({
   entrypoints: ["src/shell/main.ts"],

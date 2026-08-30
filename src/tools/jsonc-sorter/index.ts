@@ -61,7 +61,7 @@ function tokenize(src: string): Tok[] {
     }
     // number / true / false / null / anything atom-like
     let j = i;
-    while (j < n && !/[\s{}\[\]:,"'\/]/.test(src[j]!)) j++;
+    while (j < n && !/[\s{}[\]:,"'/]/.test(src[j]!)) j++;
     if (j === i) throw new SyntaxError("Unexpected character " + JSON.stringify(c) + " at line " + line);
     tokens.push({ type: "atom", text: src.slice(i, j), line });
     i = j;
@@ -213,7 +213,7 @@ function decodeKey(tok: Tok): string {
 
 /* ---------------- sorting ---------------- */
 
-const BRACKET_KEY = /^(\[[^\[\]]+\])+$/;
+const BRACKET_KEY = /^(\[[^[\]]+\])+$/;
 
 function cmpKeys(a: string, b: string) {
   return a.localeCompare(b, "en", { numeric: true, sensitivity: "variant" });
@@ -223,8 +223,8 @@ function sortTree(node: Node, order: string, sortBrackets: boolean) {
   if (node.kind === "object") {
     for (const p of node.props) {
       if (sortBrackets && BRACKET_KEY.test(p.keyValue)) {
-        const segs = p.keyValue.match(/\[[^\[\]]+\]/g);
-        const sorted = segs.slice().sort(cmpKeys);
+        const segs = p.keyValue.match(/\[[^[\]]+\]/g);
+        const sorted = segs.toSorted(cmpKeys);
         if (sorted.join("") !== p.keyValue) {
           p.keyValue = sorted.join("");
           p.keyRaw = JSON.stringify(p.keyValue);
