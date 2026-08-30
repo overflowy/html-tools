@@ -1,0 +1,129 @@
+/* Theme: the dark variant of the original base64-to-image design tokens.
+   Dark only, no light mode, no toggle. */
+
+:root {
+  --bg: #1a1a1a;
+  --surface: #262625;
+  --surface-2: #2d2d2c;
+  --border: rgba(255, 255, 255, 0.12);
+  --border-strong: rgba(255, 255, 255, 0.25);
+  --text: #f5f4ee;
+  --text-muted: #a0a09a;
+  --accent: #c96442;
+  --accent-soft: rgba(201, 100, 66, 0.15);
+  --danger-bg: #501313;
+  --danger-text: #f7c1c1;
+  --ok: #9fbf7f;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: var(--sans);
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.5;
+}
+
+h1 {
+  font-size: 22px;
+  font-weight: 500;
+  margin: 0 0 4px;
+}
+
+.subtitle {
+  color: var(--text-muted);
+  font-size: 14px;
+  margin: 0;
+}
+
+button {
+  font-family: inherit;
+  font-size: 13px;
+  padding: 7px 14px;
+  background: transparent;
+  color: var(--text);
+  border: 0.5px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: background 0.15s, transform 0.05s;
+}
+
+button:hover { background: var(--surface-2); }
+button:active { transform: scale(0.98); }
+
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  font-weight: 500;
+}
+button.primary:hover { background: var(--accent); filter: brightness(1.08); }
+
+textarea {
+  font-family: var(--mono);
+  font-size: 12px;
+  padding: 12px;
+  background: var(--surface);
+  color: var(--text);
+  border: 0.5px solid var(--border);
+  border-radius: var(--radius-md);
+  line-height: 1.5;
+}
+
+textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+textarea::placeholder { color: var(--text-muted); opacity: 0.7; }
+
+select {
+  font-family: inherit;
+  font-size: 12.5px;
+  padding: 4px 8px;
+  background: var(--surface);
+  color: var(--text);
+  border: 0.5px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+}
+
+input[type="checkbox"] {
+  accent-color: var(--accent);
+  width: 14px;
+  height: 14px;
+}
+
+input[type="search"],
+input[type="text"] {
+  font-family: inherit;
+  font-size: 13px;
+  padding: 7px 10px;
+  background: var(--bg);
+  color: var(--text);
+  border: 0.5px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+input:focus-visible,
+select:focus-visible,
+button:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.error-box {
+  padding: 10px 14px;
+  background: var(--danger-bg);
+  color: var(--danger-text);
+  border-radius: var(--radius-md);
+  font-size: 13px;
+}

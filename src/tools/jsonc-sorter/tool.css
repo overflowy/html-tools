@@ -1,0 +1,121 @@
+.tool-jsonc-sorter {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 0.25rem 2rem 2rem;
+}
+
+/* token colors re-picked for the dark cream theme */
+.tool-jsonc-sorter {
+  --tok-key: #92c5e8;
+  --tok-str: #d6a284;
+  --tok-num: #b8c79a;
+  --tok-bool: #8ba7d1;
+  --tok-com: #8fa07e;
+}
+
+.tool-jsonc-sorter .options {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 18px;
+}
+
+.tool-jsonc-sorter .opt {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--text-muted);
+  font-size: 12.5px;
+}
+
+.tool-jsonc-sorter .panes {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.tool-jsonc-sorter .pane {
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 0.5px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  min-height: 200px;
+}
+
+.tool-jsonc-sorter .pane-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--text-muted);
+  font-family: var(--mono);
+}
+
+.tool-jsonc-sorter .pane-head .spacer { flex: 1; }
+
+.tool-jsonc-sorter .pane-head button {
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: var(--radius-sm);
+}
+
+.tool-jsonc-sorter .src {
+  flex: 1;
+  width: 100%;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  resize: none;
+  tab-size: 2;
+}
+.tool-jsonc-sorter .src:focus {
+  border: none;
+  box-shadow: none;
+}
+
+.tool-jsonc-sorter .output {
+  flex: 1;
+  overflow: auto;
+  margin: 0;
+  padding: 12px 14px;
+  white-space: pre;
+  tab-size: 2;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.tool-jsonc-sorter .output .k { color: var(--tok-key); }
+.tool-jsonc-sorter .output .s { color: var(--tok-str); }
+.tool-jsonc-sorter .output .n { color: var(--tok-num); }
+.tool-jsonc-sorter .output .b { color: var(--tok-bool); }
+.tool-jsonc-sorter .output .c { color: var(--tok-com); font-style: italic; }
+
+.tool-jsonc-sorter .statusbar {
+  padding: 6px 12px;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--text-muted);
+  min-height: 30px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--mono);
+}
+
+.tool-jsonc-sorter .statusbar.error { color: var(--danger-text); }
+.tool-jsonc-sorter .statusbar.ok .dot { color: var(--ok); }
+.tool-jsonc-sorter .dot { font-size: 10px; }
+
+@media (max-width: 1000px) {
+  .tool-jsonc-sorter .panes { grid-template-columns: 1fr; }
+}
