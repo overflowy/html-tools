@@ -390,7 +390,7 @@ const tool: Tool = {
       <div class="panes">
         <section class="pane">
           <div class="pane-head">
-            <span>input.jsonc</span>
+            <span>input</span>
             <span class="spacer"></span>
             <button class="btn-paste" type="button">Paste from clipboard</button>
             <button class="btn-clear" type="button">Clear</button>
@@ -401,7 +401,7 @@ const tool: Tool = {
         </section>
         <section class="pane">
           <div class="pane-head">
-            <span>sorted.jsonc</span>
+            <span>output</span>
             <span class="spacer"></span>
             <button class="btn-copy primary" type="button">Copy</button>
           </div>
