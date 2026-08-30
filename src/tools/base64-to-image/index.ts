@@ -22,8 +22,8 @@ function formatBytes(n: number) {
 const tool: Tool = {
   id: "base64-to-image",
   name: "Base64 to Image",
-  subtitle: "Paste a base64 string or data URI.",
-  keywords: ["base64", "image", "decode", "convert", "data uri", "png", "preview"],
+  subtitle: "Paste a base64 string, or paste an image to get its base64.",
+  keywords: ["base64", "image", "decode", "encode", "convert", "data uri", "png", "preview"],
   mount(el) {
     el.innerHTML = `
       <div class="container">
@@ -34,7 +34,7 @@ const tool: Tool = {
         </div>
         <textarea class="b64-input" placeholder="Paste your base64 string here. Data URI prefix (data:image/png;base64,...) is fine; it'll be stripped automatically."></textarea>
         <div class="drop-zone">
-          Or drop a text file containing base64 here
+          Or drop an image, or a text file containing base64, here
           <input type="file" hidden>
         </div>
         <div class="output">
@@ -139,13 +139,49 @@ const tool: Tool = {
       debounce = setTimeout(() => convert(input.value), 200);
     });
 
+    function loadImageBlob(blob: Blob) {
+      const reader = new FileReader();
+      reader.onload = () => {
+        input.value = String(reader.result);
+        convert(input.value);
+      };
+      reader.readAsDataURL(blob);
+    }
+
     $(".paste-btn").addEventListener("click", async () => {
       try {
+        if (navigator.clipboard.read) {
+          const items = await navigator.clipboard.read();
+          for (const item of items) {
+            const type = item.types.find((t) => t.startsWith("image/"));
+            if (type) {
+              loadImageBlob(await item.getType(type));
+              return;
+            }
+          }
+        }
         const text = await navigator.clipboard.readText();
         input.value = text;
         convert(text);
       } catch {
         showError("Clipboard access denied. Paste manually into the text area instead.");
+      }
+    });
+
+    // Cmd+V anywhere in the tool with an image on the clipboard
+    document.addEventListener("paste", (e) => {
+      if (el.hidden) return;
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      for (const item of items) {
+        if (item.type.startsWith("image/")) {
+          const file = item.getAsFile();
+          if (file) {
+            e.preventDefault();
+            loadImageBlob(file);
+            return;
+          }
+        }
       }
     });
 
@@ -179,6 +215,10 @@ const tool: Tool = {
     });
 
     function readFile(file: File) {
+      if (file.type.startsWith("image/")) {
+        loadImageBlob(file);
+        return;
+      }
       const reader = new FileReader();
       reader.onload = (e) => {
         const text = String(e.target?.result ?? "");

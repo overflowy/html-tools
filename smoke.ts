@@ -29,6 +29,14 @@ await page.locator(".b64-input").fill("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfF
 await page.waitForSelector(".tool-base64-to-image .output", { state: "visible" });
 check("base64 decodes", (await page.locator(".tool-base64-to-image .meta").textContent())!.includes("image/png"));
 
+// image file -> base64 (encode direction)
+await Bun.write("/tmp/smoke-pixel.png", Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64"));
+await page.locator(".tool-base64-to-image .drop-zone input").setInputFiles("/tmp/smoke-pixel.png");
+await page.waitForFunction(() =>
+  (document.querySelector(".tool-base64-to-image .b64-input") as HTMLTextAreaElement).value.startsWith("data:image/png;base64,"));
+await page.waitForSelector(".tool-base64-to-image .output", { state: "visible" });
+check("image file encodes to base64", true);
+
 // jsonc tool: sort a snippet with a comment.
 await page.goto(url + "#jsonc-sorter");
 await page.locator(".tool-jsonc-sorter .src").fill('{\n  // b first\n  "b": 1,\n  "a": 2\n}');
