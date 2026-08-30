@@ -392,6 +392,7 @@ const tool: Tool = {
           <div class="pane-head">
             <span>input.jsonc</span>
             <span class="spacer"></span>
+            <button class="btn-paste" type="button">Paste from clipboard</button>
             <button class="btn-clear" type="button">Clear</button>
           </div>
           <textarea class="src" spellcheck="false" autocapitalize="off" autocomplete="off"
@@ -416,6 +417,7 @@ const tool: Tool = {
     const $optOrder = el.querySelector(".opt-order") as HTMLSelectElement;
     const $optBrackets = el.querySelector(".opt-brackets") as HTMLInputElement;
     const $btnCopy = el.querySelector(".btn-copy") as HTMLButtonElement;
+    const $btnPaste = el.querySelector(".btn-paste") as HTMLButtonElement;
     const $btnClear = el.querySelector(".btn-clear") as HTMLButtonElement;
 
     let lastResult = "";
@@ -474,6 +476,15 @@ const tool: Tool = {
       const old = $btnCopy.textContent;
       $btnCopy.textContent = "Copied";
       setTimeout(() => { $btnCopy.textContent = old; }, 1200);
+    });
+
+    $btnPaste.addEventListener("click", async () => {
+      try {
+        $input.value = await navigator.clipboard.readText();
+        run();
+      } catch {
+        setStatus("error", "Clipboard access denied. Paste manually into the text area instead.");
+      }
     });
 
     $btnClear.addEventListener("click", () => {
