@@ -16,6 +16,10 @@ document.body.innerHTML = `
       <kbd>&#8984;K</kbd>
     </div>
     <nav class="tool-list"></nav>
+    <footer class="sidebar-footer">
+      <p>All tools run in the browser.</p>
+      <a href="https://github.com/overflowy/html-tools" target="_blank" rel="noreferrer">Source</a>
+    </footer>
   </aside>
   <div class="content">
     <header class="tool-header">
