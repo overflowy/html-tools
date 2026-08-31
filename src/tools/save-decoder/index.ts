@@ -34,7 +34,7 @@ const tool: Tool = {
           <div class="pane-head">
             <span>encoded</span>
             <span class="spacer"></span>
-            <button class="btn-paste-enc" type="button">Paste from clipboard</button>
+            <button class="btn-paste-enc" type="button">Paste<span class="wide-only"> from clipboard</span></button>
             <button class="btn-clear-enc" type="button">Clear</button>
             <button class="btn-copy-enc primary" type="button">Copy</button>
           </div>
@@ -46,7 +46,7 @@ const tool: Tool = {
           <div class="pane-head">
             <span>decoded</span>
             <span class="spacer"></span>
-            <button class="btn-paste-dec" type="button">Paste from clipboard</button>
+            <button class="btn-paste-dec" type="button">Paste<span class="wide-only"> from clipboard</span></button>
             <button class="btn-clear-dec" type="button">Clear</button>
             <button class="btn-copy-dec primary" type="button">Copy</button>
           </div>

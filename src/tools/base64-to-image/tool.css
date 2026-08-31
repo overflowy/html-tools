@@ -1,4 +1,4 @@
-.tool-base64-to-image { padding: 0.25rem 2rem 2rem; }
+.tool-base64-to-image { padding: 0.25rem var(--gutter) 2rem; }
 
 .tool-base64-to-image .container { max-width: 760px; width: 100%; }
 

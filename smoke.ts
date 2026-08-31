@@ -274,6 +274,52 @@ check("qr deep link restores fields", (await page.locator(".tool-qr-generator .f
 check("qr deep link restores options", (await page.locator(".tool-qr-generator .opt-ecl").inputValue()) === "Q");
 await checkQrDecodes("qr deep link renders a scannable code", "WIFI:T:WPA;S:Cafe Guest;P:espresso99;;");
 
+// Narrow layout: below 768px the sidebar becomes an on-demand drawer.
+await page.setViewportSize({ width: 375, height: 667 });
+await page.goto(url + "#jsonc-sorter");
+// waitFor, not isVisible: shrinking the viewport hides the sidebar via a
+// transition, and this goto is a same-document hash navigation, not a reload.
+await page.locator(".sidebar").waitFor({ state: "hidden" });
+check("narrow: drawer starts closed", true);
+check("narrow: hamburger visible", await page.locator(".menu-btn").isVisible());
+
+await page.locator(".menu-btn").click();
+await page.locator(".sidebar").waitFor({ state: "visible" });
+check("narrow: hamburger opens drawer",
+  (await page.locator(".menu-btn").getAttribute("aria-expanded")) === "true");
+check("narrow: main pane inert while open",
+  await page.locator(".content").evaluate((el) => (el as HTMLElement).inert));
+
+await page.locator(".tool-list button", { hasText: "Base64" }).click();
+await page.locator(".sidebar").waitFor({ state: "hidden" });
+check("narrow: selecting a tool closes drawer", await page.evaluate(() => location.hash === "#base64-to-image"));
+check("narrow: main pane usable again", !(await page.locator(".content").evaluate((el) => (el as HTMLElement).inert)));
+
+// Re-selecting the current tool fires no hashchange but must still close the drawer.
+await page.locator(".menu-btn").click();
+await page.locator(".sidebar").waitFor({ state: "visible" });
+await page.locator(".tool-list button", { hasText: "Base64" }).click();
+await page.locator(".sidebar").waitFor({ state: "hidden" });
+check("narrow: re-selecting current tool closes drawer", true);
+
+// The drawer overlays the left edge, so aim the backdrop click at the right side.
+await page.locator(".menu-btn").click();
+await page.locator(".sidebar").waitFor({ state: "visible" });
+await page.locator(".drawer-backdrop").click({ position: { x: 340, y: 400 } });
+await page.locator(".sidebar").waitFor({ state: "hidden" });
+check("narrow: backdrop closes drawer", true);
+
+await page.locator(".menu-btn").click();
+await page.locator(".sidebar").waitFor({ state: "visible" });
+await page.keyboard.press("Escape");
+await page.locator(".sidebar").waitFor({ state: "hidden" });
+check("narrow: escape closes drawer", true);
+
+// Widening across the breakpoint restores the always-visible sidebar.
+await page.setViewportSize({ width: 1200, height: 800 });
+await page.locator(".sidebar").waitFor({ state: "visible" });
+check("wide: sidebar visible, hamburger gone", !(await page.locator(".menu-btn").isVisible()));
+
 check("no page errors", errors.length === 0, errors.join(" | "));
 await browser.close();
 process.exit(failed ? 1 : 0);

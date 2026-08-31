@@ -28,7 +28,7 @@ const tool: Tool = {
     el.innerHTML = `
       <div class="container">
         <div class="toolbar">
-          <button type="button" class="paste-btn">Paste from clipboard</button>
+          <button type="button" class="paste-btn">Paste<span class="wide-only"> from clipboard</span></button>
           <button type="button" class="clear-btn">Clear</button>
           <span class="status"></span>
         </div>

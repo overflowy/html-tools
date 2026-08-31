@@ -19,11 +19,17 @@ document.body.innerHTML = `
   </aside>
   <div class="content">
     <header class="tool-header">
-      <h1></h1>
-      <p class="subtitle"></p>
+      <button class="menu-btn" type="button" aria-label="Open tool list" aria-expanded="false">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+      </button>
+      <div class="tool-title">
+        <h1></h1>
+        <p class="subtitle"></p>
+      </div>
     </header>
     <div class="hosts"></div>
   </div>
+  <div class="drawer-backdrop"></div>
 `;
 
 const $filter = document.querySelector(".filter-wrap input") as HTMLInputElement;
@@ -31,6 +37,40 @@ const $list = document.querySelector(".tool-list") as HTMLElement;
 const $h1 = document.querySelector(".tool-header h1") as HTMLElement;
 const $subtitle = document.querySelector(".tool-header .subtitle") as HTMLElement;
 const $hosts = document.querySelector(".hosts") as HTMLElement;
+const $sidebar = document.querySelector(".sidebar") as HTMLElement;
+const $content = document.querySelector(".content") as HTMLElement;
+const $menuBtn = document.querySelector(".menu-btn") as HTMLButtonElement;
+const $backdrop = document.querySelector(".drawer-backdrop") as HTMLElement;
+
+// Narrow Layout: below 768px the Sidebar becomes the Drawer. Keep this query
+// in sync with the media queries in shell.css and theme.css.
+const narrow = window.matchMedia("(max-width: 767px)");
+let drawerOpen = false;
+
+function setDrawer(open: boolean) {
+  if (open === drawerOpen) return;
+  if (open && !narrow.matches) return;
+  drawerOpen = open;
+  document.body.classList.toggle("drawer-open", open);
+  $menuBtn.setAttribute("aria-expanded", String(open));
+  // Full modal treatment: the Main Pane is inert while the Drawer is open,
+  // which both traps focus in the Drawer and hides the background from
+  // screen readers.
+  $content.inert = open;
+  if (open) {
+    $sidebar.setAttribute("role", "dialog");
+    $sidebar.setAttribute("aria-modal", "true");
+    $sidebar.setAttribute("aria-label", "Tool list");
+    const target = $list.querySelector("button.selected") ?? $list.querySelector("button");
+    (target as HTMLElement | null)?.focus();
+  } else {
+    $sidebar.removeAttribute("role");
+    $sidebar.removeAttribute("aria-modal");
+    $sidebar.removeAttribute("aria-label");
+    const active = document.activeElement;
+    if ($sidebar.contains(active) || active === document.body) $menuBtn.focus();
+  }
+}
 
 const hosts = new Map<string, HTMLElement>();
 const payloads = new Map<string, string>();
@@ -67,6 +107,9 @@ function renderList() {
     if (document.activeElement === $filter && i === cursor) btn.classList.add("cursor");
     btn.addEventListener("click", () => {
       location.hash = tool.id;
+      // Re-selecting the current tool fires no hashchange, so the Drawer
+      // closes here rather than in the hashchange handler.
+      setDrawer(false);
     });
     $list.appendChild(btn);
   });
@@ -144,14 +187,22 @@ window.addEventListener("keydown", (e) => {
     t.isContentEditable;
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
     e.preventDefault();
+    setDrawer(true);
     $filter.focus();
     $filter.select();
   } else if (e.key === "/" && !typing) {
     e.preventDefault();
+    setDrawer(true);
     $filter.focus();
     $filter.select();
+  } else if (e.key === "Escape") {
+    setDrawer(false);
   }
 });
+
+$menuBtn.addEventListener("click", () => setDrawer(!drawerOpen));
+$backdrop.addEventListener("click", () => setDrawer(false));
+narrow.addEventListener("change", () => setDrawer(false));
 
 $filter.addEventListener("input", () => {
   cursor = 0;
@@ -176,8 +227,12 @@ $filter.addEventListener("keydown", (e) => {
       cursor = 0;
       $filter.blur();
       renderList();
+      setDrawer(false);
     }
   } else if (e.key === "Escape") {
+    // Escape layers innermost-first: clear the Filter now, leave the Drawer
+    // open; the next press reaches the window handler and closes it.
+    e.stopPropagation();
     $filter.value = "";
     cursor = 0;
     $filter.blur();

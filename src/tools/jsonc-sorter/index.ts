@@ -396,7 +396,7 @@ const tool: Tool = {
           <div class="pane-head">
             <span>input</span>
             <span class="spacer"></span>
-            <button class="btn-paste" type="button">Paste from clipboard</button>
+            <button class="btn-paste" type="button">Paste<span class="wide-only"> from clipboard</span></button>
             <button class="btn-clear" type="button">Clear</button>
           </div>
           <textarea class="src" spellcheck="false" autocapitalize="off" autocomplete="off"

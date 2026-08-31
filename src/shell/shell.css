@@ -1,4 +1,6 @@
 html, body { height: 100%; }
+/* dvh tracks mobile browser chrome; the 100% above is the fallback. */
+html, body { height: 100dvh; }
 body { display: flex; overflow: hidden; }
 
 /* ---- sidebar ---- */
@@ -63,7 +65,9 @@ body { display: flex; overflow: hidden; }
   border: none;
   border-radius: var(--radius-sm);
 }
-.tool-list button:hover { background: var(--surface-2); color: var(--text); }
+@media (hover: hover) {
+  .tool-list button:hover { background: var(--surface-2); color: var(--text); }
+}
 .tool-list button.selected { background: var(--surface-2); color: var(--text); }
 .tool-list button.cursor { box-shadow: inset 0 0 0 1px var(--accent); }
 .tool-list .no-match {
@@ -81,7 +85,24 @@ body { display: flex; overflow: hidden; }
   flex-direction: column;
 }
 
-.tool-header { padding: 1.5rem 2rem 0.75rem; }
+.tool-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 1.5rem var(--gutter) 0.75rem;
+}
+.tool-title { min-width: 0; }
+
+.menu-btn {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  flex-shrink: 0;
+}
+.menu-btn svg { width: 16px; height: 16px; }
 
 .hosts {
   flex: 1;
@@ -98,3 +119,53 @@ body { display: flex; overflow: hidden; }
   flex-direction: column;
 }
 .tool-host[hidden] { display: none; }
+
+/* ---- narrow layout: the sidebar becomes the drawer ---- */
+
+.drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  background: rgb(0 0 0 / 0.5);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.2s ease, visibility 0s 0.2s;
+}
+
+/* Keep this breakpoint in sync with `narrow` in main.ts and theme.css. */
+@media (max-width: 767px) {
+  :root { --gutter: 1rem; }
+
+  .sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    height: 100dvh;
+    z-index: 20;
+    transform: translateX(-100%);
+    visibility: hidden;
+    transition: transform 0.2s ease, visibility 0s 0.2s;
+  }
+  body.drawer-open .sidebar {
+    transform: none;
+    visibility: visible;
+    transition: transform 0.2s ease;
+  }
+  body.drawer-open .drawer-backdrop {
+    opacity: 1;
+    visibility: visible;
+    transition: opacity 0.2s ease;
+  }
+
+  .filter-wrap kbd { display: none; }
+  .menu-btn { display: inline-flex; }
+
+  .tool-header { padding-top: 0.75rem; padding-bottom: 0.5rem; }
+
+  .tool-list button { padding: 10px 12px; font-size: 14px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar, .drawer-backdrop, body.drawer-open .sidebar, body.drawer-open .drawer-backdrop {
+    transition: none;
+  }
+}
