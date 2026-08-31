@@ -1,6 +1,7 @@
 // Browser smoke test for the built dist/index.html. Run: bun run smoke.ts
 // Uses the Playwright headless Chromium already present in ~/Library/Caches/ms-playwright.
 import { chromium } from "playwright-core";
+import jsQR from "jsqr";
 
 const exe =
   process.env.CHROMIUM_PATH ??
@@ -21,7 +22,7 @@ function check(label: string, ok: boolean, detail = "") {
 
 await page.goto(url);
 const names = await page.locator(".tool-list button").allTextContents();
-check("sidebar lists all tools", names.length === 4, names.join(", "));
+check("sidebar lists all tools", names.length === 5, names.join(", "));
 
 // base64 tool: paste a tiny valid png via direct input.
 await page.goto(url + "#base64-to-image");
@@ -128,6 +129,100 @@ for (const [fmt, b64] of Object.entries(FIXTURES)) {
   }
 }
 
+// qr generator: render codes for every payload type and error correction level,
+// then prove they scan by decoding the canvas pixels with jsQR.
+async function decodeQrCanvas(): Promise<{ text: string; bytes: Uint8Array } | null> {
+  const img = await page.evaluate(() => {
+    const c = document.querySelector(".tool-qr-generator .qr-canvas") as HTMLCanvasElement | null;
+    if (!c || c.hidden) return null;
+    const d = c.getContext("2d")!.getImageData(0, 0, c.width, c.height);
+    return { data: Array.from(d.data), width: d.width, height: d.height };
+  });
+  if (!img) return null;
+  const res = jsQR(new Uint8ClampedArray(img.data), img.width, img.height);
+  return res ? { text: res.data, bytes: new Uint8Array(res.binaryData) } : null;
+}
+
+/** Poll until the rendered code decodes to `expected` (the tool debounces regeneration). */
+async function checkQrDecodes(label: string, expected: string, utf8 = false) {
+  const deadline = Date.now() + 5000;
+  let got = "";
+  for (;;) {
+    const res = await decodeQrCanvas();
+    if (res) got = utf8 ? new TextDecoder().decode(res.bytes) : res.text;
+    if (got === expected || Date.now() > deadline) break;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  check(label, got === expected, got.slice(0, 50) || "(no decode)");
+}
+
+await page.goto(url + "#qr-generator");
+await page.locator(".tool-qr-generator .opt-size").fill("192");
+await page.locator(".tool-qr-generator .f-text").fill("https://example.com/some/path?q=1");
+await checkQrDecodes("qr text scans back", "https://example.com/some/path?q=1");
+for (const ecl of ["L", "Q", "H", "M"]) {
+  await page.locator(".tool-qr-generator .opt-ecl").selectOption(ecl);
+  await checkQrDecodes("qr scans at level " + ecl, "https://example.com/some/path?q=1");
+}
+await page.locator(".tool-qr-generator .f-text").fill("Grüße, 世界! \u{1F389}");
+await checkQrDecodes("qr utf-8 scans back", "Grüße, 世界! \u{1F389}", true);
+const longText = "The quick brown fox jumps over the lazy dog. ".repeat(20);
+await page.locator(".tool-qr-generator .f-text").fill(longText);
+await checkQrDecodes("qr high-version payload scans back", longText);
+
+await page.locator('.tool-qr-generator [data-type="wifi"]').click();
+await page.locator(".tool-qr-generator .f-wifi-ssid").fill("Home Network");
+await page.locator(".tool-qr-generator .f-wifi-pass").fill("s3cret;pass");
+await page.locator(".tool-qr-generator .f-wifi-hidden").check();
+await checkQrDecodes("qr wifi payload scans back", "WIFI:T:WPA;S:Home Network;P:s3cret\\;pass;H:true;;");
+
+await page.locator('.tool-qr-generator [data-type="contact"]').click();
+await page.locator(".tool-qr-generator .f-ct-first").fill("Jane");
+await page.locator(".tool-qr-generator .f-ct-last").fill("Doe");
+await page.locator(".tool-qr-generator .f-ct-phone").fill("+1 555 0100");
+await page.locator(".tool-qr-generator .f-ct-email").fill("jane@example.com");
+await checkQrDecodes("qr vcard payload scans back",
+  "BEGIN:VCARD\r\nVERSION:3.0\r\nN:Doe;Jane;;;\r\nFN:Jane Doe\r\nTEL:+1 555 0100\r\nEMAIL:jane@example.com\r\nEND:VCARD");
+
+await page.locator('.tool-qr-generator [data-type="email"]').click();
+await page.locator(".tool-qr-generator .f-em-to").fill("jane@example.com");
+await page.locator(".tool-qr-generator .f-em-subject").fill("Hi there");
+await checkQrDecodes("qr email payload scans back", "mailto:jane@example.com?subject=Hi%20there");
+
+await page.locator('.tool-qr-generator [data-type="sms"]').click();
+await page.locator(".tool-qr-generator .f-sms-num").fill("+1 555 0100");
+await page.locator(".tool-qr-generator .f-sms-msg").fill("See you at 6");
+await checkQrDecodes("qr sms payload scans back", "SMSTO:+15550100:See you at 6");
+
+await page.locator('.tool-qr-generator [data-type="phone"]').click();
+await page.locator(".tool-qr-generator .f-ph-num").fill("+1 555 0100");
+await checkQrDecodes("qr phone payload scans back", "tel:+15550100");
+
+await page.locator('.tool-qr-generator [data-type="geo"]').click();
+await page.locator(".tool-qr-generator .f-geo-lat").fill("52.520008");
+await page.locator(".tool-qr-generator .f-geo-lng").fill("13.404954");
+await checkQrDecodes("qr geo payload scans back", "geo:52.520008,13.404954");
+
+// oversized payload reports an error instead of rendering
+await page.locator('.tool-qr-generator [data-type="text"]').click();
+await page.locator(".tool-qr-generator .f-text").fill("x".repeat(3200));
+await page.waitForSelector(".tool-qr-generator .statusbar.error");
+check("qr too-long payload reports error",
+  (await page.locator(".tool-qr-generator .status-text").textContent())!.includes("too long"));
+
+// inverted colors get a warning
+await page.locator(".tool-qr-generator .f-text").fill("contrast check");
+await page.evaluate(() => {
+  const fg = document.querySelector(".tool-qr-generator .opt-fg") as HTMLInputElement;
+  const bg = document.querySelector(".tool-qr-generator .opt-bg") as HTMLInputElement;
+  fg.value = "#ffffff";
+  bg.value = "#000000";
+  fg.dispatchEvent(new Event("input", { bubbles: true }));
+});
+await page.waitForSelector(".tool-qr-generator .statusbar.warn");
+check("qr inverted colors warn",
+  (await page.locator(".tool-qr-generator .status-text").textContent())!.includes("inverted"));
+
 // Deep links: a tool's state lives in the URL hash and a fresh load restores it.
 await page.goto(url + "#jsonc-sorter");
 await page.locator(".tool-jsonc-sorter .src").fill('{"z": 1, "a": 2}');
@@ -161,6 +256,23 @@ await page.goto(saveLink);
 await page.waitForSelector(".tool-save-decoder .enc-status.ok");
 check("save deep link restores encoded pane", (await page.locator(".tool-save-decoder .enc").inputValue()) === savedEnc);
 check("save deep link decodes on load", JSON.parse(await page.locator(".tool-save-decoder .dec").inputValue()).day === 7);
+
+await page.goto(url + "#qr-generator");
+await page.locator('.tool-qr-generator [data-type="wifi"]').click();
+await page.locator(".tool-qr-generator .f-wifi-ssid").fill("Cafe Guest");
+await page.locator(".tool-qr-generator .f-wifi-pass").fill("espresso99");
+await page.locator(".tool-qr-generator .opt-ecl").selectOption("Q");
+await page.waitForFunction(() => location.hash.startsWith("#qr-generator/wifi."));
+await page.waitForSelector(".tool-qr-generator .statusbar.ok");
+const qrLink = await page.evaluate(() => location.href);
+await page.goto("about:blank");
+await page.goto(qrLink);
+await page.waitForSelector(".tool-qr-generator .statusbar.ok");
+check("qr deep link restores type", await page.locator('.tool-qr-generator [data-type="wifi"]').evaluate((b) => b.classList.contains("active")));
+check("qr deep link restores fields", (await page.locator(".tool-qr-generator .f-wifi-ssid").inputValue()) === "Cafe Guest" &&
+  (await page.locator(".tool-qr-generator .f-wifi-pass").inputValue()) === "espresso99");
+check("qr deep link restores options", (await page.locator(".tool-qr-generator .opt-ecl").inputValue()) === "Q");
+await checkQrDecodes("qr deep link renders a scannable code", "WIFI:T:WPA;S:Cafe Guest;P:espresso99;;");
 
 check("no page errors", errors.length === 0, errors.join(" | "));
 await browser.close();

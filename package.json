@@ -8,10 +8,12 @@
     "lint": "oxlint",
     "lint:fix": "oxlint --fix",
     "lint:ci": "oxlint --deny-warnings",
-    "test": "bun run smoke.ts"
+    "test": "bun run smoke.ts",
+    "test:unit": "bun test"
   },
   "devDependencies": {
     "@types/bun": "^1.4.0",
+    "jsqr": "^1.4.0",
     "oxlint": "^1.79.0",
     "playwright-core": "^1.62.1",
     "typescript": "^7.0.2"

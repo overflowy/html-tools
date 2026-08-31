@@ -3,6 +3,7 @@ import type { Tool } from "./shell/types";
 import base64ToImage from "./tools/base64-to-image";
 import imageMetadata from "./tools/image-metadata";
 import jsoncSorter from "./tools/jsonc-sorter";
+import qrGenerator from "./tools/qr-generator";
 import saveDecoder from "./tools/save-decoder";
 
-export const tools: Tool[] = [base64ToImage, imageMetadata, jsoncSorter, saveDecoder];
+export const tools: Tool[] = [base64ToImage, imageMetadata, jsoncSorter, qrGenerator, saveDecoder];
