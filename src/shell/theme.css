@@ -134,16 +134,8 @@ button:focus-visible {
   font-size: 13px;
 }
 
-/* iOS zooms into any focused form control below 16px. Keep this
-   breakpoint in sync with `narrow` in main.ts and shell.css. */
+/* Keep this breakpoint in sync with `narrow` in main.ts and shell.css. */
 @media (max-width: 767px) {
-  input[type="search"],
-  input[type="text"],
-  textarea,
-  select {
-    font-size: 16px;
-  }
-
   /* Label text that only fits in the wide layout, e.g. "Paste[ from clipboard]". */
   .wide-only { display: none; }
 }
