@@ -2,3 +2,6 @@ CONTEXT.md
 CONTEXT-MAP.md
 docs/
 node_modules/
+
+# Build output (published via GitHub Pages, not committed)
+dist/

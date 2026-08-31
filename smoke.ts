@@ -1,4 +1,4 @@
-// Browser smoke test for the built index.html. Run: bun run smoke.ts
+// Browser smoke test for the built dist/index.html. Run: bun run smoke.ts
 // Uses the Playwright headless Chromium already present in ~/Library/Caches/ms-playwright.
 import { chromium } from "playwright-core";
 
@@ -12,7 +12,7 @@ const errors: string[] = [];
 page.on("pageerror", (e) => errors.push("pageerror: " + e.message));
 page.on("console", (m) => { if (m.type() === "error") errors.push("console: " + m.text()); });
 
-const url = "file://" + import.meta.dir + "/index.html";
+const url = "file://" + import.meta.dir + "/dist/index.html";
 let failed = false;
 function check(label: string, ok: boolean, detail = "") {
   console.log((ok ? "ok  " : "FAIL") + "  " + label + (detail ? "  [" + detail + "]" : ""));

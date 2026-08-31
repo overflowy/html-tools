@@ -1,4 +1,4 @@
-// Bundles the app and inlines JS + CSS into a single self-contained index.html.
+// Bundles the app and inlines JS + CSS into a single self-contained dist/index.html.
 
 const result = await Bun.build({
   entrypoints: ["src/shell/main.ts"],
@@ -24,5 +24,5 @@ const html = template
   .replace("<!--STYLE-->", "<style>\n" + css + "</style>")
   .replace("<!--SCRIPT-->", "<script>\n" + js.replaceAll("</script", "<\\/script") + "</script>");
 
-await Bun.write("index.html", html);
-console.log("index.html written (" + (html.length / 1024).toFixed(1) + " KB)");
+await Bun.write("dist/index.html", html);
+console.log("dist/index.html written (" + (html.length / 1024).toFixed(1) + " KB)");
