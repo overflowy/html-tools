@@ -556,10 +556,87 @@ await page.keyboard.press("Escape");
 await page.locator(".sidebar").waitFor({ state: "hidden" });
 check("narrow: escape closes drawer", true);
 
-// Widening across the breakpoint restores the always-visible sidebar.
+// The collapse button is a wide-layout control; the drawer has none.
+await page.locator(".menu-btn").click();
+await page.locator(".sidebar").waitFor({ state: "visible" });
+check("narrow: no collapse button in the drawer", !(await page.locator(".collapse-btn").isVisible()));
+await page.keyboard.press("Escape");
+await page.locator(".sidebar").waitFor({ state: "hidden" });
+
+// Widening across the breakpoint restores the inline sidebar; the hamburger
+// gives way to the collapse button in the sidebar's corner.
 await page.setViewportSize({ width: 1200, height: 800 });
 await page.locator(".sidebar").waitFor({ state: "visible" });
-check("wide: sidebar visible, hamburger gone", !(await page.locator(".menu-btn").isVisible()));
+// CSS shows the sidebar before the matchMedia change event syncs the button.
+await page.waitForFunction(() => document.querySelector(".menu-btn")!.getAttribute("aria-expanded") === "true");
+check("wide: sidebar visible, hamburger gone, collapse button shown",
+  !(await page.locator(".menu-btn").isVisible()) && (await page.locator(".collapse-btn").isVisible()));
+
+// Wide layout: the corner button collapses the sidebar and the main pane
+// takes the full width.
+const paneLeft = async () => (await page.locator(".content").boundingBox())!.x;
+await page.waitForFunction(() => document.querySelector(".content")!.getBoundingClientRect().x === 220);
+check("wide: main pane sits beside the sidebar", true);
+
+// Clicking a tool while the filter has focus must land: the blur must not
+// rebuild the list under the pointer.
+await page.locator(".filter-wrap input").focus();
+await page.locator(".tool-list button", { hasText: "DNS" }).click();
+check("wide: click on tool lands while filter is focused",
+  await page.evaluate(() => location.hash === "#dns-lookup"));
+
+await page.locator(".collapse-btn").click();
+await page.locator(".sidebar").waitFor({ state: "hidden" });
+await page.waitForFunction(() => document.querySelector(".content")!.getBoundingClientRect().x === 0);
+check("wide: corner button collapses sidebar, focus moves to the reveal button",
+  (await page.locator(".menu-btn").isVisible()) &&
+  (await page.locator(".menu-btn").getAttribute("aria-expanded")) === "false" &&
+  (await page.locator(".menu-btn").evaluate((el) => el === document.activeElement)) &&
+  !(await page.locator(".content").evaluate((el) => (el as HTMLElement).inert)));
+
+// While collapsed, the filter shortcut opens the sidebar as the drawer
+// without disturbing the collapse.
+await page.keyboard.press("Meta+k");
+await page.locator(".sidebar").waitFor({ state: "visible" });
+check("wide collapsed: cmd+k opens drawer",
+  (await page.locator(".content").evaluate((el) => (el as HTMLElement).inert)) &&
+  (await page.locator(".filter-wrap input").evaluate((el) => el === document.activeElement)) &&
+  (await paneLeft()) === 0);
+await page.locator(".tool-list button", { hasText: "JSONC" }).click();
+await page.locator(".sidebar").waitFor({ state: "hidden" });
+check("wide collapsed: selecting a tool closes drawer, stays collapsed",
+  (await page.evaluate(() => location.hash === "#jsonc-sorter" && document.body.classList.contains("sidebar-collapsed"))));
+
+// The collapse is a preference: it survives a reload, with no slide-out.
+await page.reload();
+await page.waitForSelector(".tool-list button", { state: "attached" });
+check("wide collapsed: remembered across reloads",
+  !(await page.locator(".sidebar").isVisible()) && (await paneLeft()) === 0);
+
+await page.locator(".menu-btn").click();
+await page.locator(".sidebar").waitFor({ state: "visible" });
+await page.waitForFunction(() => document.querySelector(".content")!.getBoundingClientRect().x === 220);
+check("wide: reveal button expands sidebar again, focus moves to the corner button",
+  !(await page.locator(".menu-btn").isVisible()) &&
+  (await page.locator(".collapse-btn").evaluate((el) => el === document.activeElement)) &&
+  (await page.evaluate(() => localStorage.getItem("html-tools:sidebar"))) === "expanded");
+
+// Narrowing while expanded still starts the drawer closed; the collapse
+// preference is a wide-layout thing and does not leak into it.
+await page.evaluate(() => localStorage.setItem("html-tools:sidebar", "collapsed"));
+await page.setViewportSize({ width: 375, height: 667 });
+await page.reload();
+await page.waitForSelector(".menu-btn");
+await page.locator(".menu-btn").click();
+await page.locator(".sidebar").waitFor({ state: "visible" });
+check("narrow: drawer opens regardless of collapse preference", true);
+await page.keyboard.press("Escape");
+await page.locator(".sidebar").waitFor({ state: "hidden" });
+await page.setViewportSize({ width: 1200, height: 800 });
+await page.waitForFunction(() => document.querySelector(".content")!.getBoundingClientRect().x === 0);
+await page.waitForFunction(() => document.querySelector(".menu-btn")!.getAttribute("aria-expanded") === "false");
+check("wide: collapse preference applies again after widening", !(await page.locator(".sidebar").isVisible()));
+await page.evaluate(() => localStorage.removeItem("html-tools:sidebar"));
 
 check("no page errors", errors.length === 0, errors.join(" | "));
 await browser.close();

@@ -4,12 +4,22 @@ import { tools } from "../registry";
 import type { Tool } from "./types";
 
 const LAST_KEY = "html-tools:last";
+const SIDEBAR_KEY = "html-tools:sidebar";
+
+// One icon for both ends of the collapse: hide from the sidebar's corner,
+// show from the main pane's, so the control reads as moving between them.
+const PANEL_ICON = `<svg class="icon-panel" viewBox="0 0 16 16" aria-hidden="true"><rect x="1.75" y="2.75" width="12.5" height="10.5" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M6 2.75v10.5" stroke="currentColor" stroke-width="1.5"/></svg>`;
 
 document.body.innerHTML = `
-  <aside class="sidebar">
-    <div class="app-name">
-      <svg class="logo" viewBox="0 0 64 64" aria-hidden="true"><text x="32" y="45" font-family="ui-monospace,Menlo,monospace" font-size="32" font-weight="700" text-anchor="middle" fill="#c96442">{/}</text></svg>
-      html tools
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-head">
+      <div class="app-name">
+        <svg class="logo" viewBox="0 0 64 64" aria-hidden="true"><text x="32" y="45" font-family="ui-monospace,Menlo,monospace" font-size="32" font-weight="700" text-anchor="middle" fill="#c96442">{/}</text></svg>
+        html tools
+      </div>
+      <button class="collapse-btn" type="button" aria-label="Hide sidebar" title="Hide sidebar">
+        ${PANEL_ICON}
+      </button>
     </div>
     <div class="filter-wrap">
       <input type="search" placeholder="Filter tools" aria-label="Filter tools">
@@ -22,8 +32,9 @@ document.body.innerHTML = `
   </aside>
   <div class="content">
     <header class="tool-header">
-      <button class="menu-btn" type="button" aria-label="Open tool list" aria-expanded="false">
-        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+      <button class="menu-btn" type="button" aria-label="Show sidebar" title="Show sidebar" aria-controls="sidebar" aria-expanded="false">
+        <svg class="icon-menu" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+        ${PANEL_ICON}
       </button>
       <div class="tool-title">
         <h1></h1>
@@ -43,6 +54,7 @@ const $hosts = document.querySelector(".hosts") as HTMLElement;
 const $sidebar = document.querySelector(".sidebar") as HTMLElement;
 const $content = document.querySelector(".content") as HTMLElement;
 const $menuBtn = document.querySelector(".menu-btn") as HTMLButtonElement;
+const $collapseBtn = document.querySelector(".collapse-btn") as HTMLButtonElement;
 const $backdrop = document.querySelector(".drawer-backdrop") as HTMLElement;
 
 // Narrow Layout: below 768px the Sidebar becomes the Drawer. Keep this query
@@ -50,12 +62,30 @@ const $backdrop = document.querySelector(".drawer-backdrop") as HTMLElement;
 const narrow = window.matchMedia("(max-width: 767px)");
 let drawerOpen = false;
 
+// Collapsed: the user's choice to hide the Sidebar in the Wide Layout. A
+// preference, so it persists; the Drawer is ephemeral and does not. The class
+// goes on before the first paint so the Sidebar never slides out on load.
+let collapsed = localStorage.getItem(SIDEBAR_KEY) === "collapsed";
+document.body.classList.toggle("sidebar-collapsed", collapsed);
+
+/** Whether the Sidebar is currently the Drawer rather than inline. */
+function drawerForm(): boolean {
+  return narrow.matches || collapsed;
+}
+
+// The menu button reflects whichever form the Sidebar is in: open/closed for
+// the Drawer, shown/hidden for the inline Sidebar. (It is only displayed
+// while the Sidebar is not inline; see shell.css.)
+function syncMenuBtn() {
+  $menuBtn.setAttribute("aria-expanded", String(drawerForm() ? drawerOpen : true));
+}
+
 function setDrawer(open: boolean) {
   if (open === drawerOpen) return;
-  if (open && !narrow.matches) return;
+  if (open && !drawerForm()) return;
   drawerOpen = open;
   document.body.classList.toggle("drawer-open", open);
-  $menuBtn.setAttribute("aria-expanded", String(open));
+  syncMenuBtn();
   // Full modal treatment: the Main Pane is inert while the Drawer is open,
   // which both traps focus in the Drawer and hides the background from
   // screen readers.
@@ -73,6 +103,23 @@ function setDrawer(open: boolean) {
     const active = document.activeElement;
     if ($sidebar.contains(active) || active === document.body) $menuBtn.focus();
   }
+}
+
+function setCollapsed(next: boolean) {
+  if (next === collapsed) return;
+  // A Drawer opened over a collapsed Sidebar is closed first, so expanding
+  // lands on the plain inline Sidebar rather than an inline one with a
+  // backdrop still up.
+  setDrawer(false);
+  collapsed = next;
+  document.body.classList.toggle("sidebar-collapsed", next);
+  localStorage.setItem(SIDEBAR_KEY, next ? "collapsed" : "expanded");
+  syncMenuBtn();
+  // Whichever button was pressed is about to disappear; hand focus to its
+  // counterpart so a keyboard user can toggle straight back.
+  const active = document.activeElement;
+  if (next && $sidebar.contains(active)) $menuBtn.focus();
+  else if (!next && active === $menuBtn) $collapseBtn.focus();
 }
 
 const hosts = new Map<string, HTMLElement>();
@@ -102,12 +149,11 @@ function renderList() {
     $list.appendChild(empty);
     return;
   }
-  visible.forEach((tool, i) => {
+  visible.forEach((tool) => {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.textContent = tool.name;
     if (current && tool.id === current.id) btn.classList.add("selected");
-    if (document.activeElement === $filter && i === cursor) btn.classList.add("cursor");
     btn.addEventListener("click", () => {
       location.hash = tool.id;
       // Re-selecting the current tool fires no hashchange, so the Drawer
@@ -116,6 +162,15 @@ function renderList() {
     });
     $list.appendChild(btn);
   });
+  renderCursor();
+}
+
+// The cursor highlight is updated in place. Rebuilding the list on Filter
+// blur would swap the button out from under a mouse click on it (blur fires
+// on mousedown), so the click would never land.
+function renderCursor() {
+  const active = document.activeElement === $filter;
+  $list.querySelectorAll("button").forEach((btn, i) => btn.classList.toggle("cursor", active && i === cursor));
 }
 
 /** Deep Link format: `#<tool-id>` or `#<tool-id>/<payload>`. */
@@ -203,25 +258,38 @@ window.addEventListener("keydown", (e) => {
   }
 });
 
-$menuBtn.addEventListener("click", () => setDrawer(!drawerOpen));
+// The menu button in the Main Pane brings the Sidebar in (as the Drawer in
+// the Narrow Layout, inline in the Wide Layout); the one in the Sidebar's
+// corner collapses it, and is only shown in the Wide Layout. While
+// collapsed, the Sidebar is still reachable as the Drawer through the
+// filter shortcuts below.
+$menuBtn.addEventListener("click", () => {
+  if (narrow.matches) setDrawer(!drawerOpen);
+  else setCollapsed(false);
+});
+$collapseBtn.addEventListener("click", () => setCollapsed(true));
 $backdrop.addEventListener("click", () => setDrawer(false));
-narrow.addEventListener("change", () => setDrawer(false));
+narrow.addEventListener("change", () => {
+  setDrawer(false);
+  syncMenuBtn();
+});
+syncMenuBtn();
 
 $filter.addEventListener("input", () => {
   cursor = 0;
   renderList();
 });
-$filter.addEventListener("focus", renderList);
-$filter.addEventListener("blur", renderList);
+$filter.addEventListener("focus", renderCursor);
+$filter.addEventListener("blur", renderCursor);
 $filter.addEventListener("keydown", (e) => {
   if (e.key === "ArrowDown") {
     e.preventDefault();
     cursor = Math.min(cursor + 1, visible.length - 1);
-    renderList();
+    renderCursor();
   } else if (e.key === "ArrowUp") {
     e.preventDefault();
     cursor = Math.max(cursor - 1, 0);
-    renderList();
+    renderCursor();
   } else if (e.key === "Enter") {
     const tool = visible[cursor];
     if (tool) {

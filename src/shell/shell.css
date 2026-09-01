@@ -1,19 +1,39 @@
 html, body { height: 100%; }
 /* dvh tracks mobile browser chrome; the 100% above is the fallback. */
 html, body { height: 100dvh; }
-body { display: flex; overflow: hidden; }
+body { overflow: hidden; }
 
 /* ---- sidebar ---- */
 
+/* The sidebar is always fixed to the left edge and starts off-screen: this
+   is the Drawer. The wide layout slides it in and pushes the main pane over
+   (see below), so collapsing in the wide layout animates the same way the
+   drawer does. */
 .sidebar {
-  width: 220px;
-  flex-shrink: 0;
+  position: fixed;
+  inset: 0 auto 0 0;
+  height: 100dvh;
+  width: var(--sidebar-width);
+  z-index: 20;
   display: flex;
   flex-direction: column;
   gap: 12px;
   padding: 14px 10px;
   background: var(--surface);
   border-right: 1px solid var(--border);
+  transform: translateX(-100%);
+  visibility: hidden;
+  transition: transform 0.2s ease, visibility 0s 0.2s;
+}
+
+.sidebar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  /* Left pad matches .app-name's old inset; the button's own box supplies
+     the right one so its icon lines up with the filter's edge. */
+  padding-left: 6px;
 }
 
 .app-name {
@@ -23,9 +43,29 @@ body { display: flex; overflow: hidden; }
   font-size: 13px;
   font-weight: 600;
   letter-spacing: 0.04em;
-  padding: 0 6px;
 }
 .app-name .logo { width: 20px; height: 20px; flex-shrink: 0; }
+
+/* Icon-only toggles: the one in the sidebar's corner hides it, the one in
+   the tool header (.menu-btn, below) brings it back. */
+.collapse-btn,
+.menu-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  flex-shrink: 0;
+}
+.collapse-btn {
+  width: 28px;
+  height: 28px;
+  color: var(--text-muted);
+  border-color: transparent;
+}
+.collapse-btn svg { width: 16px; height: 16px; }
+@media (hover: hover) {
+  .collapse-btn:hover { color: var(--text); }
+}
 
 .filter-wrap { position: relative; }
 .filter-wrap input {
@@ -78,7 +118,6 @@ body { display: flex; overflow: hidden; }
 
 .sidebar-footer {
   display: flex;
-  justify-content: flex-end;
   gap: 8px;
   white-space: nowrap;
   padding: 0 6px;
@@ -93,10 +132,10 @@ body { display: flex; overflow: hidden; }
 /* ---- main pane ---- */
 
 .content {
-  flex: 1;
-  min-width: 0;
+  height: 100%;
   display: flex;
   flex-direction: column;
+  transition: margin-left 0.2s ease;
 }
 
 .tool-header {
@@ -108,15 +147,12 @@ body { display: flex; overflow: hidden; }
 .tool-title { min-width: 0; }
 
 .menu-btn {
-  display: none;
-  align-items: center;
-  justify-content: center;
   width: 36px;
   height: 36px;
-  padding: 0;
-  flex-shrink: 0;
 }
 .menu-btn svg { width: 16px; height: 16px; }
+/* Hamburger for the drawer on narrow screens, panel icon on wide ones. */
+.menu-btn .icon-panel { display: none; }
 
 .hosts {
   flex: 1;
@@ -134,7 +170,7 @@ body { display: flex; overflow: hidden; }
 }
 .tool-host[hidden] { display: none; }
 
-/* ---- narrow layout: the sidebar becomes the drawer ---- */
+/* ---- drawer: the sidebar whenever it is not inline ---- */
 
 .drawer-backdrop {
   position: fixed;
@@ -146,32 +182,43 @@ body { display: flex; overflow: hidden; }
   transition: opacity 0.2s ease, visibility 0s 0.2s;
 }
 
-/* Keep this breakpoint in sync with `narrow` in main.ts and theme.css. */
-@media (max-width: 767px) {
-  :root { --gutter: 1rem; }
+body.drawer-open .sidebar {
+  transform: none;
+  visibility: visible;
+  transition: transform 0.2s ease;
+}
+body.drawer-open .drawer-backdrop {
+  opacity: 1;
+  visibility: visible;
+  transition: opacity 0.2s ease;
+}
 
-  .sidebar {
-    position: fixed;
-    inset: 0 auto 0 0;
-    height: 100dvh;
-    z-index: 20;
-    transform: translateX(-100%);
-    visibility: hidden;
-    transition: transform 0.2s ease, visibility 0s 0.2s;
-  }
-  body.drawer-open .sidebar {
+/* ---- wide layout: the sidebar sits inline unless collapsed ---- */
+
+/* Keep this breakpoint in sync with `narrow` in main.ts and theme.css. */
+@media (min-width: 768px) {
+  body:not(.sidebar-collapsed) .sidebar {
     transform: none;
     visibility: visible;
     transition: transform 0.2s ease;
   }
-  body.drawer-open .drawer-backdrop {
-    opacity: 1;
-    visibility: visible;
-    transition: opacity 0.2s ease;
-  }
+  body:not(.sidebar-collapsed) .content { margin-left: var(--sidebar-width); }
+  /* Exactly one toggle on screen: the sidebar's own while inline, the
+     tool header's while collapsed. */
+  body:not(.sidebar-collapsed) .menu-btn { display: none; }
+  .menu-btn .icon-menu { display: none; }
+  .menu-btn .icon-panel { display: block; }
+}
+
+/* ---- narrow layout: the sidebar is only ever the drawer ---- */
+
+@media (max-width: 767px) {
+  :root { --gutter: 1rem; }
 
   .filter-wrap kbd { display: none; }
-  .menu-btn { display: inline-flex; }
+  /* The drawer closes from the backdrop, Escape, or picking a tool; the
+     hamburger is its only button. */
+  .collapse-btn { display: none; }
 
   .tool-header { padding-top: 0.75rem; padding-bottom: 0.5rem; }
 
@@ -179,7 +226,9 @@ body { display: flex; overflow: hidden; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .sidebar, .drawer-backdrop, body.drawer-open .sidebar, body.drawer-open .drawer-backdrop {
+  .sidebar, .drawer-backdrop, .content,
+  body.drawer-open .sidebar, body.drawer-open .drawer-backdrop,
+  body:not(.sidebar-collapsed) .sidebar {
     transition: none;
   }
 }
