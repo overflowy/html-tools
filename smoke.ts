@@ -2,6 +2,7 @@
 // Uses the Playwright headless Chromium already present in ~/Library/Caches/ms-playwright.
 import { chromium } from "playwright-core";
 import jsQR from "jsqr";
+import dnsFixtures from "./src/tools/dns-lookup/fixtures.json";
 
 const exe =
   process.env.CHROMIUM_PATH ??
@@ -22,7 +23,7 @@ function check(label: string, ok: boolean, detail = "") {
 
 await page.goto(url);
 const names = await page.locator(".tool-list button").allTextContents();
-check("sidebar lists all tools", names.length === 5, names.join(", "));
+check("sidebar lists all tools", names.length === 6, names.join(", "));
 
 // base64 tool: paste a tiny valid png via direct input.
 await page.goto(url + "#base64-to-image");
@@ -273,6 +274,138 @@ check("qr deep link restores fields", (await page.locator(".tool-qr-generator .f
   (await page.locator(".tool-qr-generator .f-wifi-pass").inputValue()) === "espresso99");
 check("qr deep link restores options", (await page.locator(".tool-qr-generator .opt-ecl").inputValue()) === "Q");
 await checkQrDecodes("qr deep link renders a scannable code", "WIFI:T:WPA;S:Cafe Guest;P:espresso99;;");
+
+// dns lookup: the only tool that talks to the network. Every endpoint is
+// intercepted and answered from the unit-test fixtures, so this stays offline
+// and deterministic; what it proves is the wiring from input to table to URL.
+const dnsHits: string[] = [];
+const cors = { "access-control-allow-origin": "*" };
+await page.route(/^https:\/\/(cloudflare-dns\.com|security\.cloudflare-dns\.com|family\.cloudflare-dns\.com|dns\.google)\//, (route) => {
+  const u = new URL(route.request().url());
+  const name = u.searchParams.get("name");
+  // Known types travel as numbers; map the ones this test dispatches on back to names.
+  const wire = u.searchParams.get("type")!;
+  const type = ({ "1": "A", "12": "PTR", "15": "MX", "16": "TXT", "33": "SRV" } as Record<string, string>)[wire] ?? wire;
+  dnsHits.push(u.host + " " + name + " " + type + (u.searchParams.get("do") ? " do" : ""));
+  let body: unknown;
+  if (name === "doesnotexist.example.com") body = dnsFixtures.cloudflare_nxdomain;
+  else if (name === "8.8.8.8.in-addr.arpa") body = dnsFixtures.cloudflare_ptr;
+  else if (type === "A") body = u.host === "dns.google" ? dnsFixtures.google_a : dnsFixtures.cloudflare_a;
+  else if (type === "MX") body = dnsFixtures.cloudflare_mx;
+  else if (type === "TXT") body = dnsFixtures.cloudflare_txt;
+  else if (type === "NOTIMPTYPE") body = dnsFixtures.cloudflare_notimp;
+  else body = dnsFixtures.cloudflare_empty;
+  return route.fulfill({ status: 200, contentType: "application/dns-json", headers: cors, body: JSON.stringify(body) });
+});
+await page.route(/^https:\/\/api\.certspotter\.com\//, (route) => {
+  const u = new URL(route.request().url());
+  dnsHits.push("certspotter " + u.searchParams.get("domain") + (u.searchParams.get("after") ? " after" : ""));
+  const body = u.searchParams.get("after") ? [] : dnsFixtures.certspotter_page;
+  return route.fulfill({ status: 200, contentType: "application/json", headers: cors, body: JSON.stringify(body) });
+});
+await page.route(/^https:\/\/api\.hackertarget\.com\//, (route) => {
+  dnsHits.push("hackertarget " + new URL(route.request().url()).searchParams.get("q"));
+  return route.fulfill({ status: 200, contentType: "text/plain", headers: cors, body: dnsFixtures.hackertarget_text });
+});
+
+await page.goto(url + "#dns-lookup");
+await page.locator(".tool-dns-lookup .name").fill("https://Example.COM/some/path?x=1");
+await page.locator(".tool-dns-lookup .type").selectOption("MX");
+await page.locator(".tool-dns-lookup .btn-lookup").click();
+await page.waitForSelector(".tool-dns-lookup .statusbar.ok");
+check("dns normalizes the pasted URL to a name", (await page.locator(".tool-dns-lookup .name").inputValue()) === "example.com");
+check("dns asks the resolver for exactly that", dnsHits.at(-1) === "cloudflare-dns.com example.com MX", dnsHits.at(-1));
+check("dns renders the answer rows", (await page.locator(".tool-dns-lookup .records tbody tr").count()) === 3);
+check("dns shows the status flags", (await page.locator(".tool-dns-lookup .flags").textContent())!.startsWith("NOERROR"));
+check("dns status counts records", (await page.locator(".tool-dns-lookup .status-text").textContent())!.startsWith("3 records"));
+check("dns writes the query into the deep link", await page.evaluate(() => location.hash === "#dns-lookup/cf.00.lookup.MX.example.com"));
+check("dns raw pane holds the response", (await page.locator(".tool-dns-lookup .raw").textContent())!.includes('"data": "10 mail.example.com."'));
+
+// No records of that type is reported distinctly from NXDOMAIN, with the SOA shown.
+await page.locator(".tool-dns-lookup .type").selectOption("SRV");
+await page.locator(".tool-dns-lookup .btn-lookup").click();
+await page.waitForFunction(() => document.querySelector(".tool-dns-lookup .status-text")?.textContent?.startsWith("no records"));
+check("dns empty answer says so", (await page.locator(".tool-dns-lookup .results .note").textContent())!.includes("No SRV records for example.com"));
+check("dns empty answer still shows the authority SOA", (await page.locator(".tool-dns-lookup .results .section").textContent()) === "authority" &&
+  (await page.locator(".tool-dns-lookup .records .type-badge").first().textContent()) === "SOA");
+
+await page.locator(".tool-dns-lookup .name").fill("doesnotexist.example.com");
+await page.locator(".tool-dns-lookup .type").selectOption("A");
+await page.locator(".tool-dns-lookup .btn-lookup").click();
+await page.waitForFunction(() => document.querySelector(".tool-dns-lookup .status-text")?.textContent?.startsWith("NXDOMAIN"));
+check("dns NXDOMAIN is its own outcome", (await page.locator(".tool-dns-lookup .results .note").textContent())!.includes("does not exist (NXDOMAIN)"));
+check("dns NXDOMAIN flags show the rcode", (await page.locator(".tool-dns-lookup .flags .status").textContent()) === "NXDOMAIN");
+
+// An IP address becomes a reverse lookup regardless of the picked type.
+await page.locator(".tool-dns-lookup .name").fill("8.8.8.8");
+await page.locator(".tool-dns-lookup .btn-lookup").click();
+await page.waitForFunction(() => document.querySelector(".tool-dns-lookup .status-text")?.textContent?.startsWith("1 record"));
+check("dns IP input queries the arpa name for PTR", dnsHits.at(-1) === "cloudflare-dns.com 8.8.8.8.in-addr.arpa PTR", dnsHits.at(-1));
+check("dns reverse lookup is labelled", (await page.locator(".tool-dns-lookup .results-title").textContent()) === "reverse lookup");
+check("dns reverse lookup shows the PTR", (await page.locator(".tool-dns-lookup .records .c-data").first().textContent()) === "dns.google.");
+
+// Resolver-side failure (NOTIMP with an EDE comment) renders as an error, not as "no records".
+await page.locator(".tool-dns-lookup .name").fill("example.com");
+await page.locator(".tool-dns-lookup .type").selectOption("custom");
+await page.locator(".tool-dns-lookup .custom-type").fill("not a type");
+await page.locator(".tool-dns-lookup .btn-lookup").click();
+await page.waitForSelector(".tool-dns-lookup .statusbar.error");
+const hitsBefore = dnsHits.length;
+check("dns rejects a malformed custom type before querying", (await page.locator(".tool-dns-lookup .status-text").textContent())!.includes("record type name or number"));
+await page.locator(".tool-dns-lookup .custom-type").fill("notimptype");
+await page.locator(".tool-dns-lookup .custom-type").press("Enter");
+await page.waitForFunction(() => document.querySelector(".tool-dns-lookup .results .error-box") !== null);
+check("dns custom type is uppercased and sent", dnsHits.length === hitsBefore + 1 && dnsHits.at(-1) === "cloudflare-dns.com example.com NOTIMPTYPE", dnsHits.at(-1));
+check("dns resolver failure shows the rcode and EDE", (await page.locator(".tool-dns-lookup .results .error-box").textContent())!.includes("NOTIMP: EDE(21): Not Supported"));
+
+// Google with DNSSEC OK: the flag reaches the wire and the string Comment is displayed.
+await page.locator(".tool-dns-lookup .type").selectOption("A");
+await page.locator(".tool-dns-lookup .resolver").selectOption("google");
+await page.locator(".tool-dns-lookup .opt-do").check();
+await page.locator(".tool-dns-lookup .btn-lookup").click();
+await page.waitForFunction(() => document.querySelector(".tool-dns-lookup .status-text")?.textContent?.includes("Google 8.8.8.8"));
+check("dns google resolver with DO", dnsHits.at(-1) === "dns.google example.com A do", dnsHits.at(-1));
+check("dns shows the resolver comment", (await page.locator(".tool-dns-lookup .results .comment").textContent()) === "Response from 108.162.195.228.");
+check("dns deep link carries resolver and flags", await page.evaluate(() => location.hash === "#dns-lookup/google.01.lookup.A.example.com"));
+
+// All Types: one collapsible group per Common Type, empties collapsed.
+await page.locator(".tool-dns-lookup .resolver").selectOption("cf");
+await page.locator(".tool-dns-lookup .opt-do").uncheck();
+const allStart = dnsHits.length;
+await page.locator(".tool-dns-lookup .btn-all").click();
+await page.waitForSelector(".tool-dns-lookup .statusbar.ok");
+check("dns all types queries the 14 common types", dnsHits.length - allStart === 14, String(dnsHits.length - allStart));
+check("dns all types renders a group per type", (await page.locator(".tool-dns-lookup .group").count()) === 14);
+check("dns all types opens groups with records", await page.locator('.tool-dns-lookup .group[data-type="MX"]').evaluate((d) => (d as HTMLDetailsElement).open) &&
+  !(await page.locator('.tool-dns-lookup .group[data-type="SRV"]').evaluate((d) => (d as HTMLDetailsElement).open)));
+check("dns all types summarises", (await page.locator(".tool-dns-lookup .status-text").textContent())!.startsWith("14 types · 7 records"));
+check("dns all types deep link", await page.evaluate(() => location.hash === "#dns-lookup/cf.00.all.A.example.com"));
+
+// Subdomains: both sources queried, union rendered, www. dropped, a row click looks that name up.
+await page.locator(".tool-dns-lookup .name").fill("www.example.com");
+await page.locator(".tool-dns-lookup .btn-subs").click();
+await page.waitForSelector(".tool-dns-lookup .statusbar.ok");
+check("dns subdomains asks both sources without www.",
+  dnsHits.includes("certspotter example.com") && dnsHits.includes("hackertarget example.com"), dnsHits.slice(-3).join(" | "));
+check("dns subdomains walks cert spotter pages", dnsHits.includes("certspotter example.com after"));
+check("dns subdomains unions the sources", (await page.locator(".tool-dns-lookup .subs tbody tr").count()) === 8);
+check("dns subdomains lists the searched name first", (await page.locator(".tool-dns-lookup .subs .link").first().textContent()) === "example.com");
+check("dns subdomains status per source", (await page.locator(".tool-dns-lookup .status-text").textContent())!.includes("8 subdomains · Cert Spotter 5 · HackerTarget 5"));
+await page.locator(".tool-dns-lookup .subs .link", { hasText: "blog.example.com" }).click();
+await page.waitForFunction(() => location.hash === "#dns-lookup/cf.00.lookup.A.blog.example.com");
+check("dns subdomain row click looks the name up", dnsHits.at(-1) === "cloudflare-dns.com blog.example.com A", dnsHits.at(-1));
+
+// A DNS deep link restores every control and runs the query on load.
+await page.goto("about:blank");
+await page.goto(url + "#dns-lookup/google.01.lookup.TXT.example.com");
+await page.waitForSelector(".tool-dns-lookup .statusbar.ok");
+check("dns deep link restores controls",
+  (await page.locator(".tool-dns-lookup .name").inputValue()) === "example.com" &&
+  (await page.locator(".tool-dns-lookup .type").inputValue()) === "TXT" &&
+  (await page.locator(".tool-dns-lookup .resolver").inputValue()) === "google" &&
+  (await page.locator(".tool-dns-lookup .opt-do").isChecked()) && !(await page.locator(".tool-dns-lookup .opt-cd").isChecked()));
+check("dns deep link runs the lookup", dnsHits.at(-1) === "dns.google example.com TXT do" &&
+  (await page.locator(".tool-dns-lookup .records tbody tr").count()) === 2, dnsHits.at(-1));
 
 // Narrow layout: below 768px the sidebar becomes an on-demand drawer.
 await page.setViewportSize({ width: 375, height: 667 });

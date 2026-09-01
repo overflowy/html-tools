@@ -17,7 +17,6 @@ document.body.innerHTML = `
     </div>
     <nav class="tool-list"></nav>
     <footer class="sidebar-footer">
-      <p>All tools run in the browser.</p>
       <a href="https://github.com/overflowy/html-tools" target="_blank" rel="noreferrer">Source</a>
     </footer>
   </aside>

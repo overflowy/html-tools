@@ -1,0 +1,20 @@
+{
+  "cloudflare_a": {"Status":0,"TC":false,"RD":true,"RA":true,"AD":false,"CD":false,"Question":[{"name":"example.com","type":1}],"Answer":[{"name":"example.com","type":1,"TTL":252,"data":"104.20.23.154"},{"name":"example.com","type":1,"TTL":252,"data":"172.66.147.243"}]},
+  "google_a": {"Status":0,"TC":false,"RD":true,"RA":true,"AD":true,"CD":false,"Question":[{"name":"example.com.","type":1}],"Answer":[{"name":"example.com.","type":1,"TTL":300,"data":"104.20.23.154"},{"name":"example.com.","type":1,"TTL":300,"data":"172.66.147.243"}],"Comment":"Response from 108.162.195.228."},
+  "cloudflare_mx": {"Status":0,"TC":false,"RD":true,"RA":true,"AD":false,"CD":false,"Question":[{"name":"example.com","type":15}],"Answer":[{"name":"example.com","type":15,"TTL":300,"data":"10 mail.example.com."},{"name":"example.com","type":15,"TTL":300,"data":"20 mail2.example.com."},{"name":"example.com","type":15,"TTL":300,"data":"30 mail3.example.com."}]},
+  "cloudflare_txt": {"Status":0,"TC":false,"RD":true,"RA":true,"AD":true,"CD":false,"Question":[{"name":"example.com","type":16}],"Answer":[{"name":"example.com","type":16,"TTL":300,"data":"\"v=spf1 -all\""},{"name":"example.com","type":16,"TTL":300,"data":"\"_k2n1y4vw3qtb4skdx9e7dxt97qrmmq9\""}]},
+  "cloudflare_empty": {"Status":0,"TC":false,"RD":true,"RA":true,"AD":true,"CD":false,"Question":[{"name":"example.com","type":33}],"Authority":[{"name":"example.com","type":6,"TTL":1800,"data":"elliott.ns.cloudflare.com. dns.cloudflare.com. 2411783310 10000 2400 604800 1800"}]},
+  "cloudflare_nxdomain": {"Status":3,"TC":false,"RD":true,"RA":true,"AD":false,"CD":false,"Question":[{"name":"doesnotexist.example.com","type":1}],"Authority":[{"name":"example.com","type":6,"TTL":1800,"data":"elliott.ns.cloudflare.com. dns.cloudflare.com. 2411783310 10000 2400 604800 1800"}]},
+  "cloudflare_notimp": {"Status":4,"TC":false,"RD":true,"RA":true,"AD":false,"CD":false,"Question":[{"name":"example.com","type":255}],"Comment":["EDE(21): Not Supported"]},
+  "cloudflare_a_dnssec": {"Status":0,"TC":false,"RD":true,"RA":true,"AD":true,"CD":false,"Question":[{"name":"example.com","type":1}],"Answer":[{"name":"example.com","type":1,"TTL":173,"data":"172.66.147.243"},{"name":"example.com","type":1,"TTL":173,"data":"104.20.23.154"},{"name":"example.com","type":46,"TTL":173,"data":"A 13 2 300 1788383032 1788203032 34505 example.com. PpGO35V9ibQXF0dqO+EAGhBmiM5i9FtOnVCeyaWCNjWphRhXSnqkFKy2ibgaxXq+HMH6Aj3BhHKhVQXOhCtjRw=="}]},
+  "cloudflare_ptr": {"Status":0,"TC":false,"RD":true,"RA":true,"AD":false,"CD":false,"Question":[{"name":"8.8.8.8.in-addr.arpa","type":12}],"Answer":[{"name":"8.8.8.8.in-addr.arpa","type":12,"TTL":85783,"data":"dns.google."}]},
+  "cloudflare_https": {"Status":0,"TC":false,"RD":true,"RA":true,"AD":true,"CD":false,"Question":[{"name":"cloudflare.com","type":65}],"Answer":[{"name":"cloudflare.com","type":65,"TTL":49,"data":"1 . alpn=h3,h2 ipv4hint=104.16.132.229,104.16.133.229 ipv6hint=2606:4700::6810:84e5,2606:4700::6810:85e5"}]},
+  "certspotter_page": [
+    {"id":"15224312938","tbs_sha256":"2cc6e913","cert_sha256":"20e64153","dns_names":["staging.example.com"],"not_before":"2026-06-05T06:11:15Z","not_after":"2026-09-03T07:09:54Z","revoked":false},
+    {"id":"15226275449","tbs_sha256":"3a3acd64","cert_sha256":"39ade500","dns_names":["example.com","www.example.com","DOCS.example.com."],"not_before":"2026-06-05T08:46:06Z","not_after":"2026-09-03T09:46:01Z","revoked":false},
+    {"id":"15230000001","tbs_sha256":"aa","cert_sha256":"bb","dns_names":["mail.example.com","unrelated.example.org","notexample.com"],"not_before":"2026-06-06T00:00:00Z","not_after":"2026-09-04T00:00:00Z","revoked":false}
+  ],
+  "hackertarget_text": "api.example.com,192.0.2.10\nblog.example.com,192.0.2.10\ncdn.example.com,198.51.100.7\nmail.example.com,203.0.113.25\nwww.example.com,192.0.2.10\n",
+  "hackertarget_invalid": "error invalid host",
+  "hackertarget_quota": "API count exceeded - Increase Quota with Membership"
+}

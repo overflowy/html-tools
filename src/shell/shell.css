@@ -78,14 +78,13 @@ body { display: flex; overflow: hidden; }
 
 .sidebar-footer {
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 8px;
   white-space: nowrap;
   padding: 0 6px;
   font-size: 11px;
   color: var(--text-muted);
 }
-.sidebar-footer p { margin: 0; }
 .sidebar-footer a { color: var(--text-muted); text-decoration: underline; }
 @media (hover: hover) {
   .sidebar-footer a:hover { color: var(--text); }
