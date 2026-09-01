@@ -16,5 +16,17 @@
   ],
   "hackertarget_text": "api.example.com,192.0.2.10\nblog.example.com,192.0.2.10\ncdn.example.com,198.51.100.7\nmail.example.com,203.0.113.25\nwww.example.com,192.0.2.10\n",
   "hackertarget_invalid": "error invalid host",
-  "hackertarget_quota": "API count exceeded - Increase Quota with Membership"
+  "hackertarget_quota": "API count exceeded - Increase Quota with Membership",
+  "dkim_keys": {
+    "rsa2048": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAr95W77w0FzaZfb9nsOUL4rMlNhF+vEduzhy6m2r0CI5TTmWZfOcJu5m5lmUafVrvhNjhyGZV7rnS8+YN9l5EVshzmVqHs8u2dn3ay4X2VNF6RItlS4s5XVxLX+YVlWAos2q0mA27LCo+nd4tLtyEtBWHrL8X/nmQ7+/6SqIFV3f+LMCQSx4yMx+rOp/co0+bVlk3/8nJKOBVoqPbq4vPDOWMGzMoFPqdfDFnWrU0Fn9rg0VGeg+LTTJyE5ckEFD35SY0fUk1PuqhRXobuAZO6+aexyHoWc8ffVVQh1DpQUNAhjgpZ4cGdMLQ+naz45VUmITKp3G1eNZA1J+xWEaxqwIDAQAB",
+    "rsa1024": "MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDH0zMuVI8IkRh9kQQhY362VF+laoXZ1D3JIz8ww6XVMkD0ZCNazywpEs/AQnFoLwW+rNJiIR9xC8b5+DTQm/uCAJ4J9SdKvcvRSDmt3amYRfq3Gm1gxLGejLYt+3i/7eFW2DSdwQTOD52LsrYBl4N1BOWKsNdQ4llA7vZ8/zi4rwIDAQAB",
+    "ed25519": "PzeFkvgX+vdhKLRNbSp90UuUIIVBdu0KhKWGY9s0TDQ="
+  },
+  "txt_by_name": {
+    "example.com": ["\"v=spf1 include:_spf.example.net mx ~all\"", "\"google-site-verification=abc123\""],
+    "_spf.example.net": ["\"v=spf1 ip4:192.0.2.0/24 ip6:2001:db8::/32 -all\""],
+    "_dmarc.example.com": ["\"v=DMARC1; p=quarantine; rua=mailto:dmarc@example.com; pct=100\""],
+    "google._domainkey.example.com": ["\"v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAr95W77w0FzaZfb9nsOUL4rMlNhF+vEduzhy6m2r0CI5TTmWZfOcJu5m5lmUafVrvhNjhyGZV7rnS8+YN9l5EVshzmVqHs8u2dn3ay4X2VNF6RItlS4s5XVxLX+YVlWAos2q0mA27LCo+nd4tLtyEtBWHrL8X\" \"/nmQ7+/6SqIFV3f+LMCQSx4yMx+rOp/co0+bVlk3/8nJKOBVoqPbq4vPDOWMGzMoFPqdfDFnWrU0Fn9rg0VGeg+LTTJyE5ckEFD35SY0fUk1PuqhRXobuAZO6+aexyHoWc8ffVVQh1DpQUNAhjgpZ4cGdMLQ+naz45VUmITKp3G1eNZA1J+xWEaxqwIDAQAB\""],
+    "k1._domainkey.example.com": ["\"v=DKIM1; k=rsa; p=\""]
+  }
 }

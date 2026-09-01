@@ -3,6 +3,7 @@
 import { chromium } from "playwright-core";
 import jsQR from "jsqr";
 import dnsFixtures from "./src/tools/dns-lookup/fixtures.json";
+import { DKIM_SELECTORS } from "./src/tools/dns-lookup/email";
 
 const exe =
   process.env.CHROMIUM_PATH ??
@@ -292,7 +293,13 @@ await page.route(/^https:\/\/(cloudflare-dns\.com|security\.cloudflare-dns\.com|
   else if (name === "8.8.8.8.in-addr.arpa") body = dnsFixtures.cloudflare_ptr;
   else if (type === "A") body = u.host === "dns.google" ? dnsFixtures.google_a : dnsFixtures.cloudflare_a;
   else if (type === "MX") body = dnsFixtures.cloudflare_mx;
-  else if (type === "TXT") body = dnsFixtures.cloudflare_txt;
+  else if (type === "TXT") {
+    // TXT is served per name so the email check sees SPF, DMARC, and DKIM where they belong and nothing elsewhere.
+    const strings = (dnsFixtures.txt_by_name as Record<string, string[]>)[name ?? ""];
+    body = strings
+      ? { ...dnsFixtures.cloudflare_empty, Question: [{ name, type: 16 }], Authority: [], Answer: strings.map((data) => ({ name, type: 16, TTL: 300, data })) }
+      : dnsFixtures.cloudflare_empty;
+  }
   else if (type === "NOTIMPTYPE") body = dnsFixtures.cloudflare_notimp;
   else body = dnsFixtures.cloudflare_empty;
   return route.fulfill({ status: 200, contentType: "application/dns-json", headers: cors, body: JSON.stringify(body) });
@@ -394,6 +401,39 @@ check("dns subdomains status per source", (await page.locator(".tool-dns-lookup 
 await page.locator(".tool-dns-lookup .subs .link", { hasText: "blog.example.com" }).click();
 await page.waitForFunction(() => location.hash === "#dns-lookup/cf.00.lookup.A.blog.example.com");
 check("dns subdomain row click looks the name up", dnsHits.at(-1) === "cloudflare-dns.com blog.example.com A", dnsHits.at(-1));
+
+// Email check: MX, SPF (following includes), DMARC, and a DKIM selector sweep, all from the TXT fixtures.
+await page.locator(".tool-dns-lookup .name").fill("example.com");
+const emailStart = dnsHits.length;
+await page.locator(".tool-dns-lookup .btn-email").click();
+await page.waitForFunction(() => document.querySelector(".tool-dns-lookup .status-text")?.textContent?.startsWith("SPF"));
+const emailStatus = (await page.locator(".tool-dns-lookup .status-text").textContent())!;
+check("dns email verdicts", emailStatus.startsWith("SPF ok · DMARC ok · DKIM ok"), emailStatus);
+check("dns email queries MX, SPF and its include, DMARC, and every selector",
+  dnsHits.slice(emailStart).filter((h) => h.endsWith(" TXT")).length === 3 + DKIM_SELECTORS.length && dnsHits.includes("cloudflare-dns.com _spf.example.net TXT") &&
+  dnsHits.includes("cloudflare-dns.com _dmarc.example.com TXT") && dnsHits.includes("cloudflare-dns.com google._domainkey.example.com TXT"),
+  String(dnsHits.length - emailStart));
+check("dns email renders the four cards", (await page.locator(".tool-dns-lookup .card").count()) === 4);
+check("dns email MX lists the exchangers", (await page.locator('.tool-dns-lookup .card[data-check="mx"] .mx-list li').count()) === 3);
+check("dns email SPF counts lookups through the include",
+  (await page.locator('.tool-dns-lookup .card[data-check="spf"]').textContent())!.includes("2 of the 10 allowed DNS lookups"));
+check("dns email DMARC reads the policy",
+  (await page.locator('.tool-dns-lookup .card[data-check="dmarc"]').textContent())!.includes("p=quarantine: failing mail goes to spam"));
+check("dns email DKIM finds the live key and the revoked one",
+  (await page.locator('.tool-dns-lookup .card[data-check="dkim"] .dkim-key').count()) === 2 &&
+  (await page.locator('.tool-dns-lookup .card[data-check="dkim"]').textContent())!.includes("2048-bit RSA key") &&
+  (await page.locator('.tool-dns-lookup .card[data-check="dkim"]').textContent())!.includes("this key is revoked"));
+check("dns email deep link", await page.evaluate(() => location.hash === "#dns-lookup/cf.00.email.A.example.com"));
+
+// Probing one more selector by hand.
+await page.locator(".tool-dns-lookup .dkim-selector").fill("selector1");
+await page.locator(".tool-dns-lookup .btn-dkim").click();
+await page.waitForFunction(() => document.querySelector(".tool-dns-lookup .status-text")?.textContent?.startsWith("No key at selector selector1"));
+check("dns email DKIM probe reports a missing selector", (await page.locator(".tool-dns-lookup .dkim-extra .note").textContent())!.includes("selector1._domainkey.example.com"));
+await page.locator(".tool-dns-lookup .dkim-selector").fill("google");
+await page.locator(".tool-dns-lookup .dkim-selector").press("Enter");
+await page.waitForFunction(() => document.querySelector(".tool-dns-lookup .status-text")?.textContent?.startsWith("Key found at selector google"));
+check("dns email DKIM probe renders a found key", (await page.locator(".tool-dns-lookup .dkim-extra .dkim-key").count()) === 1);
 
 // A DNS deep link restores every control and runs the query on load.
 await page.goto("about:blank");

@@ -5,9 +5,13 @@ import {
   normalizeName, outcomeOf, pool, rcodeName, resolverById, reverseName, subdomainSearchName, typeName, validCustomType,
   type DnsRecord, type DnsResponse, type LookupResult, type QueryOptions, type Resolver, type SubdomainHit,
 } from "./dns";
+import {
+  checkDkim, checkDkimSelector, checkDmarc, checkSpf, evaluateMx, unquoteTxt,
+  type DkimKey, type Finding, type TxtResolver, type Verdict,
+} from "./email";
 
-type Action = "lookup" | "all" | "subs";
-const ACTIONS = new Set<string>(["lookup", "all", "subs"]);
+type Action = "lookup" | "all" | "subs" | "email";
+const ACTIONS = new Set<string>(["lookup", "all", "subs", "email"]);
 
 /** Lookups in flight at once during All Types. */
 const CONCURRENCY = 4;
@@ -44,6 +48,38 @@ function commentsHtml(r: DnsResponse): string {
   return r.Comment.map((c) => '<p class="comment">' + esc(c) + "</p>").join("");
 }
 
+const VERDICT_LABEL: Record<Verdict, string> = { ok: "ok", warn: "warning", fail: "failing", none: "n/a" };
+
+function verdictPill(v: Verdict): string {
+  return '<span class="verdict ' + v + '">' + VERDICT_LABEL[v] + "</span>";
+}
+
+function findingsHtml(findings: Finding[]): string {
+  if (!findings.length) return "";
+  return '<ul class="findings">' + findings.map((f) =>
+    '<li class="' + f.level + '"><span class="mark"></span>' + esc(f.text) + "</li>").join("") + "</ul>";
+}
+
+function recordLine(record: string | null): string {
+  return record === null ? "" : '<code class="record">' + esc(record) + "</code>";
+}
+
+function dkimKeyHtml(k: DkimKey): string {
+  const label = k.selectors.length > 3
+    ? k.selectors.slice(0, 2).join(", ") + " +" + (k.selectors.length - 2) + " more"
+    : k.selectors.join(", ");
+  return '<div class="dkim-key">' +
+    '<div class="dkim-head"><span class="type-badge" title="' + esc(k.selectors.join(", ")) + '">' + esc(label) + "</span>" + verdictPill(k.verdict) +
+    '<span class="dkim-meta">' + esc(k.keyType) + (k.bits ? " · " + k.bits + " bits" : "") + "</span></div>" +
+    recordLine(k.record) + findingsHtml(k.findings) + "</div>";
+}
+
+/** One check's card: title, verdict, the record as published, and what we make of it. */
+function cardHtml(id: string, title: string, verdict: Verdict, body: string): string {
+  return '<section class="card" data-check="' + id + '"><div class="card-head"><span class="card-title">' + title + "</span>" +
+    verdictPill(verdict) + '</div><div class="card-body">' + body + "</div></section>";
+}
+
 /** The records pane body for one Response: answer, or why there is none, plus any authority section. */
 function responseHtml(name: string, type: string, r: DnsResponse, withAuthority: boolean): string {
   let html = "";
@@ -70,8 +106,8 @@ function responseHtml(name: string, type: string, r: DnsResponse, withAuthority:
 const tool: Tool = {
   id: "dns-lookup",
   name: "DNS Lookup",
-  subtitle: "Query DNS records through Cloudflare or Google DNS-over-HTTPS, and list subdomains from certificate logs.",
-  keywords: ["dns", "lookup", "dig", "nslookup", "domain", "records", "mx", "txt", "cname", "nameserver", "ns", "subdomains", "reverse", "ptr", "doh", "dnssec", "resolver", "ip"],
+  subtitle: "Query DNS records through Cloudflare or Google DNS-over-HTTPS, list subdomains from certificate logs, check email authentication.",
+  keywords: ["dns", "lookup", "dig", "nslookup", "domain", "records", "mx", "txt", "cname", "nameserver", "ns", "subdomains", "reverse", "ptr", "doh", "dnssec", "resolver", "ip", "email", "spf", "dmarc", "dkim", "mail"],
   mount(el, ctx) {
     const typeOptions = TYPE_GROUPS.map((g) =>
       '<optgroup label="' + g.label + '">' + g.types.map((t) => '<option value="' + t + '">' + t + "</option>").join("") + "</optgroup>").join("");
@@ -85,9 +121,10 @@ const tool: Tool = {
         <input type="text" class="custom-type" placeholder="type or number" aria-label="Custom record type"
           spellcheck="false" autocapitalize="off" autocomplete="off" hidden>
         <div class="actions">
-          <button class="btn-lookup primary" type="button">Lookup</button>
           <button class="btn-all" type="button">All types</button>
           <button class="btn-subs" type="button">Subdomains</button>
+          <button class="btn-email" type="button">Email</button>
+          <button class="btn-lookup primary" type="button">Lookup</button>
         </div>
       </div>
       <div class="options">
@@ -297,11 +334,10 @@ const tool: Tool = {
         html += '<p class="note">' + (errors.length ? "No subdomains from the sources that answered." : "No subdomains found.") + "</p>";
         return html;
       }
-      html += '<table class="records subs"><thead><tr><th>name</th><th>ip</th><th>source</th></tr></thead><tbody>' +
+      html += '<table class="records subs"><thead><tr><th>name</th><th>ip</th></tr></thead><tbody>' +
         hits.map((h) =>
           '<tr><td class="c-name"><button type="button" class="link" data-name="' + esc(h.name) + '" title="Look up ' + esc(h.name) + '">' + esc(h.name) + "</button></td>" +
-          '<td class="c-ip">' + esc(h.ip) + "</td>" +
-          '<td class="c-source">' + esc(h.sources.join(", ")) + "</td></tr>").join("") +
+          '<td class="c-ip">' + esc(h.ip) + "</td></tr>").join("") +
         "</tbody></table>";
       return html;
     }
@@ -345,8 +381,97 @@ const tool: Tool = {
       }
     }
 
+    /** TXT strings at a name through the current resolver, recording every response in `raw`. */
+    function txtResolver(q: { resolver: Resolver; opts: QueryOptions }, raw: Record<string, unknown>, signal: AbortSignal): TxtResolver {
+      return async (name) => {
+        const { response } = await lookup(q.resolver, name, "TXT", q.opts, signal);
+        raw[name + " TXT"] = response;
+        return response.Answer.filter((r) => r.type === 16).map((r) => unquoteTxt(r.data));
+      };
+    }
+
+    function dkimProbeHtml(): string {
+      return '<div class="dkim-probe"><input type="text" class="dkim-selector" placeholder="another selector, e.g. selector1"' +
+        ' spellcheck="false" autocapitalize="off" autocomplete="off" aria-label="DKIM selector">' +
+        '<button type="button" class="btn-dkim">Check selector</button></div><div class="dkim-extra"></div>';
+    }
+
+    async function runEmail() {
+      const q = prepare("email");
+      if (!q) return;
+      if (reverseName(q.name)) {
+        setStatus("error", "Email check needs a domain name, not an IP address.");
+        return;
+      }
+      const ctrl = begin();
+      $resultsTitle.textContent = "email authentication for " + q.name;
+      $flags.innerHTML = "";
+      $results.innerHTML = '<p class="note">Checking MX, SPF, DMARC, and DKIM…</p>';
+      showRaw(undefined);
+      setStatus("", "Checking " + q.name + " via " + q.resolver.label + "…");
+      const started = performance.now();
+      const raw: Record<string, unknown> = {};
+      const txt = txtResolver(q, raw, ctrl.signal);
+      try {
+        const [mxRes, spf, dmarc, dkim] = await Promise.all([
+          lookup(q.resolver, q.name, "MX", q.opts, ctrl.signal),
+          checkSpf(q.name, txt),
+          checkDmarc(q.name, txt),
+          checkDkim(q.name, txt, (items, fn) => pool(items, CONCURRENCY, fn)),
+        ]);
+        if (ctrl.signal.aborted) return;
+        raw[q.name + " MX"] = mxRes.response;
+        const mx = evaluateMx(mxRes.response.Answer.filter((r) => r.type === 15).map((r) => r.data));
+        const mxBody = (mx.hosts.length && mx.hosts[0]!.host
+          ? '<ul class="mx-list">' + mx.hosts.map((h) => "<li><span class=\"prio\">" + h.priority + "</span> " + esc(h.host) + "</li>").join("") + "</ul>"
+          : "") + findingsHtml(mx.findings);
+        $results.innerHTML =
+          cardHtml("mx", "MX", mx.verdict, mxBody) +
+          cardHtml("spf", "SPF", spf.verdict, recordLine(spf.record) + findingsHtml(spf.findings)) +
+          cardHtml("dmarc", "DMARC", dmarc.verdict, recordLine(dmarc.record) + findingsHtml(dmarc.findings)) +
+          cardHtml("dkim", "DKIM", dkim.verdict, findingsHtml(dkim.findings) + dkim.keys.map(dkimKeyHtml).join("") + dkimProbeHtml());
+        showRaw({ mx, spf, dmarc, dkim, responses: raw });
+        const summary = ["SPF " + VERDICT_LABEL[spf.verdict], "DMARC " + VERDICT_LABEL[dmarc.verdict], "DKIM " + VERDICT_LABEL[dkim.verdict]].join(" · ");
+        const bad = [spf, dmarc].some((r) => r.verdict === "fail");
+        setStatus(bad ? "error" : "ok", summary + " · " + Math.round(performance.now() - started) + " ms · " + q.resolver.label);
+      } catch (e) {
+        fail(ctrl, e);
+      } finally {
+        finish(ctrl);
+      }
+    }
+
+    /** Look up one more DKIM selector the common list did not cover. */
+    async function probeDkim() {
+      const $sel = $results.querySelector(".dkim-selector") as HTMLInputElement | null;
+      const $extra = $results.querySelector(".dkim-extra") as HTMLElement | null;
+      if (!$sel || !$extra || !last) return;
+      const selector = $sel.value.trim().toLowerCase().replace(/\.$/, "");
+      if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/.test(selector)) {
+        setStatus("error", "Enter a DKIM selector: the part before ._domainkey in the signing record.");
+        $sel.focus();
+        return;
+      }
+      const ctrl = begin();
+      const q = { resolver: resolverById(last.resolver), opts: last.opts };
+      const raw: Record<string, unknown> = {};
+      try {
+        const key = await checkDkimSelector(last.name, selector, txtResolver(q, raw, ctrl.signal));
+        if (ctrl.signal.aborted) return;
+        $extra.insertAdjacentHTML("afterbegin", key
+          ? dkimKeyHtml(key)
+          : '<p class="note">No DKIM key at ' + esc(selector) + "._domainkey." + esc(last.name) + ".</p>");
+        setStatus(key ? "ok" : "", key ? "Key found at selector " + selector : "No key at selector " + selector);
+      } catch (e) {
+        fail(ctrl, e);
+      } finally {
+        finish(ctrl);
+      }
+    }
+
     function run(action: Action) {
       if (action === "all") void runAll();
+      else if (action === "email") void runEmail();
       else if (action === "subs") void runSubdomains();
       else void runLookup();
     }
@@ -387,13 +512,22 @@ const tool: Tool = {
     $(".btn-lookup").addEventListener("click", () => run("lookup"));
     $(".btn-all").addEventListener("click", () => run("all"));
     $(".btn-subs").addEventListener("click", () => run("subs"));
+    $(".btn-email").addEventListener("click", () => run("email"));
 
-    // A subdomain row is a shortcut to looking that name up.
+    // A subdomain row is a shortcut to looking that name up; the DKIM probe lives in the results too.
     $results.addEventListener("click", (e) => {
-      const btn = (e.target as HTMLElement).closest("button.link") as HTMLButtonElement | null;
+      const target = e.target as HTMLElement;
+      if (target.closest(".btn-dkim")) {
+        void probeDkim();
+        return;
+      }
+      const btn = target.closest("button.link") as HTMLButtonElement | null;
       if (!btn || !btn.dataset.name) return;
       $name.value = btn.dataset.name;
       run("lookup");
+    });
+    $results.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && (e.target as HTMLElement).classList.contains("dkim-selector")) void probeDkim();
     });
 
     $btnCopy.addEventListener("click", () => {
