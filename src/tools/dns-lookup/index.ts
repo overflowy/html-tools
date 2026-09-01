@@ -6,8 +6,8 @@ import {
   type DnsRecord, type DnsResponse, type LookupResult, type QueryOptions, type Resolver, type SubdomainHit,
 } from "./dns";
 import {
-  checkDkim, checkDkimSelector, checkDmarc, checkSpf, evaluateMx, unquoteTxt,
-  type DkimKey, type Finding, type TxtResolver, type Verdict,
+  checkBimi, checkDkim, checkDkimSelector, checkDmarc, checkSpf, evaluateMx, unquoteTxt,
+  type AssetFetcher, type AssetReport, type BimiReport, type DkimKey, type Finding, type TxtResolver, type Verdict,
 } from "./email";
 
 type Action = "lookup" | "all" | "subs" | "email";
@@ -72,6 +72,21 @@ function dkimKeyHtml(k: DkimKey): string {
     '<div class="dkim-head"><span class="type-badge" title="' + esc(k.selectors.join(", ")) + '">' + esc(label) + "</span>" + verdictPill(k.verdict) +
     '<span class="dkim-meta">' + esc(k.keyType) + (k.bits ? " · " + k.bits + " bits" : "") + "</span></div>" +
     recordLine(k.record) + findingsHtml(k.findings) + "</div>";
+}
+
+function assetHtml(label: string, asset: AssetReport | null): string {
+  if (!asset) return "";
+  return '<div class="asset"><div class="asset-head"><span class="asset-label">' + label + "</span>" +
+    '<a class="asset-url" href="' + esc(asset.url) + '" target="_blank" rel="noreferrer">' + esc(asset.url) + "</a></div>" +
+    findingsHtml(asset.findings) + "</div>";
+}
+
+/** The BIMI card body: the logo as the mail client would show it (an img never runs scripts), then the findings. */
+function bimiHtml(b: BimiReport): string {
+  const logo = b.logoUrl
+    ? '<img class="bimi-logo" src="' + esc(b.logoUrl) + '" alt="" width="56" height="56">'
+    : "";
+  return logo + recordLine(b.record) + findingsHtml(b.findings) + assetHtml("logo", b.logo) + assetHtml("certificate", b.certificate);
 }
 
 /** One check's card: title, verdict, the record as published, and what we make of it. */
@@ -390,6 +405,19 @@ const tool: Tool = {
       };
     }
 
+    /** Reads a BIMI asset from the browser. Status 0 stands for "could not read it", which is what a CORS refusal looks like. */
+    function assetFetcher(signal: AbortSignal): AssetFetcher {
+      return async (url) => {
+        try {
+          const res = await fetch(url, { signal, redirect: "follow" });
+          return { ok: res.ok, status: res.status, body: res.ok ? await res.text() : "" };
+        } catch (e) {
+          if (signal.aborted) throw e;
+          return { ok: false, status: 0, body: "" };
+        }
+      };
+    }
+
     function dkimProbeHtml(): string {
       return '<div class="dkim-probe"><input type="text" class="dkim-selector" placeholder="another selector, e.g. selector1"' +
         ' spellcheck="false" autocapitalize="off" autocomplete="off" aria-label="DKIM selector">' +
@@ -406,7 +434,7 @@ const tool: Tool = {
       const ctrl = begin();
       $resultsTitle.textContent = "email authentication for " + q.name;
       $flags.innerHTML = "";
-      $results.innerHTML = '<p class="note">Checking MX, SPF, DMARC, and DKIM…</p>';
+      $results.innerHTML = '<p class="note">Checking MX, SPF, DMARC, DKIM, and BIMI…</p>';
       showRaw(undefined);
       setStatus("", "Checking " + q.name + " via " + q.resolver.label + "…");
       const started = performance.now();
@@ -419,6 +447,8 @@ const tool: Tool = {
           checkDmarc(q.name, txt),
           checkDkim(q.name, txt, (items, fn) => pool(items, CONCURRENCY, fn)),
         ]);
+        // BIMI is judged against the DMARC policy, so it waits for that.
+        const bimi = await checkBimi(q.name, txt, assetFetcher(ctrl.signal), dmarc.tags);
         if (ctrl.signal.aborted) return;
         raw[q.name + " MX"] = mxRes.response;
         const mx = evaluateMx(mxRes.response.Answer.filter((r) => r.type === 15).map((r) => r.data));
@@ -429,9 +459,11 @@ const tool: Tool = {
           cardHtml("mx", "MX", mx.verdict, mxBody) +
           cardHtml("spf", "SPF", spf.verdict, recordLine(spf.record) + findingsHtml(spf.findings)) +
           cardHtml("dmarc", "DMARC", dmarc.verdict, recordLine(dmarc.record) + findingsHtml(dmarc.findings)) +
-          cardHtml("dkim", "DKIM", dkim.verdict, findingsHtml(dkim.findings) + dkim.keys.map(dkimKeyHtml).join("") + dkimProbeHtml());
-        showRaw({ mx, spf, dmarc, dkim, responses: raw });
-        const summary = ["SPF " + VERDICT_LABEL[spf.verdict], "DMARC " + VERDICT_LABEL[dmarc.verdict], "DKIM " + VERDICT_LABEL[dkim.verdict]].join(" · ");
+          cardHtml("dkim", "DKIM", dkim.verdict, findingsHtml(dkim.findings) + dkim.keys.map(dkimKeyHtml).join("") + dkimProbeHtml()) +
+          cardHtml("bimi", "BIMI", bimi.verdict, bimiHtml(bimi));
+        showRaw({ mx, spf, dmarc, dkim, bimi, responses: raw });
+        const summary = ["SPF " + VERDICT_LABEL[spf.verdict], "DMARC " + VERDICT_LABEL[dmarc.verdict], "DKIM " + VERDICT_LABEL[dkim.verdict],
+          "BIMI " + VERDICT_LABEL[bimi.verdict]].join(" · ");
         const bad = [spf, dmarc].some((r) => r.verdict === "fail");
         setStatus(bad ? "error" : "ok", summary + " · " + Math.round(performance.now() - started) + " ms · " + q.resolver.label);
       } catch (e) {
@@ -526,6 +558,11 @@ const tool: Tool = {
       $name.value = btn.dataset.name;
       run("lookup");
     });
+    // A logo that will not load (blocked, 404) just disappears; the findings already say why.
+    $results.addEventListener("error", (e) => {
+      const t = e.target as HTMLElement;
+      if (t.classList?.contains("bimi-logo")) t.hidden = true;
+    }, true);
     $results.addEventListener("keydown", (e) => {
       if (e.key === "Enter" && (e.target as HTMLElement).classList.contains("dkim-selector")) void probeDkim();
     });

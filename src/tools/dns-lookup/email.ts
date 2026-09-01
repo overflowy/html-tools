@@ -1,6 +1,6 @@
-// Email Check: SPF, DMARC, and DKIM as published in DNS, judged against the
-// RFCs (7208, 7489, 6376, 8301). Network access is injected so the checks are
-// testable against a map of TXT records.
+// Email Check: SPF, DMARC, DKIM, and BIMI as published in DNS, judged against
+// the RFCs (7208, 7489, 6376, 8301) and the BIMI drafts. Network access is
+// injected so the checks are testable against a map of TXT records.
 
 export type Verdict = "ok" | "warn" | "fail" | "none";
 
@@ -448,4 +448,196 @@ export function evaluateMx(data: string[]): MxReport {
     findings.push({ level: "ok", text: hosts.length + " mail exchanger" + (hosts.length === 1 ? "" : "s") + "." });
   }
   return { verdict: worst(findings, "none"), hosts, findings };
+}
+
+// ---- BIMI ----
+
+/** Fetches a URL from the browser. `ok: false` with status 0 means it could not be reached at all (CORS, network). */
+export type AssetFetcher = (url: string) => Promise<{ ok: boolean; status: number; body: string }>;
+
+export interface AssetReport {
+  url: string;
+  /** "ok", "fail", or "unreachable" when the server did not let the browser read it. */
+  state: "ok" | "fail" | "unreachable";
+  findings: Finding[];
+}
+
+export interface BimiReport {
+  verdict: Verdict;
+  record: string | null;
+  records: string[];
+  tags: Record<string, string>;
+  /** The logo URL when the record has one; what the tool can display. */
+  logoUrl: string | null;
+  logo: AssetReport | null;
+  certificate: AssetReport | null;
+  findings: Finding[];
+}
+
+export function bimiRecords(txts: string[]): string[] {
+  return txts.filter((t) => /^v=BIMI1(\s*;|\s|$)/i.test(t));
+}
+
+/** Whether a DMARC record meets BIMI's enforcement requirement: quarantine or reject, for the whole domain, all of the time. */
+export function dmarcEnforces(tags: Record<string, string>): { ok: boolean; why: string } {
+  const p = (tags.p ?? "").toLowerCase();
+  const sp = (tags.sp ?? "").toLowerCase();
+  if (p !== "quarantine" && p !== "reject") return { ok: false, why: "DMARC policy is p=" + (p || "missing") + "; BIMI needs quarantine or reject." };
+  if (tags.pct !== undefined && Number(tags.pct) !== 100) return { ok: false, why: "DMARC pct=" + tags.pct + "; BIMI needs the policy applied to all mail." };
+  if (sp && sp !== "quarantine" && sp !== "reject") return { ok: false, why: "DMARC sp=" + sp + " leaves subdomains unenforced; BIMI needs quarantine or reject there too." };
+  return { ok: true, why: "DMARC enforces p=" + p + (sp ? ", sp=" + sp : "") + "." };
+}
+
+const SVG_FORBIDDEN = ["script", "a", "image", "foreignObject", "animate", "animateMotion", "animateTransform", "set", "audio", "video"];
+
+/** Judges a fetched logo against the SVG Tiny Portable/Secure profile, as far as text inspection allows. */
+export function judgeLogo(url: string, body: string): AssetReport {
+  const findings: Finding[] = [];
+  const svgTag = body.match(/<svg\b[^>]*>/i);
+  if (!svgTag) {
+    findings.push({ level: "fail", text: "The logo is not an SVG document." });
+    return { url, state: "fail", findings };
+  }
+  const attrs = svgTag[0];
+  if (!/baseProfile\s*=\s*["']tiny-ps["']/i.test(attrs)) findings.push({ level: "fail", text: "Missing baseProfile=\"tiny-ps\"; mail clients require the SVG Tiny Portable/Secure profile." });
+  if (!/version\s*=\s*["']1\.2["']/i.test(attrs)) findings.push({ level: "warn", text: "The profile expects version=\"1.2\" on the svg element." });
+  if (!/<title\b[^>]*>[^<]+<\/title>/i.test(body)) findings.push({ level: "fail", text: "Missing <title>; the profile requires one." });
+  for (const el of SVG_FORBIDDEN) {
+    if (new RegExp("<" + el + "\\b", "i").test(body)) findings.push({ level: "fail", text: "Contains <" + el + ">, which the profile forbids." });
+  }
+  if (/\b(?:xlink:)?href\s*=\s*["'](?!#)/i.test(body)) findings.push({ level: "fail", text: "References an external resource; the profile forbids anything outside the file." });
+  if (/\bon[a-z]+\s*=/i.test(attrs) || /<[^>]+\bon[a-z]+\s*=/i.test(body)) findings.push({ level: "fail", text: "Contains event handler attributes." });
+  const viewBox = attrs.match(/viewBox\s*=\s*["']\s*[\d.-]+[\s,]+[\d.-]+[\s,]+([\d.]+)[\s,]+([\d.]+)\s*["']/i);
+  if (viewBox && Math.abs(Number(viewBox[1]) - Number(viewBox[2])) > 0.01 * Math.max(Number(viewBox[1]), Number(viewBox[2]))) {
+    findings.push({ level: "warn", text: "The viewBox is not square (" + viewBox[1] + "×" + viewBox[2] + "); clients expect a square logo." });
+  }
+  const bytes = new TextEncoder().encode(body).length;
+  if (bytes > 32 * 1024) findings.push({ level: "warn", text: "The file is " + Math.round(bytes / 1024) + " KB; 32 KB is the recommended maximum." });
+  if (!findings.some((f) => f.level === "fail")) findings.unshift({ level: "ok", text: "SVG Tiny Portable/Secure checks pass (" + bytes + " bytes)." });
+  return { url, state: findings.some((f) => f.level === "fail") ? "fail" : "ok", findings };
+}
+
+function derTime(bytes: Uint8Array, pos: number): Date | null {
+  const t = der(bytes, pos);
+  if (!t || (t[0] !== 0x17 && t[0] !== 0x18)) return null;
+  const text = String.fromCharCode(...bytes.subarray(t[1], t[1] + t[2]));
+  // UTCTime YYMMDDHHMMSSZ (RFC 5280: years 50-99 are 19xx), GeneralizedTime YYYYMMDDHHMMSSZ.
+  const m = t[0] === 0x17
+    ? text.match(/^(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})Z$/)
+    : text.match(/^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})(?:\.\d+)?Z$/);
+  if (!m) return null;
+  const year = t[0] === 0x17 ? (Number(m[1]) >= 50 ? 1900 : 2000) + Number(m[1]) : Number(m[1]);
+  return new Date(Date.UTC(year, Number(m[2]) - 1, Number(m[3]), Number(m[4]), Number(m[5]), Number(m[6])));
+}
+
+/** notBefore/notAfter of the first certificate in a PEM or DER blob, or null if it does not parse. */
+export function certValidity(pem: string): { notBefore: Date; notAfter: Date } | null {
+  const b64 = pem.match(/-----BEGIN CERTIFICATE-----([\s\S]*?)-----END CERTIFICATE-----/)?.[1] ?? pem;
+  const bytes = base64Bytes(b64);
+  if (!bytes) return null;
+  const cert = der(bytes, 0);
+  if (!cert || cert[0] !== 0x30) return null;
+  const tbs = der(bytes, cert[1]);
+  if (!tbs || tbs[0] !== 0x30) return null;
+  let pos = tbs[1];
+  // tbsCertificate: [0] version (optional), serial, signature algorithm, issuer, validity, ...
+  const first = der(bytes, pos);
+  if (!first) return null;
+  if (first[0] === 0xa0) pos = first[1] + first[2];
+  for (let i = 0; i < 3; i++) {
+    const item = der(bytes, pos);
+    if (!item) return null;
+    pos = item[1] + item[2];
+  }
+  const validity = der(bytes, pos);
+  if (!validity || validity[0] !== 0x30) return null;
+  const notBefore = derTime(bytes, validity[1]);
+  if (!notBefore) return null;
+  const nb = der(bytes, validity[1])!;
+  const notAfter = derTime(bytes, nb[1] + nb[2]);
+  if (!notAfter) return null;
+  return { notBefore, notAfter };
+}
+
+export function judgeCertificate(url: string, body: string, now = new Date()): AssetReport {
+  const findings: Finding[] = [];
+  if (!/-----BEGIN CERTIFICATE-----/.test(body)) {
+    findings.push({ level: "fail", text: "Not a PEM certificate file." });
+    return { url, state: "fail", findings };
+  }
+  const validity = certValidity(body);
+  if (!validity) {
+    findings.push({ level: "fail", text: "The certificate does not parse." });
+    return { url, state: "fail", findings };
+  }
+  const day = 86400000;
+  const daysLeft = Math.floor((validity.notAfter.getTime() - now.getTime()) / day);
+  const until = validity.notAfter.toISOString().slice(0, 10);
+  if (validity.notBefore.getTime() > now.getTime()) findings.push({ level: "fail", text: "The certificate is not valid until " + validity.notBefore.toISOString().slice(0, 10) + "." });
+  else if (daysLeft < 0) findings.push({ level: "fail", text: "The certificate expired on " + until + "." });
+  else if (daysLeft <= 30) findings.push({ level: "warn", text: "The certificate expires on " + until + " (" + daysLeft + " days)." });
+  else findings.push({ level: "ok", text: "Valid until " + until + "." });
+  findings.push({ level: "none", text: "Whether it is a Verified or Common Mark Certificate from an authorized CA is not checked here." });
+  return { url, state: findings.some((f) => f.level === "fail") ? "fail" : "ok", findings };
+}
+
+function httpsUrl(value: string): boolean {
+  try {
+    return new URL(value).protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+async function fetchAsset(url: string, fetcher: AssetFetcher, what: string, judge: (url: string, body: string) => AssetReport): Promise<AssetReport> {
+  let res: { ok: boolean; status: number; body: string };
+  try {
+    res = await fetcher(url);
+  } catch {
+    res = { ok: false, status: 0, body: "" };
+  }
+  if (res.status === 0) {
+    return { url, state: "unreachable", findings: [{ level: "none", text: "The " + what + " could not be fetched from the browser (the server does not allow cross-origin reads); open it by hand to inspect it." }] };
+  }
+  if (!res.ok) return { url, state: "fail", findings: [{ level: "fail", text: "The " + what + " URL answered HTTP " + res.status + "." }] };
+  return judge(url, res.body);
+}
+
+export async function checkBimi(domain: string, resolveTxt: TxtResolver, fetcher: AssetFetcher, dmarcTags: Record<string, string>, now = new Date()): Promise<BimiReport> {
+  const findings: Finding[] = [];
+  const records = bimiRecords(await resolveTxt("default._bimi." + domain));
+  const none: BimiReport = { verdict: "none", record: null, records, tags: {}, logoUrl: null, logo: null, certificate: null, findings };
+  if (records.length === 0) {
+    findings.push({ level: "none", text: "No BIMI record at default._bimi." + domain + ". Optional: only needed to show a brand logo beside messages." });
+    return none;
+  }
+  if (records.length > 1) findings.push({ level: "fail", text: records.length + " BIMI records found; receivers ignore all of them." });
+  const record = records[0]!;
+  const tags = parseTags(record);
+  const l = tags.l ?? "";
+  const a = tags.a ?? "";
+  if (!l && !a) {
+    findings.push({ level: "none", text: "Empty l= and a=: the domain declines to participate in BIMI." });
+    return { ...none, record, tags };
+  }
+  const gate = dmarcEnforces(dmarcTags);
+  findings.push({ level: gate.ok ? "ok" : "fail", text: gate.why });
+  let logo: AssetReport | null = null;
+  let certificate: AssetReport | null = null;
+  if (!l) {
+    findings.push({ level: "fail", text: "No l= logo URL." });
+  } else if (!httpsUrl(l)) {
+    findings.push({ level: "fail", text: "The logo URL must be https." });
+  } else {
+    logo = await fetchAsset(l, fetcher, "logo", judgeLogo);
+  }
+  if (!a) {
+    findings.push({ level: "warn", text: "No a= certificate: Gmail and Apple Mail show logos only with a Verified or Common Mark Certificate." });
+  } else if (!httpsUrl(a)) {
+    findings.push({ level: "fail", text: "The certificate URL must be https." });
+  } else {
+    certificate = await fetchAsset(a, fetcher, "certificate", (u, b) => judgeCertificate(u, b, now));
+  }
+  const all = findings.concat(logo?.findings ?? [], certificate?.findings ?? []);
+  return { verdict: worst(all), record, records, tags, logoUrl: l && httpsUrl(l) ? l : null, logo, certificate, findings };
 }

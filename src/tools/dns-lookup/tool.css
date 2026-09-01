@@ -410,6 +410,48 @@
 }
 .tool-dns-lookup .dkim-extra .note { margin-top: 8px; }
 
+.tool-dns-lookup .bimi-logo {
+  display: block;
+  width: 56px;
+  height: 56px;
+  margin-bottom: 10px;
+  border-radius: 50%;
+  background: #fff;
+  object-fit: contain;
+}
+
+.tool-dns-lookup .asset {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.tool-dns-lookup .asset-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-family: var(--mono);
+  font-size: 12px;
+  min-width: 0;
+}
+.tool-dns-lookup .asset-label {
+  color: var(--text-muted);
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  flex-shrink: 0;
+}
+.tool-dns-lookup .asset-url {
+  color: var(--text);
+  text-decoration: underline;
+  text-decoration-color: var(--border-strong);
+  text-underline-offset: 2px;
+  overflow-wrap: anywhere;
+}
+@media (hover: hover) {
+  .tool-dns-lookup .asset-url:hover { color: var(--accent); text-decoration-color: var(--accent); }
+}
+
 /* Stacked panes: let the host scroll instead of squeezing two scroll areas into one viewport. */
 @media (max-width: 1000px) {
   .tool-dns-lookup .panes { grid-template-columns: 1fr; flex: none; }

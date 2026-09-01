@@ -310,6 +310,13 @@ await page.route(/^https:\/\/api\.certspotter\.com\//, (route) => {
   const body = u.searchParams.get("after") ? [] : dnsFixtures.certspotter_page;
   return route.fulfill({ status: 200, contentType: "application/json", headers: cors, body: JSON.stringify(body) });
 });
+await page.route(/^https:\/\/example\.com\/brand\//, (route) => {
+  const path = new URL(route.request().url()).pathname;
+  dnsHits.push("asset " + path);
+  if (path.endsWith("logo.svg")) return route.fulfill({ status: 200, contentType: "image/svg+xml", headers: cors, body: dnsFixtures.bimi_logo });
+  if (path.endsWith("vmc.pem")) return route.fulfill({ status: 200, contentType: "application/x-pem-file", headers: cors, body: dnsFixtures.bimi_cert });
+  return route.fulfill({ status: 404, headers: cors, body: "" });
+});
 await page.route(/^https:\/\/api\.hackertarget\.com\//, (route) => {
   dnsHits.push("hackertarget " + new URL(route.request().url()).searchParams.get("q"));
   return route.fulfill({ status: 200, contentType: "text/plain", headers: cors, body: dnsFixtures.hackertarget_text });
@@ -408,12 +415,12 @@ const emailStart = dnsHits.length;
 await page.locator(".tool-dns-lookup .btn-email").click();
 await page.waitForFunction(() => document.querySelector(".tool-dns-lookup .status-text")?.textContent?.startsWith("SPF"));
 const emailStatus = (await page.locator(".tool-dns-lookup .status-text").textContent())!;
-check("dns email verdicts", emailStatus.startsWith("SPF ok · DMARC ok · DKIM ok"), emailStatus);
+check("dns email verdicts", emailStatus.startsWith("SPF ok · DMARC ok · DKIM ok · BIMI ok"), emailStatus);
 check("dns email queries MX, SPF and its include, DMARC, and every selector",
-  dnsHits.slice(emailStart).filter((h) => h.endsWith(" TXT")).length === 3 + DKIM_SELECTORS.length && dnsHits.includes("cloudflare-dns.com _spf.example.net TXT") &&
+  dnsHits.slice(emailStart).filter((h) => h.endsWith(" TXT")).length === 4 + DKIM_SELECTORS.length && dnsHits.includes("cloudflare-dns.com _spf.example.net TXT") &&
   dnsHits.includes("cloudflare-dns.com _dmarc.example.com TXT") && dnsHits.includes("cloudflare-dns.com google._domainkey.example.com TXT"),
   String(dnsHits.length - emailStart));
-check("dns email renders the four cards", (await page.locator(".tool-dns-lookup .card").count()) === 4);
+check("dns email renders the five cards", (await page.locator(".tool-dns-lookup .card").count()) === 5);
 check("dns email MX lists the exchangers", (await page.locator('.tool-dns-lookup .card[data-check="mx"] .mx-list li').count()) === 3);
 check("dns email SPF counts lookups through the include",
   (await page.locator('.tool-dns-lookup .card[data-check="spf"]').textContent())!.includes("2 of the 10 allowed DNS lookups"));
@@ -423,6 +430,11 @@ check("dns email DKIM finds the live key and the revoked one",
   (await page.locator('.tool-dns-lookup .card[data-check="dkim"] .dkim-key').count()) === 2 &&
   (await page.locator('.tool-dns-lookup .card[data-check="dkim"]').textContent())!.includes("2048-bit RSA key") &&
   (await page.locator('.tool-dns-lookup .card[data-check="dkim"]').textContent())!.includes("this key is revoked"));
+check("dns email BIMI fetches both assets", dnsHits.includes("asset /brand/logo.svg") && dnsHits.includes("asset /brand/vmc.pem"));
+const bimiText = (await page.locator('.tool-dns-lookup .card[data-check="bimi"]').textContent())!;
+check("dns email BIMI judges the logo and certificate",
+  bimiText.includes("DMARC enforces p=quarantine") && bimiText.includes("SVG Tiny Portable/Secure checks pass") && bimiText.includes("Valid until 2126-08-08"));
+check("dns email BIMI shows the logo", await page.locator(".tool-dns-lookup .bimi-logo").evaluate((img) => (img as HTMLImageElement).naturalWidth > 0 && !(img as HTMLImageElement).hidden));
 check("dns email deep link", await page.evaluate(() => location.hash === "#dns-lookup/cf.00.email.A.example.com"));
 
 // Probing one more selector by hand.

@@ -10,9 +10,43 @@
   "cloudflare_ptr": {"Status":0,"TC":false,"RD":true,"RA":true,"AD":false,"CD":false,"Question":[{"name":"8.8.8.8.in-addr.arpa","type":12}],"Answer":[{"name":"8.8.8.8.in-addr.arpa","type":12,"TTL":85783,"data":"dns.google."}]},
   "cloudflare_https": {"Status":0,"TC":false,"RD":true,"RA":true,"AD":true,"CD":false,"Question":[{"name":"cloudflare.com","type":65}],"Answer":[{"name":"cloudflare.com","type":65,"TTL":49,"data":"1 . alpn=h3,h2 ipv4hint=104.16.132.229,104.16.133.229 ipv6hint=2606:4700::6810:84e5,2606:4700::6810:85e5"}]},
   "certspotter_page": [
-    {"id":"15224312938","tbs_sha256":"2cc6e913","cert_sha256":"20e64153","dns_names":["staging.example.com"],"not_before":"2026-06-05T06:11:15Z","not_after":"2026-09-03T07:09:54Z","revoked":false},
-    {"id":"15226275449","tbs_sha256":"3a3acd64","cert_sha256":"39ade500","dns_names":["example.com","www.example.com","DOCS.example.com."],"not_before":"2026-06-05T08:46:06Z","not_after":"2026-09-03T09:46:01Z","revoked":false},
-    {"id":"15230000001","tbs_sha256":"aa","cert_sha256":"bb","dns_names":["mail.example.com","unrelated.example.org","notexample.com"],"not_before":"2026-06-06T00:00:00Z","not_after":"2026-09-04T00:00:00Z","revoked":false}
+    {
+      "id": "15224312938",
+      "tbs_sha256": "2cc6e913",
+      "cert_sha256": "20e64153",
+      "dns_names": [
+        "staging.example.com"
+      ],
+      "not_before": "2026-06-05T06:11:15Z",
+      "not_after": "2026-09-03T07:09:54Z",
+      "revoked": false
+    },
+    {
+      "id": "15226275449",
+      "tbs_sha256": "3a3acd64",
+      "cert_sha256": "39ade500",
+      "dns_names": [
+        "example.com",
+        "www.example.com",
+        "DOCS.example.com."
+      ],
+      "not_before": "2026-06-05T08:46:06Z",
+      "not_after": "2026-09-03T09:46:01Z",
+      "revoked": false
+    },
+    {
+      "id": "15230000001",
+      "tbs_sha256": "aa",
+      "cert_sha256": "bb",
+      "dns_names": [
+        "mail.example.com",
+        "unrelated.example.org",
+        "notexample.com"
+      ],
+      "not_before": "2026-06-06T00:00:00Z",
+      "not_after": "2026-09-04T00:00:00Z",
+      "revoked": false
+    }
   ],
   "hackertarget_text": "api.example.com,192.0.2.10\nblog.example.com,192.0.2.10\ncdn.example.com,198.51.100.7\nmail.example.com,203.0.113.25\nwww.example.com,192.0.2.10\n",
   "hackertarget_invalid": "error invalid host",
@@ -23,10 +57,26 @@
     "ed25519": "PzeFkvgX+vdhKLRNbSp90UuUIIVBdu0KhKWGY9s0TDQ="
   },
   "txt_by_name": {
-    "example.com": ["\"v=spf1 include:_spf.example.net mx ~all\"", "\"google-site-verification=abc123\""],
-    "_spf.example.net": ["\"v=spf1 ip4:192.0.2.0/24 ip6:2001:db8::/32 -all\""],
-    "_dmarc.example.com": ["\"v=DMARC1; p=quarantine; rua=mailto:dmarc@example.com; pct=100\""],
-    "google._domainkey.example.com": ["\"v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAr95W77w0FzaZfb9nsOUL4rMlNhF+vEduzhy6m2r0CI5TTmWZfOcJu5m5lmUafVrvhNjhyGZV7rnS8+YN9l5EVshzmVqHs8u2dn3ay4X2VNF6RItlS4s5XVxLX+YVlWAos2q0mA27LCo+nd4tLtyEtBWHrL8X\" \"/nmQ7+/6SqIFV3f+LMCQSx4yMx+rOp/co0+bVlk3/8nJKOBVoqPbq4vPDOWMGzMoFPqdfDFnWrU0Fn9rg0VGeg+LTTJyE5ckEFD35SY0fUk1PuqhRXobuAZO6+aexyHoWc8ffVVQh1DpQUNAhjgpZ4cGdMLQ+naz45VUmITKp3G1eNZA1J+xWEaxqwIDAQAB\""],
-    "k1._domainkey.example.com": ["\"v=DKIM1; k=rsa; p=\""]
-  }
+    "example.com": [
+      "\"v=spf1 include:_spf.example.net mx ~all\"",
+      "\"google-site-verification=abc123\""
+    ],
+    "_spf.example.net": [
+      "\"v=spf1 ip4:192.0.2.0/24 ip6:2001:db8::/32 -all\""
+    ],
+    "_dmarc.example.com": [
+      "\"v=DMARC1; p=quarantine; rua=mailto:dmarc@example.com; pct=100\""
+    ],
+    "google._domainkey.example.com": [
+      "\"v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAr95W77w0FzaZfb9nsOUL4rMlNhF+vEduzhy6m2r0CI5TTmWZfOcJu5m5lmUafVrvhNjhyGZV7rnS8+YN9l5EVshzmVqHs8u2dn3ay4X2VNF6RItlS4s5XVxLX+YVlWAos2q0mA27LCo+nd4tLtyEtBWHrL8X\" \"/nmQ7+/6SqIFV3f+LMCQSx4yMx+rOp/co0+bVlk3/8nJKOBVoqPbq4vPDOWMGzMoFPqdfDFnWrU0Fn9rg0VGeg+LTTJyE5ckEFD35SY0fUk1PuqhRXobuAZO6+aexyHoWc8ffVVQh1DpQUNAhjgpZ4cGdMLQ+naz45VUmITKp3G1eNZA1J+xWEaxqwIDAQAB\""
+    ],
+    "k1._domainkey.example.com": [
+      "\"v=DKIM1; k=rsa; p=\""
+    ],
+    "default._bimi.example.com": [
+      "\"v=BIMI1; l=https://example.com/brand/logo.svg; a=https://example.com/brand/vmc.pem\""
+    ]
+  },
+  "bimi_logo": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<svg xmlns=\"http://www.w3.org/2000/svg\" version=\"1.2\" baseProfile=\"tiny-ps\" viewBox=\"0 0 64 64\"><title>Example</title><rect width=\"64\" height=\"64\" fill=\"#c96442\"/></svg>\n",
+  "bimi_cert": "-----BEGIN CERTIFICATE-----\nMIIDMzCCAhugAwIBAgIUFTEedhGJqGvaig4PvUaS6emFlUMwDQYJKoZIhvcNAQEL\nBQAwKDEUMBIGA1UEAwwLZXhhbXBsZS5jb20xEDAOBgNVBAoMB0V4YW1wbGUwIBcN\nMjYwOTAxMjA1MzAyWhgPMjEyNjA4MDgyMDUzMDJaMCgxFDASBgNVBAMMC2V4YW1w\nbGUuY29tMRAwDgYDVQQKDAdFeGFtcGxlMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8A\nMIIBCgKCAQEA2UXAUs+5ytYRLRETLH2VH2lzY1HCf4BLowBcxH4Tpk6EkR7uKUlZ\nZW7UX5emr+8SbxzTnUs+G9A3Fma0H6+bso+vb8Uq638Krtjz2xoqKVNXq+TIXn11\nr0oOXQVbZSaZLOnxcIVRqn5Xub/CGBWf+6oyAjVM5RoG8QWD9UFjUkXwPJtX1BXE\nq6xlAANlM58O5fLMQ/E6+VvNHlZQPkwMyy35Vl3GJkjdSnYfFshsTn6YG5FTCxNI\n4rQvB3/Qc+GqcS0C7r2TBesshK3z4uTkD3p9Bj2FAqXQ72wApYSml2fpae9ZP5SH\nKbJ9b5SSnzkcwDhHA9cm2+y+zmyT9urHLwIDAQABo1MwUTAdBgNVHQ4EFgQUn4iz\nml/8ErzYa/+T+csibbBBJ0cwHwYDVR0jBBgwFoAUn4izml/8ErzYa/+T+csibbBB\nJ0cwDwYDVR0TAQH/BAUwAwEB/zANBgkqhkiG9w0BAQsFAAOCAQEAr6jBRSaaRuc0\nLHIHDlpRj0JzHADZ2VE2QQUzMyInvLDk0EyzfeMZIPB9ItMBCp6LqbB7GDrsSoqA\nZ5S2spJSvzlUJP0krNQXsmShlgwrFjAa48VaSILqEFiEflsWgoDzhZt+UzSdYE4M\nUpHd+OyxQ7fZRYPB6G0hAgDpQj/6Ixk8fpmQcthq6DPSoS+SD30UD9JbF/pfKXps\n2zXO38rHZxPrEG6Szfb6p1JD5ai57T+Vc0u1MEwtc9iPEvljV4Babcj8EzKsPlZB\nw8H4pBiX+rxn69U76jn+oRZcyfqJ+l79IiMBD5HzN9vITsDxEJautOU5Yi3/iPq1\n95qWD5hxcw==\n-----END CERTIFICATE-----\n"
 }

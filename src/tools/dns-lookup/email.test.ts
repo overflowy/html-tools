@@ -2,8 +2,8 @@
 // The DKIM keys in fixtures.json are throwaway keys generated with openssl.
 import { describe, expect, test } from "bun:test";
 import {
-  checkDkim, checkDkimSelector, checkDmarc, checkSpf, dkimRecords, evaluateDkimKey, evaluateMx, parseTags,
-  rsaBits, unquoteTxt, type Runner, type TxtResolver,
+  certValidity, checkBimi, checkDkim, checkDkimSelector, checkDmarc, checkSpf, dkimRecords, dmarcEnforces,
+  evaluateDkimKey, evaluateMx, judgeCertificate, judgeLogo, parseTags, rsaBits, unquoteTxt, type Runner, type TxtResolver,
 } from "./email";
 import fixtures from "./fixtures.json";
 
@@ -199,5 +199,82 @@ describe("MX", () => {
     expect(evaluateMx(["0 ."]).verdict).toBe("none");
     expect(evaluateMx(["0 ."]).findings[0]!.text).toContain("does not receive mail");
     expect(evaluateMx([]).verdict).toBe("warn");
+  });
+});
+
+describe("BIMI", () => {
+  const enforcing = { v: "DMARC1", p: "reject", rua: "mailto:d@example.com" };
+  const assets: Record<string, string> = {
+    "https://example.com/brand/logo.svg": fixtures.bimi_logo,
+    "https://example.com/brand/vmc.pem": fixtures.bimi_cert,
+  };
+  const fetcher = async (url: string) => {
+    if (url === "https://example.com/missing.svg") return { ok: false, status: 404, body: "" };
+    if (url === "https://example.com/blocked.svg") return { ok: false, status: 0, body: "" };
+    return { ok: url in assets, status: url in assets ? 200 : 404, body: assets[url] ?? "" };
+  };
+  const bimiZone = (record: string) => zone({ "default._bimi.example.com": [record] });
+
+  test("no record is n/a, not a failure", async () => {
+    const r = await checkBimi("example.com", zone({}), fetcher, enforcing);
+    expect(r.verdict).toBe("none");
+  });
+  test("declined participation", async () => {
+    const r = await checkBimi("example.com", bimiZone("v=BIMI1; l=; a="), fetcher, enforcing);
+    expect(r.verdict).toBe("none");
+    expect(r.findings.some((f) => f.text.includes("declines"))).toBe(true);
+  });
+  test("full record with reachable logo and certificate is ok", async () => {
+    const r = await checkBimi("example.com", bimiZone("v=BIMI1; l=https://example.com/brand/logo.svg; a=https://example.com/brand/vmc.pem"), fetcher, enforcing);
+    expect(r.verdict).toBe("ok");
+    expect(r.logoUrl).toBe("https://example.com/brand/logo.svg");
+    expect(r.logo!.state).toBe("ok");
+    expect(r.certificate!.state).toBe("ok");
+    expect(r.certificate!.findings[0]!.text).toContain("Valid until 2126-08-08");
+  });
+  test("DMARC gate", () => {
+    expect(dmarcEnforces({ p: "none" }).ok).toBe(false);
+    expect(dmarcEnforces({ p: "quarantine", pct: "50" }).ok).toBe(false);
+    expect(dmarcEnforces({ p: "reject", sp: "none" }).ok).toBe(false);
+    expect(dmarcEnforces({ p: "reject", sp: "quarantine", pct: "100" }).ok).toBe(true);
+    expect(dmarcEnforces({}).ok).toBe(false);
+  });
+  test("unenforced DMARC fails the check even with good assets", async () => {
+    const r = await checkBimi("example.com", bimiZone("v=BIMI1; l=https://example.com/brand/logo.svg"), fetcher, { p: "none" });
+    expect(r.verdict).toBe("fail");
+    expect(r.findings.some((f) => f.level === "warn" && f.text.includes("No a= certificate"))).toBe(true);
+  });
+  test("http logo, missing logo, unreachable logo", async () => {
+    expect((await checkBimi("example.com", bimiZone("v=BIMI1; l=http://example.com/logo.svg"), fetcher, enforcing)).findings.some((f) => f.text.includes("must be https"))).toBe(true);
+    const missing = await checkBimi("example.com", bimiZone("v=BIMI1; l=https://example.com/missing.svg"), fetcher, enforcing);
+    expect(missing.logo!.state).toBe("fail");
+    expect(missing.logo!.findings[0]!.text).toContain("HTTP 404");
+    const blocked = await checkBimi("example.com", bimiZone("v=BIMI1; l=https://example.com/blocked.svg"), fetcher, enforcing);
+    expect(blocked.logo!.state).toBe("unreachable");
+    expect(blocked.verdict).toBe("warn");
+  });
+  test("logo profile checks", () => {
+    const ok = judgeLogo("u", fixtures.bimi_logo);
+    expect(ok.state).toBe("ok");
+    const bad = judgeLogo("u", '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 32"><script>alert(1)</script><image href="https://x/y.png"/></svg>');
+    expect(bad.state).toBe("fail");
+    const texts = bad.findings.map((f) => f.text).join("\n");
+    expect(texts).toContain("baseProfile");
+    expect(texts).toContain("<title>");
+    expect(texts).toContain("<script>");
+    expect(texts).toContain("<image>");
+    expect(texts).toContain("external resource");
+    expect(texts).toContain("not square");
+    expect(judgeLogo("u", "<html></html>").state).toBe("fail");
+  });
+  test("certificate validity parses UTCTime and GeneralizedTime and judges dates", () => {
+    const v = certValidity(fixtures.bimi_cert)!;
+    expect(v.notBefore.toISOString().slice(0, 10)).toBe("2026-09-01");
+    expect(v.notAfter.toISOString().slice(0, 10)).toBe("2126-08-08");
+    expect(judgeCertificate("u", fixtures.bimi_cert, new Date("2126-07-20")).findings[0]!.level).toBe("warn");
+    expect(judgeCertificate("u", fixtures.bimi_cert, new Date("2127-01-01")).state).toBe("fail");
+    expect(judgeCertificate("u", fixtures.bimi_cert, new Date("2020-01-01")).findings[0]!.text).toContain("not valid until");
+    expect(judgeCertificate("u", "not a cert").state).toBe("fail");
+    expect(certValidity("-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----")).toBeNull();
   });
 });
