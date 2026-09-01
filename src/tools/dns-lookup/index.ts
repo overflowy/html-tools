@@ -9,9 +9,13 @@ import {
   checkBimi, checkDkim, checkDkimSelector, checkDmarc, checkSpf, evaluateMx, unquoteTxt,
   type AssetFetcher, type AssetReport, type BimiReport, type DkimKey, type Finding, type TxtResolver, type Verdict,
 } from "./email";
+import {
+  BOOTSTRAP_URLS, ianaTldPage, judgeDomain, judgeWhoisText, loadBootstrap, lookupDomain, lookupIp, lookupWhoisText, rdapFetch,
+  type Contact, type DomainInfo, type IpInfo, type RdapFetch, type TextFetch, type WhoisText,
+} from "./rdap";
 
-type Action = "lookup" | "all" | "subs" | "email";
-const ACTIONS = new Set<string>(["lookup", "all", "subs", "email"]);
+type Action = "lookup" | "all" | "subs" | "email" | "whois";
+const ACTIONS = new Set<string>(["lookup", "all", "subs", "email", "whois"]);
 
 /** Lookups in flight at once during All Types. */
 const CONCURRENCY = 4;
@@ -89,6 +93,53 @@ function bimiHtml(b: BimiReport): string {
   return logo + recordLine(b.record) + findingsHtml(b.findings) + assetHtml("logo", b.logo) + assetHtml("certificate", b.certificate);
 }
 
+function contactHtml(c: Contact | null): string {
+  if (!c) return "";
+  const parts = [c.name, c.email ? '<a href="mailto:' + esc(c.email) + '">' + esc(c.email) + "</a>" : "", c.phone].filter(Boolean);
+  return parts.join(" · ");
+}
+
+/** A definition-list row; skipped entirely when there is nothing to show. */
+function row(label: string, valueHtml: string): string {
+  return valueHtml ? "<dt>" + label + "</dt><dd>" + valueHtml + "</dd>" : "";
+}
+
+function registryLink(url: string): string {
+  return '<a class="asset-url" href="' + esc(url) + '" target="_blank" rel="noreferrer">' + esc(new URL(url).host) + "</a>";
+}
+
+function domainInfoHtml(info: DomainInfo): string {
+  const registrar = info.registrar
+    ? esc(info.registrar.name || "unnamed") + (info.registrar.ianaId ? ' <span class="muted">(IANA ID ' + esc(info.registrar.ianaId) + ")</span>" : "")
+    : "";
+  return '<dl class="facts">' +
+    row("registrar", registrar) +
+    row("abuse contact", contactHtml(info.registrar?.abuse ?? null)) +
+    row("registrant", contactHtml(info.registrant)) +
+    row("nameservers", info.nameservers.map(esc).join("<br>")) +
+    row("registry", registryLink(info.url)) +
+    "</dl>";
+}
+
+function ipInfoHtml(info: IpInfo): string {
+  const range = info.cidrs.length ? info.cidrs.join(", ") : info.start + " – " + info.end;
+  return '<dl class="facts">' +
+    row("network", esc(range) + (info.name ? ' <span class="muted">' + esc(info.name) + "</span>" : "")) +
+    row("holder", contactHtml(info.holder)) +
+    row("country", esc(info.country)) +
+    row("allocation", esc(info.type)) +
+    row("status", info.status.map(esc).join(", ")) +
+    row("abuse contact", contactHtml(info.abuse)) +
+    row("registry", registryLink(info.url)) +
+    "</dl>";
+}
+
+function whoisTextHtml(w: WhoisText): string {
+  return '<dl class="facts">' +
+    row("registrar", esc(w.registrar)) +
+    "</dl>";
+}
+
 /** One check's card: title, verdict, the record as published, and what we make of it. */
 function cardHtml(id: string, title: string, verdict: Verdict, body: string): string {
   return '<section class="card" data-check="' + id + '"><div class="card-head"><span class="card-title">' + title + "</span>" +
@@ -121,8 +172,8 @@ function responseHtml(name: string, type: string, r: DnsResponse, withAuthority:
 const tool: Tool = {
   id: "dns-lookup",
   name: "DNS Lookup",
-  subtitle: "Query DNS records through Cloudflare or Google DNS-over-HTTPS, list subdomains from certificate logs, check email authentication.",
-  keywords: ["dns", "lookup", "dig", "nslookup", "domain", "records", "mx", "txt", "cname", "nameserver", "ns", "subdomains", "reverse", "ptr", "doh", "dnssec", "resolver", "ip", "email", "spf", "dmarc", "dkim", "mail"],
+  subtitle: "Query DNS records through Cloudflare or Google DNS-over-HTTPS, list subdomains, check email authentication, read whois data over RDAP.",
+  keywords: ["dns", "lookup", "dig", "nslookup", "domain", "records", "mx", "txt", "cname", "nameserver", "ns", "subdomains", "reverse", "ptr", "doh", "dnssec", "resolver", "ip", "email", "spf", "dmarc", "dkim", "bimi", "mail", "whois", "rdap", "registrar", "expiry"],
   mount(el, ctx) {
     const typeOptions = TYPE_GROUPS.map((g) =>
       '<optgroup label="' + g.label + '">' + g.types.map((t) => '<option value="' + t + '">' + t + "</option>").join("") + "</optgroup>").join("");
@@ -139,6 +190,7 @@ const tool: Tool = {
           <button class="btn-all" type="button">All types</button>
           <button class="btn-subs" type="button">Subdomains</button>
           <button class="btn-email" type="button">Email</button>
+          <button class="btn-whois" type="button">Whois</button>
           <button class="btn-lookup primary" type="button">Lookup</button>
         </div>
       </div>
@@ -501,8 +553,124 @@ const tool: Tool = {
       }
     }
 
+    /** RDAP GET that keeps every registry answer for the raw pane (the bootstrap files are just plumbing). */
+    function recordingRdap(raw: Record<string, unknown>, signal: AbortSignal): RdapFetch {
+      return async (url) => {
+        const res = await rdapFetch(url, signal);
+        if (res.json !== null && !url.startsWith("https://data.iana.org/")) raw[url] = res.json;
+        return res;
+      };
+    }
+
+    async function runWhois() {
+      const q = prepare("whois");
+      if (!q) return;
+      const ctrl = begin();
+      const isIp = reverseName(q.name) !== null;
+      $resultsTitle.textContent = "whois for " + q.name;
+      $flags.innerHTML = "";
+      $results.innerHTML = '<p class="note">Asking the registry…</p>';
+      showRaw(undefined);
+      setStatus("", "Looking up " + q.name + " in RDAP…");
+      const started = performance.now();
+      const raw: Record<string, unknown> = {};
+      const fetcher = recordingRdap(raw, ctrl.signal);
+      try {
+        if (isIp) {
+          const bootstrap = await loadBootstrap(q.name.includes(":") ? BOOTSTRAP_URLS.ipv6 : BOOTSTRAP_URLS.ipv4, fetcher);
+          const res = await lookupIp(q.name, bootstrap, fetcher);
+          if (ctrl.signal.aborted) return;
+          if (res.kind === "error") throw new LookupError(res.message);
+          const info = res.info;
+          const events = info.events.map((e) => ({ level: "none" as Verdict, text: e.action + " " + e.date.slice(0, 10) + "." }));
+          $results.innerHTML = cardHtml("whois", "IP NETWORK", "none", ipInfoHtml(info) + findingsHtml(events));
+          showRaw(raw);
+          setStatus("ok", (info.holder?.name || info.name || info.handle) + " · " + (info.cidrs[0] ?? info.handle) + " · " + Math.round(performance.now() - started) + " ms");
+          return;
+        }
+        const bootstrap = await loadBootstrap(BOOTSTRAP_URLS.dns, fetcher);
+        const res = await lookupDomain(q.name, bootstrap, fetcher);
+        if (ctrl.signal.aborted) return;
+        if (res.kind === "error" && !res.unreadable) throw new LookupError(res.message);
+        if (res.kind === "no-rdap" || res.kind === "error") {
+          // No browser-readable RDAP for this TLD: fall back to raw WHOIS through a proxy.
+          await runWhoisText(q.name, res.kind === "no-rdap" ? res.tld : q.name.split(".").pop()!, ctrl, raw, started);
+          return;
+        }
+        if (res.kind === "not-found") {
+          $results.innerHTML = cardHtml("whois", "WHOIS", "none",
+            '<p class="note">The registry has no record for ' + esc(res.tried.at(-1)!) + ": it is not registered, or the registry knows it under a different name.</p>");
+          showRaw(raw);
+          setStatus("", "Not registered · " + Math.round(performance.now() - started) + " ms");
+          return;
+        }
+        // The zone's own NS set, for comparison with what the registry delegates to.
+        let zoneNs: string[] | null = null;
+        try {
+          const ns = await lookup(q.resolver, res.info.name, "NS", q.opts, ctrl.signal);
+          raw[res.info.name + " NS"] = ns.response;
+          zoneNs = ns.response.Answer.filter((r) => r.type === 2).map((r) => r.data);
+        } catch {
+          // No NS comparison then; the registry data still stands on its own.
+        }
+        if (ctrl.signal.aborted) return;
+        const report = judgeDomain(res.info, zoneNs);
+        const walked = res.tried.length > 1
+          ? '<p class="note">Registered name: ' + esc(res.info.name) + " (looked up on behalf of " + esc(q.name) + ").</p>"
+          : "";
+        $results.innerHTML = cardHtml("whois", "WHOIS", report.verdict, walked + domainInfoHtml(res.info) + findingsHtml(report.findings));
+        showRaw(raw);
+        const expiry = report.findings.find((f) => f.text.startsWith("Expires") || f.text.startsWith("Expired"));
+        setStatus(report.verdict === "fail" ? "error" : "ok",
+          (res.info.registrar?.name ? "registrar " + res.info.registrar.name : "registered") +
+          (expiry ? " · " + expiry.text.replace(/\.$/, "").toLowerCase() : "") + " · " + Math.round(performance.now() - started) + " ms");
+      } catch (e) {
+        fail(ctrl, e);
+      } finally {
+        finish(ctrl);
+      }
+    }
+
+    function textFetcher(signal: AbortSignal): TextFetch {
+      return async (url) => {
+        try {
+          const res = await fetch(url, { signal });
+          return { status: res.status, text: await res.text() };
+        } catch (e) {
+          if (signal.aborted) throw e;
+          return { status: 0, text: "" };
+        }
+      };
+    }
+
+    /** Raw WHOIS via the whois.vu proxy, for TLDs whose registry offers no RDAP a browser can read. */
+    async function runWhoisText(name: string, tld: string, ctrl: AbortController, raw: Record<string, unknown>, started: number) {
+      setStatus("", "No RDAP for ." + tld + "; asking the WHOIS proxy…");
+      let w: WhoisText;
+      try {
+        w = await lookupWhoisText(name, textFetcher(ctrl.signal));
+      } catch (e) {
+        if (ctrl.signal.aborted) return;
+        $results.innerHTML = cardHtml("whois", "WHOIS", "none",
+          '<p class="note">The .' + esc(tld) + " registry publishes no RDAP a browser can read, and the WHOIS proxy failed: " + esc((e as Error).message) + " " +
+          '<a class="asset-url" href="' + esc(ianaTldPage(name)) + '" target="_blank" rel="noreferrer">IANA\'s page for .' + esc(tld) + "</a> names the registry's WHOIS server.</p>");
+        setStatus("error", "No RDAP for ." + tld + " and the WHOIS proxy failed");
+        return;
+      }
+      if (ctrl.signal.aborted) return;
+      raw["whois.vu " + name] = w;
+      const report = judgeWhoisText(w);
+      $results.innerHTML = cardHtml("whois", "RAW WHOIS", report.verdict,
+        whoisTextHtml(w) + findingsHtml(report.findings) + '<pre class="whois-text">' + esc(w.text) + "</pre>");
+      showRaw(raw);
+      setStatus(report.verdict === "fail" ? "error" : w.available === true ? "" : "ok",
+        (w.available === true ? "not registered" : w.registrar ? "registrar " + w.registrar : "registered") +
+        (w.expires ? " · expires " + w.expires : "") + " · raw WHOIS via whois.vu · " + Math.round(performance.now() - started) + " ms");
+    }
+
     function run(action: Action) {
       if (action === "all") void runAll();
+      else if (action === "whois") void runWhois();
       else if (action === "email") void runEmail();
       else if (action === "subs") void runSubdomains();
       else void runLookup();
@@ -545,6 +713,7 @@ const tool: Tool = {
     $(".btn-all").addEventListener("click", () => run("all"));
     $(".btn-subs").addEventListener("click", () => run("subs"));
     $(".btn-email").addEventListener("click", () => run("email"));
+    $(".btn-whois").addEventListener("click", () => run("whois"));
 
     // A subdomain row is a shortcut to looking that name up; the DKIM probe lives in the results too.
     $results.addEventListener("click", (e) => {

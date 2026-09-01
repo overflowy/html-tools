@@ -452,6 +452,47 @@
   .tool-dns-lookup .asset-url:hover { color: var(--accent); text-decoration-color: var(--accent); }
 }
 
+/* ---- whois facts ---- */
+
+.tool-dns-lookup .facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 14px;
+  margin: 0 0 10px;
+  font-size: 12.5px;
+}
+.tool-dns-lookup .facts dt {
+  color: var(--text-muted);
+  font-family: var(--mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding-top: 2px;
+}
+.tool-dns-lookup .facts dd {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.tool-dns-lookup .facts a { color: var(--text); text-decoration: underline; text-decoration-color: var(--border-strong); text-underline-offset: 2px; }
+.tool-dns-lookup .muted { color: var(--text-muted); }
+
+.tool-dns-lookup .whois-text {
+  margin: 10px 0 0;
+  padding: 10px;
+  max-height: 60vh;
+  overflow: auto;
+  background: var(--bg);
+  border-radius: var(--radius-sm);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--text-muted);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 /* Stacked panes: let the host scroll instead of squeezing two scroll areas into one viewport. */
 @media (max-width: 1000px) {
   .tool-dns-lookup .panes { grid-template-columns: 1fr; flex: none; }
@@ -462,6 +503,8 @@
 
 @media (max-width: 767px) {
   .tool-dns-lookup .name { flex-basis: 100%; }
+  .tool-dns-lookup .facts { grid-template-columns: 1fr; gap: 2px; }
+  .tool-dns-lookup .facts dd { margin-bottom: 6px; }
   .tool-dns-lookup .actions { flex-wrap: wrap; }
   .tool-dns-lookup .group-flags { display: none; }
 }

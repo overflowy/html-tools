@@ -286,13 +286,18 @@ await page.route(/^https:\/\/(cloudflare-dns\.com|security\.cloudflare-dns\.com|
   const name = u.searchParams.get("name");
   // Known types travel as numbers; map the ones this test dispatches on back to names.
   const wire = u.searchParams.get("type")!;
-  const type = ({ "1": "A", "12": "PTR", "15": "MX", "16": "TXT", "33": "SRV" } as Record<string, string>)[wire] ?? wire;
+  const type = ({ "1": "A", "2": "NS", "12": "PTR", "15": "MX", "16": "TXT", "33": "SRV" } as Record<string, string>)[wire] ?? wire;
   dnsHits.push(u.host + " " + name + " " + type + (u.searchParams.get("do") ? " do" : ""));
   let body: unknown;
   if (name === "doesnotexist.example.com") body = dnsFixtures.cloudflare_nxdomain;
   else if (name === "8.8.8.8.in-addr.arpa") body = dnsFixtures.cloudflare_ptr;
   else if (type === "A") body = u.host === "dns.google" ? dnsFixtures.google_a : dnsFixtures.cloudflare_a;
   else if (type === "MX") body = dnsFixtures.cloudflare_mx;
+  else if (type === "NS" && name === "example.com") {
+    // Matches the delegation in the RDAP fixture, so the whois card can report agreement.
+    body = { ...dnsFixtures.cloudflare_empty, Question: [{ name, type: 2 }], Authority: [],
+      Answer: ["elliott.ns.cloudflare.com.", "hera.ns.cloudflare.com."].map((data) => ({ name, type: 2, TTL: 300, data })) };
+  }
   else if (type === "TXT") {
     // TXT is served per name so the email check sees SPF, DMARC, and DKIM where they belong and nothing elsewhere.
     const strings = (dnsFixtures.txt_by_name as Record<string, string[]>)[name ?? ""];
@@ -316,6 +321,26 @@ await page.route(/^https:\/\/example\.com\/brand\//, (route) => {
   if (path.endsWith("logo.svg")) return route.fulfill({ status: 200, contentType: "image/svg+xml", headers: cors, body: dnsFixtures.bimi_logo });
   if (path.endsWith("vmc.pem")) return route.fulfill({ status: 200, contentType: "application/x-pem-file", headers: cors, body: dnsFixtures.bimi_cert });
   return route.fulfill({ status: 404, headers: cors, body: "" });
+});
+await page.route(/^https:\/\/(data\.iana\.org|rdap\.verisign\.com|rdap\.arin\.net)\//, (route) => {
+  const u = new URL(route.request().url());
+  dnsHits.push("rdap " + u.host + u.pathname);
+  const bodies: Record<string, unknown> = {
+    "data.iana.org/rdap/dns.json": dnsFixtures.rdap_bootstrap_dns,
+    "data.iana.org/rdap/ipv4.json": dnsFixtures.rdap_bootstrap_ipv4,
+    "data.iana.org/rdap/ipv6.json": dnsFixtures.rdap_bootstrap_ipv6,
+    "rdap.verisign.com/com/v1/domain/example.com": dnsFixtures.rdap_domain,
+    "rdap.arin.net/registry/ip/8.8.8.8": dnsFixtures.rdap_ip,
+  };
+  const body = bodies[u.host + u.pathname];
+  // Unknown names get an RDAP-shaped 404 body, but a 200 status: Chromium logs a console error for
+  // any 404 and this harness treats console errors as failures. The tool keys off the status alone,
+  // so the walk-up path is covered in the unit tests instead.
+  return route.fulfill({ status: 200, contentType: "application/rdap+json", headers: cors, body: JSON.stringify(body ?? { errorCode: 404 }) });
+});
+await page.route(/^https:\/\/api\.whois\.vu\//, (route) => {
+  dnsHits.push("whois.vu " + new URL(route.request().url()).searchParams.get("q"));
+  return route.fulfill({ status: 200, contentType: "text/plain", headers: cors, body: JSON.stringify(dnsFixtures.whois_text) });
 });
 await page.route(/^https:\/\/api\.hackertarget\.com\//, (route) => {
   dnsHits.push("hackertarget " + new URL(route.request().url()).searchParams.get("q"));
@@ -392,7 +417,7 @@ check("dns all types queries the 14 common types", dnsHits.length - allStart ===
 check("dns all types renders a group per type", (await page.locator(".tool-dns-lookup .group").count()) === 14);
 check("dns all types opens groups with records", await page.locator('.tool-dns-lookup .group[data-type="MX"]').evaluate((d) => (d as HTMLDetailsElement).open) &&
   !(await page.locator('.tool-dns-lookup .group[data-type="SRV"]').evaluate((d) => (d as HTMLDetailsElement).open)));
-check("dns all types summarises", (await page.locator(".tool-dns-lookup .status-text").textContent())!.startsWith("14 types · 7 records"));
+check("dns all types summarises", (await page.locator(".tool-dns-lookup .status-text").textContent())!.startsWith("14 types · 9 records"));
 check("dns all types deep link", await page.evaluate(() => location.hash === "#dns-lookup/cf.00.all.A.example.com"));
 
 // Subdomains: both sources queried, union rendered, www. dropped, a row click looks that name up.
@@ -446,6 +471,37 @@ await page.locator(".tool-dns-lookup .dkim-selector").fill("google");
 await page.locator(".tool-dns-lookup .dkim-selector").press("Enter");
 await page.waitForFunction(() => document.querySelector(".tool-dns-lookup .status-text")?.textContent?.startsWith("Key found at selector google"));
 check("dns email DKIM probe renders a found key", (await page.locator(".tool-dns-lookup .dkim-extra .dkim-key").count()) === 1);
+
+// Whois over RDAP: the registry answer for a domain, cross-checked against the zone's NS set, and an IP network.
+await page.locator(".tool-dns-lookup .name").fill("example.com");
+await page.locator(".tool-dns-lookup .btn-whois").click();
+await page.waitForFunction(() => document.querySelector(".tool-dns-lookup .status-text")?.textContent?.startsWith("registrar "));
+const whoisText = (await page.locator('.tool-dns-lookup .card[data-check="whois"]').textContent())!;
+check("dns whois loads the bootstrap and asks the registry",
+  dnsHits.includes("rdap data.iana.org/rdap/dns.json") && dnsHits.includes("rdap rdap.verisign.com/com/v1/domain/example.com"));
+check("dns whois shows registrar and abuse contact", whoisText.includes("IANA ID 376") && whoisText.includes("abuse@registrar.example"));
+check("dns whois judges expiry, locks, and DNSSEC",
+  whoisText.includes("Expires on 2099-08-13") && whoisText.includes("Registrar lock against transfers") && whoisText.includes("delegation is signed (1 DS record at the registry)"));
+check("dns whois compares registry delegation with the zone", whoisText.includes("Nameservers at the registry match the zone's NS records"));
+check("dns whois verdict", (await page.locator('.tool-dns-lookup .card[data-check="whois"] .card-head .verdict').textContent()) === "ok");
+check("dns whois deep link", await page.evaluate(() => location.hash === "#dns-lookup/cf.00.whois.A.example.com"));
+check("dns whois raw pane skips the bootstrap", !(await page.locator(".tool-dns-lookup .raw").textContent())!.includes("data.iana.org"));
+
+await page.locator(".tool-dns-lookup .name").fill("8.8.8.8");
+await page.locator(".tool-dns-lookup .btn-whois").click();
+await page.waitForFunction(() => document.querySelector(".tool-dns-lookup .status-text")?.textContent?.startsWith("Google LLC"));
+const ipText = (await page.locator('.tool-dns-lookup .card[data-check="whois"]').textContent())!;
+check("dns whois IP goes to the RIR from the ipv4 bootstrap", dnsHits.includes("rdap rdap.arin.net/registry/ip/8.8.8.8"));
+check("dns whois IP shows the network and holder", ipText.includes("8.8.8.0/24") && ipText.includes("Google LLC") && ipText.includes("network-abuse@google.com"));
+
+// A TLD without RDAP falls back to raw WHOIS through the proxy.
+await page.locator(".tool-dns-lookup .name").fill("google.it");
+await page.locator(".tool-dns-lookup .btn-whois").click();
+await page.waitForFunction(() => document.querySelector(".tool-dns-lookup .status-text")?.textContent?.includes("raw WHOIS via whois.vu"));
+const rawWhois = (await page.locator('.tool-dns-lookup .card[data-check="whois"]').textContent())!;
+check("dns whois falls back to the proxy for a TLD without RDAP", dnsHits.includes("whois.vu google.it") && !dnsHits.some((h) => h.includes("/domain/google.it")));
+check("dns whois fallback shows parsed fields and the registry text",
+  rawWhois.includes("MarkMonitor International Limited") && rawWhois.includes("Expires on 2099-04-21") && rawWhois.includes("Nameservers\n  ns1.google.com"));
 
 // A DNS deep link restores every control and runs the query on load.
 await page.goto("about:blank");
