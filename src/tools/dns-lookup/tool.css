@@ -238,6 +238,8 @@
 @media (hover: hover) {
   .tool-dns-lookup button.link:hover { background: none; color: var(--accent); text-decoration-color: var(--accent); }
 }
+/* A text link gets no pressed face; the drop is enough. */
+.tool-dns-lookup button.link:active { background: none; }
 .tool-dns-lookup .subs .c-name { color: var(--text); }
 
 /* ---- all types groups ---- */

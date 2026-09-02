@@ -68,7 +68,7 @@ body { overflow: hidden; }
   margin: -6px -6px -6px 0;
   color: var(--text-muted);
   border-color: transparent;
-  transition: color 0.15s, opacity 0.1s, transform 0.05s;
+  transition: color 0.15s, opacity 0.1s;
 }
 .collapse-btn svg { width: 16px; height: 16px; }
 @media (hover: hover) {
@@ -81,7 +81,7 @@ body { overflow: hidden; }
 body.sidebar-collapsed .collapse-btn {
   opacity: 0;
   visibility: hidden;
-  transition: color 0.15s, opacity 0.1s, transform 0.05s, visibility 0s 0.1s;
+  transition: color 0.15s, opacity 0.1s, visibility 0s 0.1s;
 }
 
 .filter-wrap { position: relative; }

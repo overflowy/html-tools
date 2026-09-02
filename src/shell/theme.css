@@ -70,10 +70,8 @@ button {
   border: 0.5px solid var(--border-strong);
   border-radius: var(--radius-md);
   cursor: pointer;
-  transition: background 0.15s, filter 0.15s, transform 0.05s;
+  transition: background 0.15s, filter 0.15s;
 }
-
-button:active { transform: scale(0.96); }
 
 button.primary {
   background: var(--accent);
@@ -88,6 +86,13 @@ button.primary {
   button:hover { background: var(--surface-2); }
   button.primary:hover { background: var(--accent); filter: brightness(1.08); }
 }
+
+/* Press: a 1px drop and a darker face, applied instantly. Not a scale:
+   scaling resamples the 0.5px border at a fractional size and its curves
+   come out ragged, while a whole-pixel translate leaves it untouched.
+   After the hover rules so the pressed face wins while hovered. */
+button:active { transform: translateY(1px); background: var(--surface-3); transition: none; }
+button.primary:active { background: var(--accent); filter: brightness(0.92); }
 
 textarea {
   font-family: var(--mono);
