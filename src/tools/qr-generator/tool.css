@@ -147,17 +147,8 @@
 .tool-qr-generator .f-text:focus {
   border: none;
   box-shadow: none;
+  outline: none;
 }
-/* The pane clips its rounded corners, so the focus ring lives on the pane
-   border rather than inside the textarea. Only for the bare textarea: the
-   other forms' fields carry their own rings. */
-.tool-qr-generator .pane:has(.f-text:focus) {
-  outline: var(--ring-line);
-  outline-offset: -1px;
-  border-color: transparent;
-  box-shadow: var(--ring-halo);
-}
-
 .tool-qr-generator .field {
   display: flex;
   flex-direction: column;

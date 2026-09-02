@@ -31,7 +31,7 @@ function check(label: string, ok: boolean, detail = "") {
 
 await page.goto(url);
 const names = await page.locator(".tool-list button").allTextContents();
-check("sidebar lists all tools", names.length === 9, names.join(", "));
+check("sidebar lists all tools", names.length === 10, names.join(", "));
 
 // base64 tool: paste a tiny valid png via direct input.
 await page.goto(url + "#base64-to-image");
@@ -894,6 +894,125 @@ await page.locator(".tool-whoami .btn-refresh").click();
 await page.waitForFunction(() => !document.querySelector(".tool-whoami .value.pending"));
 check("whoami shows both countries when the traces disagree",
   (await whoamiValue("country"))!.startsWith("IT · Italy via IPv4, DE · Germany via IPv6"), (await whoamiValue("country")) ?? "");
+
+// Markdown Editor: the welcome Draft on a first visit, Preview with Contents
+// open, then edits that reach the preview, the stats, the draft, and the Deep
+// Link. Math and diagrams fetch their Engines over the real CDN from file://,
+// and a second visit fetches nothing. Contents jumps and follows the scroll;
+// the Light Document is a Preference that survives a reload.
+await page.goto("about:blank");
+await page.goto(url + "#markdown-editor");
+const mv = ".tool-markdown-editor ";
+const mvHost = () => page.locator(mv.trim());
+await page.waitForSelector(mv + ".doc h1");
+check("markdown editor opens in Preview with Contents open",
+  (await mvHost().getAttribute("data-view")) === "preview" &&
+  (await mvHost().evaluate((el) => el.classList.contains("toc-open"))) &&
+  (await page.locator(mv + ".toc-link").count()) >= 8 &&
+  (await page.locator(mv + ".doc h1").textContent()) === "Markdown Editor");
+check("welcome draft renders a table, a task list, a callout, highlighted code, and a footnote",
+  (await page.locator(mv + ".doc table").count()) === 1 &&
+  (await page.locator(mv + ".doc li.task input[type=checkbox]").count()) === 2 &&
+  (await page.locator(mv + ".doc blockquote.callout-tip .callout-title").textContent()) === "Tip" &&
+  (await page.locator(mv + ".doc pre code.hljs .hljs-keyword").count()) >= 1 &&
+  (await page.locator(mv + ".doc .footnotes li").count()) === 1);
+
+// Engines: the welcome Draft has math and a diagram, so both load, from the CDN the first time.
+await page.waitForFunction(() => document.querySelectorAll(".tool-markdown-editor .doc .katex").length >= 2, null, { timeout: 120000 });
+await page.waitForFunction(() => document.querySelector(".tool-markdown-editor .doc .mermaid-block svg"), null, { timeout: 120000 });
+check("math and diagrams render once their engines load", true);
+
+// Contents: a click jumps, the entry for the heading at the top is highlighted.
+await page.locator(mv + ".toc-link[data-id='md-callouts']").click();
+await page.waitForFunction(() => document.querySelector(".tool-markdown-editor .toc-link.active")?.getAttribute("data-id") === "md-callouts");
+check("contents jumps to the heading and highlights it",
+  (await page.locator(mv + ".preview-pane").evaluate((p) => p.scrollTop)) > 100);
+
+// Edit: the preview, the stats, the draft, and the Deep Link follow the editor.
+await page.locator(mv + ".seg button[data-mode=split]").click();
+await page.locator(mv + ".editor").fill("# Smoke\n\nSome *text* with `code`.\n\n## Second\n\n- [ ] todo\n");
+await page.waitForFunction(() => document.querySelector(".tool-markdown-editor .doc h1")?.textContent === "Smoke");
+await page.waitForFunction(() => JSON.parse(localStorage.getItem("html-tools:markdown-editor:draft") ?? "{}").text?.startsWith("# Smoke"));
+check("editing updates the preview, contents, stats, and draft",
+  (await page.locator(mv + ".toc-link").allTextContents()).join("|") === "Smoke|Second" &&
+  (await page.locator(mv + ".stat-words").textContent()) === "12 words");
+await page.locator(mv + ".filename").fill("notes");
+await page.locator(mv + ".filename").press("Enter");
+check("a renamed file gets its extension back", (await page.locator(mv + ".filename").inputValue()) === "notes.md");
+await page.waitForFunction(() => location.hash.startsWith("#markdown-editor/notes.md."));
+const mvLink = await page.evaluate(() => location.href);
+
+// Light Document: a Preference, remembered, applied to the preview only.
+await page.locator(mv + ".light-btn").click();
+check("light document toggles the preview palette and is remembered",
+  (await page.locator(mv + ".preview-pane").evaluate((p) => p.classList.contains("light"))) &&
+  (await page.evaluate(() => localStorage.getItem("html-tools:markdown-editor:light"))) === "1");
+
+// Second visit through the Deep Link: the document comes back with its name,
+// the mode and the light page come back from the Preferences, and the
+// engines come back from IndexedDB with nothing downloaded.
+const mvRequests: string[] = [];
+const mvSpy = (r: { url(): string }) => { if (r.url().startsWith("http")) mvRequests.push(r.url()); };
+page.on("request", mvSpy);
+await page.goto("about:blank");
+await page.goto(mvLink);
+await page.waitForFunction(() => document.querySelector(".tool-markdown-editor .doc h1")?.textContent === "Smoke");
+check("markdown deep link restores the draft, its name, and the preferences",
+  (await page.locator(mv + ".editor").inputValue()).startsWith("# Smoke") &&
+  (await page.locator(mv + ".filename").inputValue()) === "notes.md" &&
+  (await mvHost().getAttribute("data-view")) === "split" &&
+  (await page.locator(mv + ".preview-pane").evaluate((p) => p.classList.contains("light"))),
+  [(await page.locator(mv + ".editor").inputValue()).slice(0, 12), await page.locator(mv + ".filename").inputValue(), await mvHost().getAttribute("data-view"), await page.locator(mv + ".preview-pane").getAttribute("class")].join(" | "));
+await page.locator(mv + ".editor").fill("Inline $x^2$ and\n\n```mermaid\nflowchart LR\n  A --> B\n```\n");
+await page.waitForFunction(() => document.querySelector(".tool-markdown-editor .doc .mermaid-block svg") && document.querySelector(".tool-markdown-editor .doc .katex"));
+page.off("request", mvSpy);
+check("second visit renders math and diagrams from cached engines with no download", mvRequests.length === 0, mvRequests.join(" ").slice(0, 200));
+
+// Find and replace: one match stepped to, replaced, the count following.
+await page.locator(mv + ".editor").fill("alpha beta alpha\n");
+await page.locator(mv + ".editor").click();
+await page.keyboard.press(process.platform === "darwin" ? "Meta+f" : "Control+f");
+await page.locator(mv + ".find-input").fill("alpha");
+await page.keyboard.press("Enter");
+check("find counts matches and keeps focus in the find box",
+  (await page.locator(mv + ".find-count").textContent()) === "2/2" &&
+  (await page.locator(mv + ".find-input").evaluate((i) => i === document.activeElement)));
+await page.locator(mv + ".replace-input").fill("gamma");
+await page.locator(mv + ".find-all").click();
+check("replace all rewrites the draft",
+  (await page.locator(mv + ".editor").inputValue()) === "gamma beta gamma\n" &&
+  (await page.locator(mv + ".find-count").textContent()) === "0/0");
+await page.locator(mv + ".find-close").click();
+
+// New asks first when there is text: the button becomes the confirmation, a second click discards.
+await page.locator(mv + ".new-btn").click();
+check("new arms a confirmation and keeps the text",
+  (await page.locator(mv + ".new-btn").textContent()) === "Discard?" &&
+  (await page.locator(mv + ".editor").inputValue()) === "gamma beta gamma\n");
+await page.locator(mv + ".editor").click();
+check("clicking elsewhere disarms it", (await page.locator(mv + ".new-btn").textContent()) === "New");
+await page.locator(mv + ".new-btn").click();
+await page.locator(mv + ".new-btn").click();
+check("a second click starts a new document",
+  (await page.locator(mv + ".editor").inputValue()) === "" &&
+  (await page.locator(mv + ".filename").inputValue()) === "untitled.md" &&
+  (await page.locator(mv + ".new-btn").textContent()) === "New");
+
+// Contents in the Narrow Layout is a drawer, closed on load, opened by the button.
+await page.setViewportSize({ width: 600, height: 800 });
+await page.locator(mv + ".seg button[data-mode=preview]").click();
+await page.waitForFunction(() => document.querySelector(".tool-markdown-editor")!.classList.contains("toc-drawer"));
+check("narrow: contents becomes a drawer and closes", !(await mvHost().evaluate((el) => el.classList.contains("toc-open"))));
+await page.locator(mv + ".toc-btn").click();
+check("narrow: the contents button opens the drawer", await page.locator(mv + ".toc-backdrop").isVisible());
+await page.locator(mv + ".toc-backdrop").click({ position: { x: 550, y: 400 } });
+check("narrow: the backdrop closes the drawer", !(await page.locator(mv + ".toc-backdrop").isVisible()));
+await page.setViewportSize({ width: 1200, height: 800 });
+await page.waitForFunction(() => document.querySelector(".tool-markdown-editor")!.classList.contains("toc-open"));
+check("wide again: contents comes back as a column", true);
+await page.evaluate(() => {
+  for (const k of ["draft", "view", "contents", "light"]) localStorage.removeItem("html-tools:markdown-editor:" + k);
+});
 
 // Narrow layout: below 768px the sidebar becomes an on-demand drawer.
 await page.setViewportSize({ width: 375, height: 667 });

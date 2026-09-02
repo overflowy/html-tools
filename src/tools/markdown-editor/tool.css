@@ -1,0 +1,608 @@
+.tool-markdown-editor {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 0.25rem var(--gutter) 2rem;
+}
+
+.tool-markdown-editor button {
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: var(--radius-sm);
+}
+
+/* ---- toolbar ---- */
+
+.tool-markdown-editor .toolbar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
+.tool-markdown-editor .spacer { flex: 1; }
+
+.tool-markdown-editor .filename-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.tool-markdown-editor .filename {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: var(--text-muted);
+  background: transparent;
+  border: 0.5px solid transparent;
+  border-radius: var(--radius-sm);
+  padding: 3px 7px;
+  min-width: 60px;
+  max-width: 260px;
+  width: 16ch;
+}
+@media (hover: hover) {
+  .tool-markdown-editor .filename:hover { border-color: var(--border-strong); }
+}
+.tool-markdown-editor .filename:focus {
+  outline: var(--ring-line);
+  outline-offset: -1px;
+  border-color: transparent;
+  box-shadow: var(--ring-halo);
+  color: var(--text);
+}
+
+/* Edit / Split / Preview: one pill, the active mode raised inside it. */
+.tool-markdown-editor .seg {
+  display: flex;
+  background: var(--surface);
+  border: 0.5px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  padding: 2px;
+  gap: 2px;
+  flex: none;
+}
+.tool-markdown-editor .seg button {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-weight: 500;
+  padding: 2px 10px;
+  border-radius: var(--radius-sm);
+}
+@media (hover: hover) {
+  .tool-markdown-editor .seg button:hover { color: var(--text); background: transparent; }
+}
+.tool-markdown-editor .seg button.active {
+  background: var(--surface-3);
+  color: var(--text);
+}
+.tool-markdown-editor .seg button:active { transform: none; }
+
+.tool-markdown-editor .toolbar button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  flex: none;
+  line-height: normal;
+}
+.tool-markdown-editor .toolbar button svg { width: 14px; height: 14px; }
+.tool-markdown-editor .toolbar button.icon { padding: 3px 7px; min-width: 30px; justify-content: center; }
+.tool-markdown-editor .new-btn.confirm {
+  background: var(--danger-bg);
+  border-color: var(--danger-text);
+  color: var(--danger-text);
+}
+.tool-markdown-editor .toolbar button.toggled {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.tool-markdown-editor .light-btn.toggled svg { transform: scaleX(-1); }
+
+/* ---- the pane: Contents | editor | preview, with a status bar ---- */
+
+.tool-markdown-editor .pane {
+  flex: 1;
+  min-height: 240px;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  background: var(--surface);
+  border: 0.5px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+.tool-markdown-editor.dragging .pane {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.tool-markdown-editor .body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.tool-markdown-editor .editor-pane,
+.tool-markdown-editor .preview-pane {
+  flex: 1 1 50%;
+  min-width: 0;
+  /* Stacked, the editor's tall bottom padding would otherwise set the floor. */
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.tool-markdown-editor .editor-pane { border-right: 1px solid var(--border); }
+.tool-markdown-editor[data-view="edit"] .preview-pane { display: none; }
+.tool-markdown-editor[data-view="edit"] .editor-pane { border-right: none; }
+.tool-markdown-editor[data-view="preview"] .editor-pane { display: none; }
+
+.tool-markdown-editor .editor-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+/* The textarea and the mirror of its text behind it must wrap identically:
+   one set of metrics for both, and a stable scrollbar gutter so a scrollbar
+   appearing on the textarea does not narrow only it. */
+.tool-markdown-editor .editor,
+.tool-markdown-editor .editor-marks {
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.7;
+  letter-spacing: normal;
+  padding: 24px 28px 45vh;
+  tab-size: 2;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  word-break: normal;
+  scrollbar-gutter: stable;
+}
+.tool-markdown-editor .editor {
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  resize: none;
+  border: none;
+  border-radius: 0;
+  outline: none;
+  background: transparent;
+  position: relative;
+}
+.tool-markdown-editor .editor:focus { outline: none; box-shadow: none; border: none; }
+.tool-markdown-editor .editor-marks {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  color: transparent;
+  pointer-events: none;
+  user-select: none;
+}
+.tool-markdown-editor .editor-marks mark {
+  color: transparent;
+  background: var(--accent-soft);
+  border-radius: 2px;
+}
+.tool-markdown-editor .editor-marks mark.current { background: rgba(201, 100, 66, 0.45); }
+
+.tool-markdown-editor .preview-pane {
+  overflow-y: auto;
+  background: var(--doc-bg);
+  color: var(--doc-text);
+}
+
+/* ---- status bar ---- */
+
+.tool-markdown-editor .footer {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  white-space: nowrap;
+  padding: 6px 12px;
+  border-top: 1px solid var(--border);
+  font-size: 11.5px;
+  color: var(--text-muted);
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+.tool-markdown-editor .status {
+  font-family: var(--sans);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+/* ---- drop overlay ---- */
+
+.tool-markdown-editor .drop-overlay {
+  position: absolute;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: rgb(26 26 26 / 0.75);
+  backdrop-filter: blur(3px);
+  pointer-events: none;
+  z-index: 6;
+}
+.tool-markdown-editor.dragging .drop-overlay { display: flex; }
+.tool-markdown-editor .drop-overlay .card {
+  border: 2px dashed var(--accent);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  padding: 42px 64px;
+  text-align: center;
+  color: var(--text);
+  font-weight: 500;
+}
+.tool-markdown-editor .drop-overlay .sub { color: var(--text-muted); font-weight: 400; font-size: 12.5px; margin-top: 6px; }
+
+/* ---- Contents: the leftmost column, or a drawer when the Tool is narrow ---- */
+
+.tool-markdown-editor .toc {
+  display: none;
+  flex: none;
+  width: 232px;
+  min-height: 0;
+  overflow-y: auto;
+  border-right: 1px solid var(--border);
+  padding: 20px 12px 20px 6px;
+  font-size: 12.5px;
+}
+.tool-markdown-editor.toc-open .toc { display: block; }
+/* Nothing to jump to while the preview is hidden. */
+.tool-markdown-editor[data-view="edit"] .toc,
+.tool-markdown-editor[data-view="edit"] .toc-backdrop { display: none !important; }
+
+.tool-markdown-editor .toc-backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgb(0 0 0 / 0.5);
+  z-index: 29;
+}
+.tool-markdown-editor.toc-drawer.toc-open .toc {
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: min(300px, 84vw);
+  z-index: 30;
+  background: var(--surface);
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 0.3), 12px 0 32px rgb(0 0 0 / 0.4);
+  padding: 16px 12px calc(16px + env(safe-area-inset-bottom, 0px));
+  font-size: 14px;
+  overscroll-behavior: contain;
+}
+.tool-markdown-editor.toc-drawer.toc-open .toc-backdrop { display: block; }
+.tool-markdown-editor.toc-drawer.toc-open .toc-link { padding-top: 9px; padding-bottom: 9px; }
+
+.tool-markdown-editor .toc-title {
+  font-weight: 600;
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  margin: 0 0 8px 10px;
+}
+.tool-markdown-editor .toc-empty { color: var(--text-muted); font-size: 12px; margin-left: 10px; }
+.tool-markdown-editor .toc-link {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font-size: inherit;
+  color: var(--text-muted);
+  background: transparent;
+  border: none;
+  border-left: 2px solid var(--border);
+  border-radius: 0;
+  padding: 3px 8px;
+  line-height: 1.45;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: none;
+}
+@media (hover: hover) {
+  .tool-markdown-editor .toc-link:hover { color: var(--text); border-left-color: var(--accent); background: var(--accent-soft); }
+}
+.tool-markdown-editor .toc-link:active { transform: none; background: var(--accent-soft); }
+.tool-markdown-editor .toc-link.active { color: var(--text); border-left-color: var(--accent); }
+.tool-markdown-editor .toc-link.d2 { padding-left: 20px; }
+.tool-markdown-editor .toc-link.d3 { padding-left: 32px; }
+.tool-markdown-editor .toc-link.d4 { padding-left: 44px; }
+
+/* ---- find and replace ---- */
+
+/* One row, always: the two inputs give way before anything wraps. */
+.tool-markdown-editor .find-bar {
+  display: none;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  flex: none;
+  flex-wrap: nowrap;
+}
+.tool-markdown-editor.find-open .find-bar { display: flex; }
+.tool-markdown-editor .find-bar input {
+  font-family: inherit;
+  font-size: 12.5px;
+  padding: 4px 7px;
+  border: 0.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--text);
+  min-width: 40px;
+  width: 0;
+  flex: 1 1 0;
+}
+.tool-markdown-editor .find-bar input:focus {
+  outline: var(--ring-line);
+  outline-offset: -1px;
+  border-color: transparent;
+  box-shadow: var(--ring-halo);
+}
+.tool-markdown-editor .find-count {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  min-width: 3ch;
+  margin: 0 2px;
+  text-align: center;
+  flex: none;
+}
+.tool-markdown-editor .find-count.none { color: var(--danger-text); }
+.tool-markdown-editor .find-bar button { font-size: 11.5px; padding: 3px 6px; flex: none; }
+
+/* ---- the Rendered Document ----
+   Its palette is a set of tokens on the preview pane: the Theme's by
+   default, a light page as the Light Document. */
+
+.tool-markdown-editor .preview-pane {
+  --doc-bg: var(--bg);
+  --doc-text: var(--text);
+  --doc-text-soft: var(--text-muted);
+  --doc-text-faint: #6f6f69;
+  --doc-border: var(--border-strong);
+  --doc-border-soft: var(--border);
+  --doc-code-bg: var(--surface);
+  --doc-accent: #e08a6a;
+  --doc-accent-soft: var(--accent-soft);
+  --doc-danger: var(--danger-text);
+  --co-note: #79b8ff;
+  --co-tip: #7ed492;
+  --co-important: #cfa3ff;
+  --co-warning: #f2c14e;
+  --co-caution: #f28b82;
+  --hl-keyword: #ff7b72;
+  --hl-title: #d2a8ff;
+  --hl-attr: #79c0ff;
+  --hl-string: #a5d6ff;
+  --hl-builtin: #ffa657;
+  color-scheme: dark;
+}
+.tool-markdown-editor .preview-pane.light {
+  --doc-bg: #fafafa;
+  --doc-text: #18181b;
+  --doc-text-soft: #52525b;
+  --doc-text-faint: #a1a1aa;
+  --doc-border: #d4d4d8;
+  --doc-border-soft: #e4e4e7;
+  --doc-code-bg: #f0f0f1;
+  --doc-accent: #b5502f;
+  --doc-accent-soft: rgba(201, 100, 66, 0.1);
+  --doc-danger: #dc2626;
+  --co-note: #2563eb;
+  --co-tip: #16a34a;
+  --co-important: #9333ea;
+  --co-warning: #d97706;
+  --co-caution: #dc2626;
+  --hl-keyword: #cf222e;
+  --hl-title: #8250df;
+  --hl-attr: #0550ae;
+  --hl-string: #116329;
+  --hl-builtin: #953800;
+  color-scheme: light;
+}
+
+.tool-markdown-editor .doc {
+  max-width: 760px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 32px 40px 45vh;
+  min-width: 0;
+  font-size: 14.5px;
+  line-height: 1.65;
+  letter-spacing: -0.006em;
+  color: var(--doc-text);
+  overflow-wrap: break-word;
+}
+.tool-markdown-editor .doc h1, .tool-markdown-editor .doc h2, .tool-markdown-editor .doc h3,
+.tool-markdown-editor .doc h4, .tool-markdown-editor .doc h5, .tool-markdown-editor .doc h6 {
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  line-height: 1.3;
+  margin: 1.6em 0 0.55em;
+  text-wrap: initial;
+}
+.tool-markdown-editor .doc > :first-child { margin-top: 0; }
+.tool-markdown-editor .doc h1 { font-size: 1.75em; padding-bottom: 0.35em; border-bottom: 1px solid var(--doc-border-soft); }
+.tool-markdown-editor .doc h2 { font-size: 1.35em; padding-bottom: 0.3em; border-bottom: 1px solid var(--doc-border-soft); }
+.tool-markdown-editor .doc h3 { font-size: 1.15em; }
+.tool-markdown-editor .doc h4 { font-size: 1em; }
+.tool-markdown-editor .doc h5, .tool-markdown-editor .doc h6 { font-size: 0.9em; color: var(--doc-text-soft); }
+.tool-markdown-editor .doc p, .tool-markdown-editor .doc ul, .tool-markdown-editor .doc ol,
+.tool-markdown-editor .doc blockquote, .tool-markdown-editor .doc pre, .tool-markdown-editor .doc table { margin: 0 0 0.9em; }
+.tool-markdown-editor .doc ul, .tool-markdown-editor .doc ol { padding-left: 1.6em; }
+.tool-markdown-editor .doc li { margin: 0.25em 0; }
+.tool-markdown-editor .doc li > ul, .tool-markdown-editor .doc li > ol { margin-bottom: 0; }
+.tool-markdown-editor .doc li.task { list-style: none; margin-left: -1.4em; }
+.tool-markdown-editor .doc li input[type="checkbox"] { margin-right: 0.45em; accent-color: var(--doc-accent); vertical-align: -1px; }
+.tool-markdown-editor .doc a { color: var(--doc-accent); text-decoration: none; }
+.tool-markdown-editor .doc a:hover { text-decoration: underline; }
+.tool-markdown-editor .doc strong { font-weight: 600; }
+.tool-markdown-editor .doc code {
+  font-family: var(--mono);
+  font-size: 0.86em;
+  background: var(--doc-code-bg);
+  border: 1px solid var(--doc-border-soft);
+  border-radius: 5px;
+  padding: 0.12em 0.35em;
+}
+.tool-markdown-editor .doc pre {
+  background: var(--doc-code-bg);
+  border: 1px solid var(--doc-border-soft);
+  border-radius: 10px;
+  padding: 14px 16px;
+  overflow-x: auto;
+}
+.tool-markdown-editor .doc pre code { background: none; border: none; padding: 0; font-size: 12.5px; line-height: 1.6; }
+.tool-markdown-editor .doc blockquote {
+  border-left: 3px solid var(--doc-border);
+  padding: 0.1em 0 0.1em 1em;
+  color: var(--doc-text-soft);
+}
+.tool-markdown-editor .doc blockquote > :last-child { margin-bottom: 0; }
+.tool-markdown-editor .doc hr { border: none; border-top: 1px solid var(--doc-border); margin: 2em 0; }
+.tool-markdown-editor .doc img { max-width: 100%; border-radius: 8px; }
+.tool-markdown-editor .doc table { border-collapse: collapse; width: 100%; font-size: 0.95em; display: block; overflow-x: auto; }
+.tool-markdown-editor .doc th, .tool-markdown-editor .doc td { border: 1px solid var(--doc-border); padding: 6px 12px; text-align: left; }
+.tool-markdown-editor .doc th { background: var(--doc-code-bg); font-weight: 600; }
+.tool-markdown-editor .doc del { color: var(--doc-text-faint); }
+
+/* callouts */
+.tool-markdown-editor .doc blockquote.callout {
+  border-left: 3px solid var(--co);
+  border-radius: 0 8px 8px 0;
+  background: var(--doc-code-bg);
+  padding: 11px 15px;
+  color: var(--doc-text);
+}
+.tool-markdown-editor .doc .callout-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-weight: 600;
+  font-size: 0.92em;
+  color: var(--co);
+  margin-bottom: 5px;
+}
+.tool-markdown-editor .doc .callout-title svg { width: 15px; height: 15px; flex: none; }
+.tool-markdown-editor .doc .callout-note { --co: var(--co-note); }
+.tool-markdown-editor .doc .callout-tip { --co: var(--co-tip); }
+.tool-markdown-editor .doc .callout-important { --co: var(--co-important); }
+.tool-markdown-editor .doc .callout-warning { --co: var(--co-warning); }
+.tool-markdown-editor .doc .callout-caution { --co: var(--co-caution); }
+
+/* syntax highlighting */
+.tool-markdown-editor .hljs { color: var(--doc-text); background: transparent; }
+.tool-markdown-editor .hljs-comment, .tool-markdown-editor .hljs-quote { color: var(--doc-text-faint); }
+.tool-markdown-editor .hljs-keyword, .tool-markdown-editor .hljs-selector-tag, .tool-markdown-editor .hljs-doctag,
+.tool-markdown-editor .hljs-section, .tool-markdown-editor .hljs-template-tag, .tool-markdown-editor .hljs-deletion,
+.tool-markdown-editor .hljs-meta .hljs-keyword { color: var(--hl-keyword); }
+.tool-markdown-editor .hljs-title, .tool-markdown-editor .hljs-title.class_, .tool-markdown-editor .hljs-title.function_ { color: var(--hl-title); }
+.tool-markdown-editor .hljs-attr, .tool-markdown-editor .hljs-attribute, .tool-markdown-editor .hljs-literal,
+.tool-markdown-editor .hljs-number, .tool-markdown-editor .hljs-operator, .tool-markdown-editor .hljs-variable,
+.tool-markdown-editor .hljs-selector-attr, .tool-markdown-editor .hljs-selector-class, .tool-markdown-editor .hljs-selector-id,
+.tool-markdown-editor .hljs-selector-pseudo, .tool-markdown-editor .hljs-meta { color: var(--hl-attr); }
+.tool-markdown-editor .hljs-string, .tool-markdown-editor .hljs-regexp, .tool-markdown-editor .hljs-addition,
+.tool-markdown-editor .hljs-meta .hljs-string { color: var(--hl-string); }
+.tool-markdown-editor .hljs-built_in, .tool-markdown-editor .hljs-symbol, .tool-markdown-editor .hljs-type { color: var(--hl-builtin); }
+.tool-markdown-editor .hljs-emphasis { font-style: italic; }
+.tool-markdown-editor .hljs-strong { font-weight: 600; }
+
+/* footnotes */
+.tool-markdown-editor .doc .fn-ref { font-size: 0.75em; line-height: 0; }
+.tool-markdown-editor .doc .fn-ref a { text-decoration: none; padding: 0 0.15em; }
+.tool-markdown-editor .doc .footnotes {
+  margin-top: 2.4em;
+  padding-top: 1em;
+  border-top: 1px solid var(--doc-border);
+  font-size: 0.88em;
+  color: var(--doc-text-soft);
+}
+.tool-markdown-editor .doc .footnotes ol { padding-left: 1.3em; }
+.tool-markdown-editor .doc .footnotes li { margin: 0.35em 0; }
+.tool-markdown-editor .doc .fn-back { text-decoration: none; margin-left: 0.3em; }
+
+/* math and diagrams */
+.tool-markdown-editor .doc .katex-block { overflow-x: auto; margin: 0 0 0.9em; padding: 2px 0; }
+.tool-markdown-editor .doc .katex { font-size: 1.08em; }
+.tool-markdown-editor .doc .math-err { color: var(--doc-danger); font-family: var(--mono); font-size: 0.85em; }
+.tool-markdown-editor .doc .mermaid-block { margin: 0 0 0.9em; overflow-x: auto; text-align: center; }
+.tool-markdown-editor .doc .mermaid-block svg { max-width: 100%; height: auto; }
+.tool-markdown-editor .doc pre.mermaid-err {
+  text-align: left;
+  border-color: var(--doc-danger);
+  white-space: pre-wrap;
+  color: var(--doc-text-soft);
+  font-size: 12px;
+}
+
+/* ---- narrow: Split stacks, editor above preview ---- */
+
+.tool-markdown-editor.stacked[data-view="split"] .body { flex-direction: column; }
+.tool-markdown-editor.stacked[data-view="split"] .editor-pane { border-right: none; border-bottom: 1px solid var(--border); }
+.tool-markdown-editor.stacked .doc { padding: 20px 18px 40vh; }
+.tool-markdown-editor.stacked .editor, .tool-markdown-editor.stacked .editor-marks { padding: 18px 18px 40vh; }
+
+@media (max-width: 767px) {
+  .tool-markdown-editor .filename { width: 12ch; }
+  /* Touch targets for the controls outside a pane head or toolbar. */
+  .tool-markdown-editor .find-bar button { min-height: 36px; }
+}
+
+/* ---- Export PDF: only the Rendered Document, on a light page ---- */
+
+@media print {
+  html { height: auto; overflow: visible; }
+  body.md-print { height: auto; overflow: visible; }
+  body.md-print > :not(.content) { display: none !important; }
+  body.md-print .tool-header { display: none; }
+  body.md-print { background: #fff; }
+  /* No transition: print lays out at time zero, and the margin would still be on its way. */
+  body.md-print .content { height: auto; margin-left: 0 !important; display: block; transition: none; }
+  body.md-print .hosts { display: block; }
+  body.md-print .tool-host { display: none; }
+  body.md-print .tool-markdown-editor { display: block; padding: 0; overflow: visible; height: auto; }
+  .tool-markdown-editor .toolbar, .tool-markdown-editor .toc, .tool-markdown-editor .toc-backdrop,
+  .tool-markdown-editor .editor-pane, .tool-markdown-editor .footer, .tool-markdown-editor .drop-overlay { display: none !important; }
+  .tool-markdown-editor .pane { display: block; border: none; border-radius: 0; overflow: visible; background: #fff; min-height: 0; }
+  .tool-markdown-editor .body { display: block; }
+  .tool-markdown-editor .preview-pane {
+    display: block !important;
+    overflow: visible;
+    --doc-bg: #ffffff;
+    --doc-text: #18181b;
+    --doc-text-soft: #52525b;
+    --doc-text-faint: #71717a;
+    --doc-border: #d4d4d8;
+    --doc-border-soft: #e4e4e7;
+    --doc-code-bg: #f6f6f7;
+    --doc-accent: #b5502f;
+    --doc-accent-soft: rgba(201, 100, 66, 0.1);
+    --doc-danger: #dc2626;
+    --co-note: #2563eb;
+    --co-tip: #16a34a;
+    --co-important: #9333ea;
+    --co-warning: #d97706;
+    --co-caution: #dc2626;
+    --hl-keyword: #cf222e;
+    --hl-title: #8250df;
+    --hl-attr: #0550ae;
+    --hl-string: #116329;
+    --hl-builtin: #953800;
+  }
+  .tool-markdown-editor .doc { padding: 0; max-width: none; }
+  .tool-markdown-editor .doc pre, .tool-markdown-editor .doc blockquote, .tool-markdown-editor .doc table,
+  .tool-markdown-editor .doc img, .tool-markdown-editor .doc .mermaid-block, .tool-markdown-editor .doc .katex-block { break-inside: avoid; }
+  .tool-markdown-editor .doc h1, .tool-markdown-editor .doc h2, .tool-markdown-editor .doc h3, .tool-markdown-editor .doc h4 { break-after: avoid; }
+  @page { margin: 16mm; }
+}

@@ -81,15 +81,8 @@
 .tool-jsonc-sorter .src:focus {
   border: none;
   box-shadow: none;
+  outline: none;
 }
-/* The pane clips its rounded corners, so the focus ring lives on the pane border rather than inside the textarea. */
-.tool-jsonc-sorter .pane:has(> .src:focus) {
-  outline: var(--ring-line);
-  outline-offset: -1px;
-  border-color: transparent;
-  box-shadow: var(--ring-halo);
-}
-
 .tool-jsonc-sorter .output {
   flex: 1;
   overflow: auto;

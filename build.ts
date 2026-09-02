@@ -38,10 +38,12 @@ for (const output of result.outputs) {
   else js += text;
 }
 
+// Replacement callbacks: a string replacement would expand `$&` and friends,
+// and a minified bundle is bound to contain one somewhere.
 const template = await Bun.file("src/index.html").text();
 const html = template
-  .replace("<!--STYLE-->", "<style>\n" + css + "</style>")
-  .replace("<!--SCRIPT-->", "<script>\n" + js.replaceAll("</script", "<\\/script") + "</script>");
+  .replace("<!--STYLE-->", () => "<style>\n" + css + "</style>")
+  .replace("<!--SCRIPT-->", () => "<script>\n" + js.replaceAll("</script", "<\\/script") + "</script>");
 
 await Bun.write("dist/index.html", html);
 console.log("dist/index.html written (" + (html.length / 1024).toFixed(1) + " KB)");

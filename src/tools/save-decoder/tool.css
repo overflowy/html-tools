@@ -72,15 +72,8 @@
 .tool-save-decoder .src:focus {
   border: none;
   box-shadow: none;
+  outline: none;
 }
-/* The pane clips its rounded corners, so the focus ring lives on the pane border rather than inside the textarea. */
-.tool-save-decoder .pane:has(> .src:focus) {
-  outline: var(--ring-line);
-  outline-offset: -1px;
-  border-color: transparent;
-  box-shadow: var(--ring-halo);
-}
-
 .tool-save-decoder .statusbar {
   padding: 6px 12px;
   border-top: 1px solid var(--border);

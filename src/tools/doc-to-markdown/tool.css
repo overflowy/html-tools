@@ -255,14 +255,7 @@
   white-space: pre;
   overflow: auto;
 }
-.tool-doc-to-markdown .output:focus { border: none; box-shadow: none; }
-/* The pane clips its rounded corners, so the focus ring lives on the pane border rather than inside the textarea. */
-.tool-doc-to-markdown .result:has(> .output:focus) {
-  outline: var(--ring-line);
-  outline-offset: -1px;
-  border-color: transparent;
-  box-shadow: var(--ring-halo);
-}
+.tool-doc-to-markdown .output:focus { border: none; box-shadow: none; outline: none; }
 
 .tool-doc-to-markdown .note {
   display: none;
