@@ -4,6 +4,7 @@ import { chromium } from "playwright-core";
 import jsQR from "jsqr";
 import dnsFixtures from "./src/tools/dns-lookup/fixtures.json";
 import { DKIM_SELECTORS } from "./src/tools/dns-lookup/email";
+import osvFixtures from "./src/tools/dependency-audit/fixtures/osv.json";
 
 const exe =
   process.env.CHROMIUM_PATH ??
@@ -13,7 +14,10 @@ const browser = await chromium.launch({ executablePath: exe });
 const page = await browser.newPage();
 const errors: string[] = [];
 page.on("pageerror", (e) => errors.push("pageerror: " + e.message));
-page.on("console", (m) => { if (m.type() === "error") errors.push("console: " + m.text()); });
+page.on("console", (m) => {
+  // Probing a repository for lockfiles that are not there is a 404 by design; the browser logs each one.
+  if (m.type() === "error" && !m.location().url.startsWith("https://raw.githubusercontent.com/")) errors.push("console: " + m.text());
+});
 
 const url = "file://" + import.meta.dir + "/dist/index.html";
 let failed = false;
@@ -24,7 +28,7 @@ function check(label: string, ok: boolean, detail = "") {
 
 await page.goto(url);
 const names = await page.locator(".tool-list button").allTextContents();
-check("sidebar lists all tools", names.length === 6, names.join(", "));
+check("sidebar lists all tools", names.length === 7, names.join(", "));
 
 // base64 tool: paste a tiny valid png via direct input.
 await page.goto(url + "#base64-to-image");
@@ -524,6 +528,109 @@ check("dns deep link restores controls",
   (await page.locator(".tool-dns-lookup .opt-do").isChecked()) && !(await page.locator(".tool-dns-lookup .opt-cd").isChecked()));
 check("dns deep link runs the lookup", dnsHits.at(-1) === "dns.google example.com TXT do" &&
   (await page.locator(".tool-dns-lookup .records tbody tr").count()) === 2, dnsHits.at(-1));
+
+// Dependency audit: OSV answered from the fixture's hit table, GitHub raw
+// files from the fixture lockfiles. What this proves is the wiring from
+// lockfile to OSV to cards, the filters, and the two Deep Link forms.
+const auditFixture = (name: string) => Bun.file(import.meta.dir + "/src/tools/dependency-audit/fixtures/" + name).text();
+const npmLock = await auditFixture("npm-v3.lock.json");
+const uvLock = await auditFixture("uv-v1.lock");
+const osvHits: string[] = [];
+await page.route(/^https:\/\/api\.osv\.dev\//, (route) => {
+  const u = new URL(route.request().url());
+  if (u.pathname === "/v1/querybatch") {
+    const queries = JSON.parse(route.request().postData() ?? "{}").queries as { package: { name: string; ecosystem: string }; version: string }[];
+    osvHits.push("querybatch " + queries.length);
+    const hits = osvFixtures.hits as Record<string, string[]>;
+    const results = queries.map((q) => ({ vulns: (hits[q.package.ecosystem + ":" + q.package.name + "@" + q.version] ?? []).map((id) => ({ id })) }));
+    return route.fulfill({ status: 200, contentType: "application/json", headers: cors, body: JSON.stringify({ results }) });
+  }
+  const id = decodeURIComponent(u.pathname.split("/").pop()!);
+  osvHits.push("vulns " + id);
+  const rec = (osvFixtures.records as Record<string, unknown>)[id];
+  return route.fulfill({ status: rec ? 200 : 404, contentType: "application/json", headers: cors, body: JSON.stringify(rec ?? { message: "Bug not found." }) });
+});
+const rawHits: string[] = [];
+await page.route(/^https:\/\/raw\.githubusercontent\.com\//, (route) => {
+  const path = new URL(route.request().url()).pathname;
+  rawHits.push(path);
+  const body = path === "/acme/demo/HEAD/package-lock.json" ? npmLock : path === "/acme/demo/HEAD/uv.lock" ? uvLock : null;
+  return route.fulfill({ status: body ? 200 : 404, contentType: "text/plain", headers: cors, body: body ?? "404: Not Found" });
+});
+
+await page.goto(url + "#dependency-audit");
+await page.locator(".tool-dependency-audit .src").fill(npmLock);
+await page.waitForFunction(() => document.querySelector(".tool-dependency-audit .kind-label")?.textContent === "package-lock.json");
+check("audit sniffs the pasted lockfile kind", true);
+await page.locator(".tool-dependency-audit .btn-audit").click();
+await page.waitForFunction(() => document.querySelector(".tool-dependency-audit .status-text")?.textContent?.startsWith("4 advisories in 3 packages"));
+check("audit asks OSV once for the distinct packages, then each record once",
+  osvHits.filter((h) => h.startsWith("querybatch")).join() === "querybatch 3" && osvHits.filter((h) => h.startsWith("vulns")).length === 4, osvHits.join(" | "));
+check("audit renders one card per affected package, worst first",
+  (await page.locator(".tool-dependency-audit .card").count()) === 3 &&
+  (await page.locator(".tool-dependency-audit .card .pkg").first().textContent()) === "minimist@1.2.0" &&
+  (await page.locator(".tool-dependency-audit .card .card-head .sev").first().textContent()) === "critical 9.8");
+check("audit tags direct and dev, names the fix",
+  (await page.locator('.tool-dependency-audit .card[data-scope="direct"]').count()) === 2 &&
+  (await page.locator(".tool-dependency-audit .card", { hasText: "minimist@1.2.5" }).locator(".tag").allTextContents()).join(",") === "direct,dev" &&
+  (await page.locator(".tool-dependency-audit .card", { hasText: "lodash@4.17.20" }).textContent())!.includes("Fixed in 4.17.21.") &&
+  (await page.locator(".tool-dependency-audit .card", { hasText: "minimist@1.2.0" }).textContent())!.includes("Fixed in 1.2.6, affected since 1.0.0."));
+check("audit lists what was not checked, with reasons",
+  (await page.locator(".tool-dependency-audit .skipped-list li").count()) === 3 &&
+  (await page.locator(".tool-dependency-audit .skipped-list").textContent())!.includes("git dependency"));
+check("audit deep link holds filters and the compressed input", await page.evaluate(() => location.hash.startsWith("#dependency-audit/11111.a.a.lz:")));
+
+// Filters hide advisories and packages without a new Audit.
+const hitsBeforeFilter = osvHits.length;
+await page.locator('.tool-dependency-audit .f-sev[value="moderate"]').uncheck();
+check("audit severity filter hides moderate advisories",
+  (await page.locator(".tool-dependency-audit .advisory:not([hidden])").count()) === 3 &&
+  (await page.locator(".tool-dependency-audit .card:not([hidden])").count()) === 3 &&
+  osvHits.length === hitsBeforeFilter);
+await page.locator(".tool-dependency-audit .f-scope").selectOption("d");
+check("audit scope filter hides the transitive package",
+  (await page.locator(".tool-dependency-audit .card:not([hidden])").count()) === 2 &&
+  !(await page.locator(".tool-dependency-audit .card", { hasText: "minimist@1.2.0" }).isVisible()));
+check("audit deep link tracks the filters", await page.evaluate(() => location.hash.startsWith("#dependency-audit/11011.d.a.lz:")));
+await page.locator('.tool-dependency-audit .f-sev[value="moderate"]').check();
+await page.locator(".tool-dependency-audit .f-scope").selectOption("a");
+
+// A declaration file is refused with a pointer to the lockfile.
+await page.locator(".tool-dependency-audit .src").fill('{"name": "x", "dependencies": {"lodash": "^4"}}');
+await page.waitForFunction(() => document.querySelector(".tool-dependency-audit .kind-label")?.textContent === "not a lockfile");
+await page.locator(".tool-dependency-audit .btn-audit").click();
+await page.waitForSelector(".tool-dependency-audit .statusbar.error");
+check("audit refuses package.json by name", (await page.locator(".tool-dependency-audit .status-text").textContent())!.includes("package.json"));
+
+// Repository Fetch: the five names tried at the root, the two present audited together.
+await page.locator(".tool-dependency-audit .repo").fill("https://github.com/acme/demo");
+await page.locator(".tool-dependency-audit .btn-fetch").click();
+await page.waitForFunction(() => document.querySelector(".tool-dependency-audit .status-text")?.textContent?.startsWith("6 advisories in 4 packages"));
+check("audit fetch tries every lockfile name at the repository root",
+  rawHits.length === 5 && rawHits.every((p) => p.startsWith("/acme/demo/HEAD/")), rawHits.join(" "));
+check("audit fetch normalizes the repo box and shows the files as chips",
+  (await page.locator(".tool-dependency-audit .repo").inputValue()) === "acme/demo" &&
+  (await page.locator(".tool-dependency-audit .chip").allTextContents()).join("|").replace(/×/g, "") === "package-lock.json|uv.lock");
+check("audit groups results by lockfile",
+  (await page.locator(".tool-dependency-audit .lockfile").count()) === 2 &&
+  (await page.locator(".tool-dependency-audit .lockfile .type-badge").allTextContents()).join() === "npm,PyPI" &&
+  (await page.locator(".tool-dependency-audit .f-file-wrap").isVisible()));
+check("audit merges records that alias each other",
+  (await page.locator(".tool-dependency-audit .card", { hasText: "requests@2.30.0" }).locator(".advisory").count()) === 2 &&
+  (await page.locator(".tool-dependency-audit .card", { hasText: "requests@2.30.0" }).textContent())!.includes("PYSEC-2023-74"));
+check("audit fetch deep link names the repository", await page.evaluate(() => location.hash === "#dependency-audit/11111.a.a.gh:acme%2Fdemo"));
+check("audit results title links the repository",
+  (await page.locator(".tool-dependency-audit .results-title a").getAttribute("href")) === "https://github.com/acme/demo");
+
+// A repository Deep Link fetches and audits on load, filters restored.
+await page.goto("about:blank");
+await page.goto(url + "#dependency-audit/11111.d.p.gh:acme%2Fdemo");
+await page.waitForFunction(() => document.querySelector(".tool-dependency-audit .status-text")?.textContent?.startsWith("6 advisories"));
+check("audit deep link restores the repository and filters",
+  (await page.locator(".tool-dependency-audit .repo").inputValue()) === "acme/demo" &&
+  (await page.locator(".tool-dependency-audit .f-scope").inputValue()) === "d" &&
+  (await page.locator(".tool-dependency-audit .f-group").inputValue()) === "p" &&
+  (await page.locator(".tool-dependency-audit .card:not([hidden])").count()) === 2);
 
 // Narrow layout: below 768px the sidebar becomes an on-demand drawer.
 await page.setViewportSize({ width: 375, height: 667 });

@@ -1,0 +1,32 @@
+{
+  "lockfileVersion": 1,
+  "workspaces": {
+    "": {
+      "name": "demo-app",
+      "dependencies": {
+        "left-pad": "github:stevemao/left-pad",
+        "lodash": "^4.17.20",
+      },
+      "devDependencies": {
+        "minimist": "^1.2.5",
+      },
+    },
+    "packages/demo-lib": {
+      "name": "demo-lib",
+      "dependencies": {
+        "minimist": "^1.2.0",
+      },
+    },
+  },
+  "packages": {
+    "demo-lib": ["demo-lib@workspace:packages/demo-lib"],
+
+    "left-pad": ["left-pad@github:stevemao/left-pad#5b6b4d6a2a4b3f1b0a2a1a2a3a4a5a6a7a8a9a0a", {}, "5b6b4d6a2a4b3f1b0a2a1a2a3a4a5a6a7a8a9a0a"],
+
+    "lodash": ["lodash@4.17.20", "", {}, "sha512-PlhdFcillOINfeV7Ni6oF1TAEayyZBoZ8bcshTHqOYJYlrqzRK5hagpagky5o4HfCzzd1TRkXPMFq6cKk9rGmA=="],
+
+    "minimist": ["minimist@1.2.5", "", {}, "sha512-FM9nNUYrRBAELZQT3xeZQ7fmMOBg6nWNmJKTcgsJeaLstP/UODVpGsr5OhXhhXg6f+qtJ8uiZ+PUxkDWcgIXLw=="],
+
+    "demo-lib/minimist": ["minimist@1.2.0", "", {}, "sha512-7Wl+Jz+IGWuSdgsQEJ4JunV0si/iMhg42MnQQG6h1R6TNeVenp4U9x5CC5v/gYqz/fENLQITAWXidNtVL0NNbw=="],
+  }
+}

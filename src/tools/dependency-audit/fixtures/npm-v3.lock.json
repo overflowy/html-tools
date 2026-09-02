@@ -1,0 +1,57 @@
+{
+  "name": "demo-app",
+  "version": "1.0.0",
+  "lockfileVersion": 3,
+  "requires": true,
+  "packages": {
+    "": {
+      "name": "demo-app",
+      "version": "1.0.0",
+      "workspaces": [
+        "packages/*"
+      ],
+      "dependencies": {
+        "left-pad": "github:stevemao/left-pad",
+        "lodash": "^4.17.20"
+      },
+      "devDependencies": {
+        "minimist": "^1.2.5"
+      }
+    },
+    "node_modules/demo-lib": {
+      "resolved": "packages/demo-lib",
+      "link": true
+    },
+    "node_modules/left-pad": {
+      "version": "1.3.0",
+      "resolved": "git+ssh://git@github.com/stevemao/left-pad.git#5b6b4d6a2a4b3f1b0a2a1a2a3a4a5a6a7a8a9a0a",
+      "license": "WTFPL"
+    },
+    "node_modules/lodash": {
+      "version": "4.17.20",
+      "resolved": "https://registry.npmjs.org/lodash/-/lodash-4.17.20.tgz",
+      "integrity": "sha512-PlhdFcillOINfeV7Ni6oF1TAEayyZBoZ8bcshTHqOYJYlrqzRK5hagpagky5o4HfCzzd1TRkXPMFq6cKk9rGmA==",
+      "license": "MIT"
+    },
+    "node_modules/minimist": {
+      "version": "1.2.5",
+      "resolved": "https://registry.npmjs.org/minimist/-/minimist-1.2.5.tgz",
+      "integrity": "sha512-FM9nNUYrRBAELZQT3xeZQ7fmMOBg6nWNmJKTcgsJeaLstP/UODVpGsr5OhXhhXg6f+qtJ8uiZ+PUxkDWcgIXLw==",
+      "dev": true,
+      "license": "MIT"
+    },
+    "packages/demo-lib": {
+      "name": "demo-lib",
+      "version": "0.1.0",
+      "dependencies": {
+        "minimist": "^1.2.0"
+      }
+    },
+    "packages/demo-lib/node_modules/minimist": {
+      "version": "1.2.0",
+      "resolved": "https://registry.npmjs.org/minimist/-/minimist-1.2.0.tgz",
+      "integrity": "sha1-o1AIsg9BOD7sH7kU9M1d95omQoQ=",
+      "license": "MIT"
+    }
+  }
+}

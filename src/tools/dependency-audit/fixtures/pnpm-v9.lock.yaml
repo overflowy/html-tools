@@ -1,0 +1,85 @@
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+importers:
+
+  .:
+    dependencies:
+      demo-lib:
+        specifier: workspace:*
+        version: link:packages/demo-lib
+      left-pad:
+        specifier: github:stevemao/left-pad
+        version: https://codeload.github.com/stevemao/left-pad/tar.gz/5b6b4d6a2a4b3f1b0a2a1a2a3a4a5a6a7a8a9a0a
+      lodash:
+        specifier: ^4.17.20
+        version: 4.17.20
+    devDependencies:
+      minimist:
+        specifier: ^1.2.5
+        version: 1.2.5
+
+  packages/demo-lib:
+    dependencies:
+      minimist:
+        specifier: ^1.2.0
+        version: 1.2.0
+      react-dom:
+        specifier: ^18.2.0
+        version: 18.2.0(react@18.2.0)
+
+packages:
+
+  '@babel/highlight@7.10.4':
+    resolution: {integrity: sha512-i6rgnR/YgPEQzZZnbTHHuZdlE8qyoBNalD6F+q4vAFlcMEcqmkoG+mPqJYJCo63qPf74+Y1UZsl3l6f7/RIkmA==}
+
+  left-pad@https://codeload.github.com/stevemao/left-pad/tar.gz/5b6b4d6a2a4b3f1b0a2a1a2a3a4a5a6a7a8a9a0a:
+    resolution: {tarball: https://codeload.github.com/stevemao/left-pad/tar.gz/5b6b4d6a2a4b3f1b0a2a1a2a3a4a5a6a7a8a9a0a}
+    version: 1.3.0
+
+  lodash@4.17.20:
+    resolution: {integrity: sha512-PlhdFcillOINfeV7Ni6oF1TAEayyZBoZ8bcshTHqOYJYlrqzRK5hagpagky5o4HfCzzd1TRkXPMFq6cKk9rGmA==}
+
+  minimist@1.2.0:
+    resolution: {integrity: sha512-7Wl+Jz+IGWuSdgsQEJ4JunV0si/iMhg42MnQQG6h1R6TNeVenp4U9x5CC5v/gYqz/fENLQITAWXidNtVL0NNbw==}
+
+  minimist@1.2.5:
+    resolution: {integrity: sha512-FM9nNUYrRBAELZQT3xeZQ7fmMOBg6nWNmJKTcgsJeaLstP/UODVpGsr5OhXhhXg6f+qtJ8uiZ+PUxkDWcgIXLw==}
+
+  react-dom@18.2.0:
+    resolution: {integrity: sha512-6IMTriUmvsjHUjNtEDudZfuDQUoWXVxKHhlEGSk81n4YFS+r/Kl99wXiwlVXtPBtJenozv2P+hxDsw9eA7Xo6g==}
+    peerDependencies:
+      react: ^18.2.0
+
+  react@18.2.0:
+    resolution: {integrity: sha512-/3IjMdb2L9QbBdWiW5e3P2/npwMBaU9mHCSCUzNln0ZCYbcfTsGbTJrU/kGemdH2IWmB2ioZ+zkxtmq6g09fGQ==}
+    engines: {node: '>=0.10.0'}
+
+  scheduler@0.23.0:
+    resolution: {integrity: sha512-CtuThmgHNg7zIZWAXi3AsyIzA3n4xx7aNyjwC2VJldO2LMVDhFK+63xGqq6CsJH4rTAt6/M+N4GhZiDYPx9eUw==}
+    os: [darwin, linux, win32]
+    cpu: [x64, arm64]
+
+snapshots:
+
+  '@babel/highlight@7.10.4': {}
+
+  lodash@4.17.20: {}
+
+  minimist@1.2.0: {}
+
+  minimist@1.2.5: {}
+
+  react-dom@18.2.0(react@18.2.0):
+    dependencies:
+      react: 18.2.0
+      scheduler: 0.23.0
+
+  react@18.2.0: {}
+
+  scheduler@0.23.0:
+    transitivePeerDependencies:
+      - supports-color
