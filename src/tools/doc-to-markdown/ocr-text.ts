@@ -7,6 +7,34 @@
 /** One recognized paragraph: its lines in reading order, already trimmed. */
 export type OcrParagraph = string[];
 
+/** A line as the recognizer reports it, with its confidence (0 to 100). */
+export interface OcrLine {
+  text: string;
+  confidence: number;
+}
+
+/**
+ * The least confidence a line needs to be kept. To the recognizer a chart, a
+ * photo, or a diagram is just shapes, and it reads them as short scraps of
+ * nonsense at 3 to 45; prose on a real scan, and the labels on a chart, come
+ * back at 85 to 96. Between those, with room on both sides.
+ */
+export const OCR_MIN_CONFIDENCE = 60;
+
+/**
+ * Drop every line the recognizer was not confident about, and every
+ * paragraph that has nothing left. A figure page comes out empty, a scanned
+ * page keeps its text, a labelled chart keeps its labels.
+ */
+export function gateByConfidence(paragraphs: OcrLine[][], min = OCR_MIN_CONFIDENCE): OcrParagraph[] {
+  const out: OcrParagraph[] = [];
+  for (const p of paragraphs) {
+    const kept = p.filter((l) => l.confidence >= min).map((l) => l.text);
+    if (kept.length) out.push(kept);
+  }
+  return out;
+}
+
 /**
  * The lines of a paragraph, one per line as recognized. Markdown reads a
  * single newline as a soft break, so prose still flows when rendered while
@@ -37,12 +65,19 @@ export function cleanParagraphs(paragraphs: OcrParagraph[]): string[] {
   return out;
 }
 
-/**
- * Markdown for one unit of OCR output. `label` names it: "page 3" inside a PDF, or
- * "image" for a standalone picture. Always ends with a single newline.
- */
-export function ocrMarkdown(label: string, paragraphs: OcrParagraph[]): string {
+/** The recognized text as Markdown body: paragraphs separated by blank lines, ending in a newline, or "" when nothing was read. */
+export function ocrBody(paragraphs: OcrParagraph[]): string {
   const clean = cleanParagraphs(paragraphs);
-  if (clean.length === 0) return `<!-- ${label}, OCR: no text found -->\n`;
-  return `<!-- ${label}, OCR -->\n\n` + clean.join("\n\n") + "\n";
+  return clean.length ? clean.join("\n\n") + "\n" : "";
+}
+
+/**
+ * Markdown for one unit of OCR output. `label` names it in a leading comment
+ * ("image", "page 3"); null means no comment at all, just the body.
+ */
+export function ocrMarkdown(label: string | null, paragraphs: OcrParagraph[]): string {
+  const body = ocrBody(paragraphs);
+  if (label === null) return body;
+  if (!body) return `<!-- ${label}, OCR: no text found -->\n`;
+  return `<!-- ${label}, OCR -->\n\n` + body;
 }

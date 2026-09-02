@@ -1,8 +1,8 @@
 // Unit tests for the engine-free parts of Document to Markdown. Run: bun test
 import { describe, expect, test } from "bun:test";
 import { ACCEPT, detect, extensionOf } from "./detect";
-import { cleanLines, cleanParagraphs, ocrMarkdown } from "./ocr-text";
-import { joinPages, paragraphsFromTextItems, splitByMarkers } from "./pages";
+import { cleanLines, cleanParagraphs, gateByConfidence, ocrMarkdown } from "./ocr-text";
+import { joinPages, markPage, paragraphsFromTextItems, splitByMarkers } from "./pages";
 
 const bytes = (...b: (number | string)[]) => {
   const out: number[] = [];
@@ -48,6 +48,16 @@ describe("detect", () => {
 });
 
 describe("ocr text", () => {
+  test("gateByConfidence keeps confident lines and drops empty paragraphs", () => {
+    const measured = [
+      [{ text: "Revenue by quarter", confidence: 96 }, { text: "| i /", confidence: 42 }],
+      [{ text: "MAN IN", confidence: 25 }, { text: "AAPA NO", confidence: 19 }],
+      [{ text: "Q1 Q2 Q3 Q4", confidence: 89 }],
+    ];
+    expect(gateByConfidence(measured)).toEqual([["Revenue by quarter"], ["Q1 Q2 Q3 Q4"]]);
+    expect(gateByConfidence(measured, 20)).toEqual([["Revenue by quarter", "| i /"], ["MAN IN"], ["Q1 Q2 Q3 Q4"]]);
+    expect(gateByConfidence([[{ text: "eg", confidence: 20 }]])).toEqual([]);
+  });
   test("lines are kept one per line; a hyphen before a lowercase continuation is a broken word", () => {
     expect(cleanLines(["The quick", "brown fox"])).toEqual(["The quick", "brown fox"]);
     expect(cleanLines(["a well-", "known fact"])).toEqual(["a wellknown fact"]);
@@ -57,6 +67,10 @@ describe("ocr text", () => {
   test("cleanParagraphs drops empties, collapses runs of spaces, keeps line breaks", () => {
     expect(cleanParagraphs([["a  b", "c"], [""], ["   "], ["d"]])).toEqual(["a b\nc", "d"]);
   });
+  test("ocrMarkdown without a label is just the body", () => {
+    expect(ocrMarkdown(null, [["One"], ["Two", "lines"]])).toBe("One\n\nTwo\nlines\n");
+    expect(ocrMarkdown(null, [])).toBe("");
+  });
   test("ocrMarkdown marks the page with a comment", () => {
     expect(ocrMarkdown("page 3", [["One"], ["Two", "lines"]])).toBe("<!-- page 3, OCR -->\n\nOne\n\nTwo\nlines\n");
     expect(ocrMarkdown("image", [])).toBe("<!-- image, OCR: no text found -->\n");
@@ -64,6 +78,18 @@ describe("ocr text", () => {
 });
 
 describe("pages", () => {
+  test("markPage announces text, OCR, and empty pages when markers are on", () => {
+    expect(markPage(1, "text", "# Title\n", true)).toBe("<!-- page 1 -->\n\n# Title\n");
+    expect(markPage(2, "ocr", "Scan.\n", true)).toBe("<!-- page 2, OCR -->\n\nScan.\n");
+    expect(markPage(3, "text", "", true)).toBe("<!-- page 3, no text -->\n");
+    expect(markPage(4, "ocr", "  \n", true)).toBe("<!-- page 4, OCR: no text found -->\n");
+  });
+  test("markPage with markers off is the bare body, and nothing for an empty page", () => {
+    expect(markPage(1, "text", "# Title\n", false)).toBe("# Title\n");
+    expect(markPage(2, "ocr", "Scan.\n", false)).toBe("Scan.\n");
+    expect(markPage(3, "text", "", false)).toBe("");
+    expect(joinPages([{ page: 3, markdown: "" }, { page: 1, markdown: "a\n" }])).toBe("a\n");
+  });
   test("splitByMarkers keys page bodies by number and strips the markers", () => {
     const md = "<!-- Page 1 -->\n\n# Title\n\nBody.\n\n<!-- Page 4 -->\n\nLater.\n";
     const pages = splitByMarkers(md);

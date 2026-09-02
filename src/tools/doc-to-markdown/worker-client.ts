@@ -119,7 +119,7 @@ export class ConvertWorker {
     return (r as Extract<WorkerResponse, { type: "office" }>).markdown;
   }
 
-  async pdf(bytes: ArrayBuffer, pages: number[]): Promise<PdfResult> {
+  async pdf(bytes: ArrayBuffer, pages?: number[]): Promise<PdfResult> {
     const r = await this.ask({ type: "pdf", id: this.nextId++, bytes, pages }, [bytes]);
     const { markdown, pdfType, pageCount, pagesNeedingOcr } = r as Extract<WorkerResponse, { type: "pdf" }>;
     return { markdown, pdfType, pageCount, pagesNeedingOcr };

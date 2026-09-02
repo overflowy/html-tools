@@ -6,6 +6,7 @@ import { LANGUAGES, languageName } from "./languages";
 import { cancelConversion, convertDocument, type Phase } from "./convert";
 
 const LANG_KEY = "html-tools:doc-to-markdown:langs";
+const MARKERS_KEY = "html-tools:doc-to-markdown:markers";
 const DEFAULT_LANGS = ["eng"];
 
 function esc(s: string) {
@@ -62,6 +63,7 @@ const tool: Tool = {
             <div class="lang-list"></div>
           </div>
         </details>
+        <label class="opt" title="Announce every PDF page with an HTML comment, and say which were OCR'd"><input type="checkbox" class="markers-box"> Page markers</label>
         <button type="button" class="clear-btn">Clear</button>
         <span class="status"></span>
       </div>
@@ -113,8 +115,11 @@ const tool: Tool = {
     const langSummary = $(".langs summary");
     const langFilter = $(".lang-filter") as HTMLInputElement;
     const langList = $(".lang-list");
+    const markersBox = $(".markers-box") as HTMLInputElement;
 
     let selected = normalizeLangs((localStorage.getItem(LANG_KEY) ?? "").split("+"));
+    let markers = localStorage.getItem(MARKERS_KEY) !== "0";
+    markersBox.checked = markers;
     let currentName = "";
     let currentMarkdown = "";
     let running = false;
@@ -135,10 +140,21 @@ const tool: Tool = {
       langSummary.innerHTML = `<span class="dim">OCR:</span> ${esc(shown)}`;
     }
 
+    /** State layout: `<langs joined by +>`, then `.p0` when Page Markers are off. Defaults leave the Deep Link empty. */
     function publishState() {
       localStorage.setItem(LANG_KEY, selected.join("+"));
-      ctx.setState(selected.join("+") === DEFAULT_LANGS.join("+") ? "" : selected.join("+"));
+      localStorage.setItem(MARKERS_KEY, markers ? "1" : "0");
+      markersBox.checked = markers;
+      const codes = selected.join("+");
+      let payload = codes === DEFAULT_LANGS.join("+") && markers ? "" : codes;
+      if (!markers) payload += ".p0";
+      ctx.setState(payload);
     }
+
+    markersBox.addEventListener("change", () => {
+      markers = markersBox.checked;
+      publishState();
+    });
 
     langList.addEventListener("change", () => {
       const picked = boxes.filter((b) => b.checked).map((b) => b.value);
@@ -187,7 +203,9 @@ const tool: Tool = {
     });
 
     ctx.onRestore((payload) => {
-      if (payload) selected = normalizeLangs(payload.split("+"));
+      const [codes, ...flags] = payload.split(".");
+      if (codes) selected = normalizeLangs(codes.split("+"));
+      if (payload) markers = !flags.includes("p0");
       renderLangs();
       publishState();
     });
@@ -209,8 +227,9 @@ const tool: Tool = {
         return;
       }
       const total = rows.reduce((n, r) => n + r.bytes, 0);
-      const parts = rows.map((r) => r.label + " " + formatBytes(r.bytes));
-      enginesText.textContent = "Engines cached (" + formatBytes(total) + "): " + parts.join(", ");
+      enginesText.textContent = "Engines cached: " + formatBytes(total);
+      // The breakdown is a hover away, not in the way.
+      enginesText.title = rows.map((r) => r.label + " " + formatBytes(r.bytes)).join("\n");
       enginesClear.hidden = false;
     }
     enginesClear.addEventListener("click", async () => {
@@ -274,12 +293,16 @@ const tool: Tool = {
       try {
         const bytes = await blob.arrayBuffer();
         if (id !== runId) return;
-        const out = await convertDocument(bytes, name, { languages: selected.slice(), onPhase: (p) => id === runId && setPhase(p) });
+        const out = await convertDocument(bytes, name, { languages: selected.slice(), pageMarkers: markers, onPhase: (p) => id === runId && setPhase(p) });
         if (id !== runId) return;
         currentMarkdown = out.markdown;
         output.value = out.markdown;
         meta.textContent = out.summary;
         result.classList.add("on");
+        if (out.note) {
+          note.textContent = out.note;
+          note.classList.add("on");
+        }
       } catch (e) {
         if (id !== runId) return;
         const msg = e instanceof Error ? e.message : String(e);

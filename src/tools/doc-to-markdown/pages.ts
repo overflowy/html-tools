@@ -74,6 +74,19 @@ export function paragraphsFromTextItems(items: TextItem[]): string[][] {
   return paragraphs;
 }
 
+/**
+ * A page's Markdown, announced by a comment when Page Markers are on: which
+ * page it is, whether it was OCR'd, and when it had no text at all, so the
+ * numbering never skips. With markers off the body stands alone and an empty
+ * page leaves nothing behind.
+ */
+export function markPage(n: number, kind: "text" | "ocr", body: string, markers: boolean): string {
+  const empty = !body.trim();
+  if (!markers) return empty ? "" : body;
+  if (empty) return kind === "ocr" ? `<!-- page ${n}, OCR: no text found -->\n` : `<!-- page ${n}, no text -->\n`;
+  return (kind === "ocr" ? `<!-- page ${n}, OCR -->` : `<!-- page ${n} -->`) + "\n\n" + body;
+}
+
 /** Join page segments in page order into one document. Each segment already ends in a newline. */
 export function joinPages(segments: { page: number; markdown: string }[]): string {
   const sorted = segments.toSorted((a, b) => a.page - b.page);

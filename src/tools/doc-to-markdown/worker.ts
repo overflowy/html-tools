@@ -12,7 +12,8 @@ import { scriptDataUrl } from "./script-url";
 export type WorkerRequest =
   | { type: "load"; engine: "anydoc" | "pdf-inspector"; glue: string; wasm: ArrayBuffer }
   | { type: "office"; id: number; bytes: ArrayBuffer; format: OfficeFormat }
-  | { type: "pdf"; id: number; bytes: ArrayBuffer; pages: number[] };
+  /** `pages` restricts the conversion to those pages; absent means every page. Markers are always requested. */
+  | { type: "pdf"; id: number; bytes: ArrayBuffer; pages?: number[] };
 
 export type WorkerResponse =
   | { type: "loaded"; engine: "anydoc" | "pdf-inspector" }

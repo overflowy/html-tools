@@ -8,8 +8,8 @@ import { createWorker, type Worker as TessWorker } from "tesseract.js";
 import { detect, type ImageFormat, type OfficeFormat } from "./detect";
 import { ENGINES, getEngine, languageAsset, pdfjsAsset, type EngineAsset, type Progress } from "./engines";
 import { languageName } from "./languages";
-import { ocrMarkdown, type OcrParagraph } from "./ocr-text";
-import { joinPages, paragraphsFromTextItems, splitByMarkers, type TextItem } from "./pages";
+import { gateByConfidence, ocrBody, ocrMarkdown, type OcrLine, type OcrParagraph } from "./ocr-text";
+import { joinPages, markPage, paragraphsFromTextItems, splitByMarkers, type TextItem } from "./pages";
 import { scriptBlobUrl, scriptDataUrl } from "./script-url";
 import { ConvertError, ConvertWorker } from "./worker-client";
 
@@ -21,6 +21,8 @@ export interface Phase {
 
 export interface ConvertOptions {
   languages: string[];
+  /** Page Markers: announce every PDF page (and an OCR'd image) with a comment. */
+  pageMarkers: boolean;
   onPhase(p: Phase): void;
 }
 
@@ -28,6 +30,8 @@ export interface ConvertOutcome {
   markdown: string;
   /** What the pane head says: format, page counts, OCR languages. */
   summary: string;
+  /** A remark worth showing above the result, if any. */
+  note?: string;
 }
 
 const CANCELLED = "The conversion was cancelled.";
@@ -166,7 +170,14 @@ async function ocrWorker(run: Run, languages: string[]): Promise<TessWorker> {
   // present, the script never consults corePath. tesseract.js spawns the
   // worker itself and messages it at once, so the bootstrap must import
   // synchronously with both URLs embedded: a blob: URL (see script-url.ts).
-  const bootUrl = scriptBlobUrl(`importScripts(${JSON.stringify(scriptDataUrl(coreSrc))}, ${JSON.stringify(scriptDataUrl(workerSrc))});`);
+  // The core writes its complaints about unreadable input ("Line cannot be
+  // recognized!!") to stderr, which Emscripten maps to console.error; on a
+  // figure page that is expected, not an error, so route it to a warning.
+  const bootUrl = scriptBlobUrl(
+    `importScripts(${JSON.stringify(scriptDataUrl(coreSrc))}, ${JSON.stringify(scriptDataUrl(workerSrc))});
+    const core = TesseractCore;
+    TesseractCore = (m = {}) => core({ printErr: (s) => console.warn("tesseract: " + s), ...m });`,
+  );
   let failed: ((e: Error) => void) | null = null;
   const failure = new Promise<never>((_, reject) => (failed = reject));
   try {
@@ -188,24 +199,24 @@ async function ocrWorker(run: Run, languages: string[]): Promise<TessWorker> {
 }
 
 interface TessBlocks {
-  blocks?: { paragraphs: { lines: { text: string }[] }[] }[] | null;
+  blocks?: { paragraphs: { lines: { text: string; confidence: number }[] }[] }[] | null;
   text: string;
 }
 
-/** Recognize one image; resolves to paragraphs of lines. Cancel terminates the worker, so race it. */
+/** Recognize one image; resolves to the confident paragraphs of lines. Cancel terminates the worker, so race it. */
 async function recognize(run: Run, worker: TessWorker, image: HTMLCanvasElement | Uint8Array, label: string): Promise<OcrParagraph[]> {
   run.onPhase({ text: "OCR " + label, fraction: null });
   const cancelled = new Promise<never>((_, reject) => run.signal.addEventListener("abort", () => reject(new Error(CANCELLED)), { once: true }));
   const res = await Promise.race([worker.recognize(image as never, {}, { text: true, blocks: true }), cancelled]);
   checkCancelled(run);
   const data = res.data as unknown as TessBlocks;
-  const paragraphs: OcrParagraph[] = [];
-  if (data.blocks) {
-    for (const b of data.blocks) for (const p of b.paragraphs) paragraphs.push(p.lines.map((l) => l.text.replace(/\n$/, "")));
-  } else if (data.text) {
-    paragraphs.push(...data.text.split(/\n{2,}/).map((p) => p.split("\n")));
+  if (!data.blocks) {
+    // No layout came back: keep the plain text, ungated, rather than nothing.
+    return data.text ? data.text.split(/\n{2,}/).map((p) => p.split("\n")) : [];
   }
-  return paragraphs;
+  const paragraphs: OcrLine[][] = [];
+  for (const b of data.blocks) for (const p of b.paragraphs) paragraphs.push(p.lines.map((l) => ({ text: l.text.replace(/\n$/, ""), confidence: l.confidence })));
+  return gateByConfidence(paragraphs);
 }
 
 /* ---------------- images ---------------- */
@@ -230,12 +241,12 @@ async function imageInput(bytes: ArrayBuffer, format: ImageFormat): Promise<HTML
   return canvas;
 }
 
-async function convertImage(run: Run, bytes: ArrayBuffer, format: ImageFormat, languages: string[]): Promise<ConvertOutcome> {
+async function convertImage(run: Run, bytes: ArrayBuffer, format: ImageFormat, languages: string[], markers: boolean): Promise<ConvertOutcome> {
   const worker = await ocrWorker(run, languages);
   const input = await imageInput(bytes, format);
   const paragraphs = await recognize(run, worker, input, "image");
   return {
-    markdown: ocrMarkdown("image", paragraphs),
+    markdown: ocrMarkdown(markers ? "image" : null, paragraphs),
     summary: format + " · OCR " + languages.join("+"),
   };
 }
@@ -337,7 +348,55 @@ function isTextItem(it: TextItem | { type: string }): it is TextItem {
   return "str" in it;
 }
 
-async function convertPdf(run: Run, bytes: ArrayBuffer, languages: string[]): Promise<ConvertOutcome> {
+/**
+ * Page Markers on an accepted PDF. The converter gives one Markdown string
+ * with no page boundaries, so the text is taken again from pdf-inspector,
+ * the same engine with markers switched on, and every page is announced,
+ * including the ones with nothing on them. If pdf-inspector has no Markdown
+ * for the document, the converter's unmarked text stands.
+ */
+async function markAcceptedPdf(run: Run, bytes: ArrayBuffer, unmarked: string): Promise<ConvertOutcome> {
+  const inspector = await converter(run, "pdf-inspector");
+  run.onPhase({ text: "Marking pages", fraction: null });
+  let result;
+  try {
+    result = await inspector.pdf(bytes.slice(0));
+  } catch (e) {
+    throw explain(e);
+  }
+  checkCancelled(run);
+  const total = result.pageCount;
+  const summary = `PDF · ${total} page${total === 1 ? "" : "s"}`;
+  if (!result.markdown) return { markdown: unmarked, summary, note: "Page markers are not available for this PDF." };
+  const byPage = splitByMarkers(result.markdown);
+  const segments = Array.from({ length: total }, (_, i) => ({ page: i + 1, markdown: markPage(i + 1, "text", byPage.get(i + 1) ?? "", true) }));
+  return { markdown: joinPages(segments), summary };
+}
+
+/**
+ * A PDF goes to the converter first, like any office document, and its
+ * verdict is final: a PDF it accepts has no Scanned Pages, whatever a middle
+ * page looks like, so OCR never runs on it and pdf.js is never loaded. Only
+ * when it refuses with the pages that need OCR are those pages rendered and
+ * recognized, the rest converted structurally, and both spliced in page
+ * order.
+ */
+async function convertPdf(run: Run, bytes: ArrayBuffer, languages: string[], markers: boolean): Promise<ConvertOutcome> {
+  const w = await converter(run, "anydoc");
+  run.onPhase({ text: "Converting PDF", fraction: null });
+  let refusal: ConvertError;
+  try {
+    let markdown = await w.office(bytes.slice(0), "pdf");
+    checkCancelled(run);
+    if (!markdown.endsWith("\n")) markdown += "\n";
+    if (!markers) return { markdown, summary: "PDF" };
+    return await markAcceptedPdf(run, bytes, markdown);
+  } catch (e) {
+    if (!(e instanceof ConvertError) || e.code !== "needsOcr") throw explain(e);
+    refusal = e;
+  }
+  checkCancelled(run);
+
   const { lib, workerUrl } = await pdfjs(run);
   run.onPhase({ text: "Opening PDF", fraction: null });
   const spawned = spawnPdfWorker(lib, workerUrl);
@@ -354,30 +413,20 @@ async function convertPdf(run: Run, bytes: ArrayBuffer, languages: string[]): Pr
 
   try {
     const total = doc.numPages;
-    const textPages: number[] = [];
-    const scanned: number[] = [];
-    const textItems = new Map<number, TextItem[]>();
-    for (let n = 1; n <= total; n++) {
-      run.onPhase({ text: `Reading page ${n} of ${total}`, fraction: (n - 1) / total });
-      const page = await doc.getPage(n);
-      const content = await page.getTextContent();
-      checkCancelled(run);
-      const items = content.items.filter(isTextItem);
-      if (items.some((it) => it.str.trim().length > 0)) {
-        textPages.push(n);
-        textItems.set(n, items);
-      } else scanned.push(n);
-      page.cleanup();
-    }
+    // The converter names the Scanned Pages; a refusal without a list means every page.
+    const listed = (refusal.pages ?? []).filter((n) => n >= 1 && n <= total);
+    const scanned = (listed.length ? [...new Set(listed)] : Array.from({ length: total }, (_, i) => i + 1)).toSorted((a, b) => a - b);
+    const scannedSet = new Set(scanned);
+    const textPages = Array.from({ length: total }, (_, i) => i + 1).filter((n) => !scannedSet.has(n));
 
     const segments: { page: number; markdown: string }[] = [];
 
     if (textPages.length) {
-      const w = await converter(run, "pdf-inspector");
+      const inspector = await converter(run, "pdf-inspector");
       run.onPhase({ text: `Converting ${textPages.length} text page${textPages.length === 1 ? "" : "s"}`, fraction: null });
       let result;
       try {
-        result = await w.pdf(bytes.slice(0), textPages);
+        result = await inspector.pdf(bytes.slice(0), textPages);
       } catch (e) {
         throw explain(e);
       }
@@ -386,40 +435,42 @@ async function convertPdf(run: Run, bytes: ArrayBuffer, languages: string[]): Pr
       for (const n of textPages) {
         const md = byPage.get(n);
         if (md !== undefined && md.trim()) {
-          segments.push({ page: n, markdown: md });
+          segments.push({ page: n, markdown: markPage(n, "text", md, markers) });
         } else {
-          // The converter had nothing for a page whose text layer exists: use the text layer as plain paragraphs.
-          const paragraphs = paragraphsFromTextItems(textItems.get(n) ?? []);
-          segments.push({ page: n, markdown: paragraphs.map((p) => p.join("\n")).join("\n\n") + "\n" });
+          // The converter had nothing for a page it did not flag: use the text layer as plain paragraphs.
+          const page = await doc.getPage(n);
+          const content = await page.getTextContent();
+          page.cleanup();
+          checkCancelled(run);
+          const paragraphs = paragraphsFromTextItems(content.items.filter(isTextItem));
+          const body = paragraphs.length ? paragraphs.map((p) => p.join("\n")).join("\n\n") + "\n" : "";
+          segments.push({ page: n, markdown: markPage(n, "text", body, markers) });
         }
       }
     }
 
-    if (scanned.length) {
-      const worker = await ocrWorker(run, languages);
-      for (let i = 0; i < scanned.length; i++) {
-        const n = scanned[i]!;
-        run.onPhase({ text: `Rendering page ${n}`, fraction: i / scanned.length });
-        const page = await doc.getPage(n);
-        const base = page.getViewport({ scale: 1 });
-        const scale = Math.max(1, Math.min(OCR_DPI / 72, OCR_MAX_EDGE / Math.max(base.width, base.height)));
-        const viewport = page.getViewport({ scale });
-        const canvas = document.createElement("canvas");
-        canvas.width = Math.ceil(viewport.width);
-        canvas.height = Math.ceil(viewport.height);
-        const ctx = canvas.getContext("2d")!;
-        await page.render({ canvas, canvasContext: ctx, viewport }).promise;
-        page.cleanup();
-        checkCancelled(run);
-        const paragraphs = await recognize(run, worker, canvas, `page ${n}`);
-        canvas.width = canvas.height = 0;
-        segments.push({ page: n, markdown: ocrMarkdown("page " + n, paragraphs) });
-      }
+    const worker = await ocrWorker(run, languages);
+    for (let i = 0; i < scanned.length; i++) {
+      const n = scanned[i]!;
+      run.onPhase({ text: `Rendering page ${n}`, fraction: i / scanned.length });
+      const page = await doc.getPage(n);
+      const base = page.getViewport({ scale: 1 });
+      const scale = Math.max(1, Math.min(OCR_DPI / 72, OCR_MAX_EDGE / Math.max(base.width, base.height)));
+      const viewport = page.getViewport({ scale });
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.ceil(viewport.width);
+      canvas.height = Math.ceil(viewport.height);
+      const ctx = canvas.getContext("2d")!;
+      await page.render({ canvas, canvasContext: ctx, viewport }).promise;
+      page.cleanup();
+      checkCancelled(run);
+      const paragraphs = await recognize(run, worker, canvas, `page ${n}`);
+      canvas.width = canvas.height = 0;
+      segments.push({ page: n, markdown: markPage(n, "ocr", ocrBody(paragraphs), markers) });
     }
 
-    const parts = [`PDF · ${total} page${total === 1 ? "" : "s"}`];
-    if (scanned.length) parts.push(`${scanned.length} via OCR (${languages.join("+")})`);
-    return { markdown: joinPages(segments), summary: parts.join(" · ") };
+    const summary = `PDF · ${total} page${total === 1 ? "" : "s"} · ${scanned.length} via OCR (${languages.join("+")})`;
+    return { markdown: joinPages(segments), summary };
   } finally {
     task.destroy().catch(() => {}).then(() => spawned.terminate());
   }
@@ -439,9 +490,13 @@ export async function convertDocument(bytes: ArrayBuffer, name: string, opts: Co
         ? `.${kind.ext} is not a supported format. Word, PowerPoint, Excel, OpenDocument, RTF, EPUB, CSV, PDF, and images are.`
         : "Could not tell what kind of file this is. Give it an extension, or drop a supported document.");
     }
-    if (kind.kind === "image") return await convertImage(run, bytes, kind.format, opts.languages);
-    if (kind.format === "pdf") return await convertPdf(run, bytes, opts.languages);
-    return await convertOffice(run, bytes, kind.format);
+    let out: ConvertOutcome;
+    if (kind.kind === "image") out = await convertImage(run, bytes, kind.format, opts.languages, opts.pageMarkers);
+    else if (kind.format === "pdf") out = await convertPdf(run, bytes, opts.languages, opts.pageMarkers);
+    else out = await convertOffice(run, bytes, kind.format);
+    // With markers off, a Document that read as nothing would be a blank pane with no explanation.
+    if (!out.markdown.trim() && !out.note) out.note = "No text was found in this document.";
+    return out;
   } finally {
     if (active === run) active = null;
   }
