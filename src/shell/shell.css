@@ -125,7 +125,9 @@ body.sidebar-collapsed .collapse-btn {
 @media (hover: hover) {
   .tool-list button:hover { background: var(--surface-2); color: var(--text); }
 }
-.tool-list button.selected { background: var(--surface-2); color: var(--text); }
+/* One step above hover, so the selected tool still reads as selected while
+   the pointer is over a neighbour. */
+.tool-list button.selected { background: var(--surface-3); color: var(--text); }
 .tool-list button.cursor { box-shadow: inset 0 0 0 1px var(--accent); }
 .tool-list .no-match {
   font-size: 12px;
