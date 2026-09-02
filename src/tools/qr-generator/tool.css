@@ -19,9 +19,12 @@
   border-radius: var(--radius-sm);
 }
 
+/* Selected: the ring line without the halo (see --ring-line in theme.css). */
 .tool-qr-generator .type-row button.active {
   background: var(--accent-soft);
-  border-color: var(--accent);
+  border-color: transparent;
+  outline: var(--ring-line);
+  outline-offset: -1px;
   color: var(--text);
 }
 
@@ -145,6 +148,15 @@
   border: none;
   box-shadow: none;
 }
+/* The pane clips its rounded corners, so the focus ring lives on the pane
+   border rather than inside the textarea. Only for the bare textarea: the
+   other forms' fields carry their own rings. */
+.tool-qr-generator .pane:has(.f-text:focus) {
+  outline: var(--ring-line);
+  outline-offset: -1px;
+  border-color: transparent;
+  box-shadow: var(--ring-halo);
+}
 
 .tool-qr-generator .field {
   display: flex;
@@ -204,7 +216,8 @@
   max-height: 100%;
   object-fit: contain;
   image-rendering: pixelated;
-  border-radius: var(--radius-sm);
+  outline: 1px solid oklch(1 0 0 / 0.1);
+  outline-offset: -1px;
 }
 
 .tool-qr-generator .preview-empty {
@@ -215,4 +228,8 @@
 @media (max-width: 1000px) {
   .tool-qr-generator .panes { grid-template-columns: 1fr; }
   .tool-qr-generator .field-pair { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 767px) {
+  .tool-qr-generator .type-row button { min-height: 40px; }
 }

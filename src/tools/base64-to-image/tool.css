@@ -29,8 +29,10 @@
 }
 
 .tool-base64-to-image.dragging .b64-input {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
+  outline: var(--ring-line);
+  outline-offset: -1px;
+  border-color: transparent;
+  box-shadow: var(--ring-halo);
 }
 
 .tool-base64-to-image .output {
@@ -50,6 +52,8 @@
 .tool-base64-to-image .meta {
   font-size: 13px;
   color: var(--text-muted);
+  /* Rewritten on every decode; equal-width digits keep the line from jittering. */
+  font-variant-numeric: tabular-nums;
 }
 
 .tool-base64-to-image .actions {
@@ -74,10 +78,14 @@
   background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
 }
 
+/* Square corners: the frame's 12px radius sits 20px outside the image, so a
+   rounded image would not be concentric with it. The hairline gives a
+   transparent PNG an edge against the checkerboard. */
 .tool-base64-to-image .preview {
   max-width: 100%;
   max-height: 600px;
-  border-radius: var(--radius-sm);
+  outline: 1px solid oklch(1 0 0 / 0.1);
+  outline-offset: -1px;
 }
 
 .tool-base64-to-image .error-box {

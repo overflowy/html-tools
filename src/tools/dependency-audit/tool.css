@@ -84,7 +84,7 @@
 }
 /* The pane clips its rounded corners, so the focus ring lives on the pane border rather than inside the textarea. */
 .tool-dependency-audit .src:focus { box-shadow: none; border: none; }
-.tool-dependency-audit .input-pane:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.tool-dependency-audit .input-pane:focus-within { outline: var(--ring-line); outline-offset: -1px; border-color: transparent; box-shadow: var(--ring-halo); }
 
 .tool-dependency-audit .files {
   display: flex;
@@ -179,6 +179,7 @@
   margin: 4px 0;
   font-size: 13px;
   color: var(--text-muted);
+  text-wrap: pretty;
 }
 
 .tool-dependency-audit .type-badge {
@@ -238,9 +239,11 @@
 }
 .tool-dependency-audit .cards:empty { display: none; }
 
+/* One step tighter than the lockfile block it sits in, so the nested corners
+   read as concentric rather than pinched. */
 .tool-dependency-audit .card {
   border: 0.5px solid var(--border);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-sm);
   background: var(--bg);
 }
 .tool-dependency-audit .card[hidden] { display: none; }
@@ -397,6 +400,10 @@
 @media (max-width: 767px) {
   .tool-dependency-audit .repo-row { flex-wrap: wrap; }
   .tool-dependency-audit .repo { flex-basis: 100%; }
+  /* Touch targets: the fetch button sits outside any pane head, and the
+     chip grows around its remove button. */
+  .tool-dependency-audit .repo-row button { min-height: 40px; }
+  .tool-dependency-audit .chip-x { min-width: 36px; min-height: 36px; }
   .tool-dependency-audit .lockfile .count { display: none; }
   .tool-dependency-audit .hit-count { display: none; }
 }

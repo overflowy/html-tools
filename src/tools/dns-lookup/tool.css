@@ -198,6 +198,7 @@
   margin: 4px 0;
   font-size: 13px;
   color: var(--text-muted);
+  text-wrap: pretty;
 }
 
 .tool-dns-lookup .comment {
@@ -503,6 +504,9 @@
 
 @media (max-width: 767px) {
   .tool-dns-lookup .name { flex-basis: 100%; }
+  /* Touch targets for the buttons that are not in a pane head. */
+  .tool-dns-lookup .actions button { min-height: 40px; }
+  .tool-dns-lookup .btn-dkim { min-height: 36px; }
   .tool-dns-lookup .facts { grid-template-columns: 1fr; gap: 2px; }
   .tool-dns-lookup .facts dd { margin-bottom: 6px; }
   .tool-dns-lookup .actions { flex-wrap: wrap; }

@@ -3,6 +3,10 @@ html, body { height: 100%; }
 html, body { height: 100dvh; }
 body { overflow: hidden; }
 
+/* One easing for everything that slides or fades in the shell: decelerating,
+   so motion starts at full speed and settles rather than winding up. */
+:root { --ease-out: cubic-bezier(0.2, 0, 0, 1); }
+
 /* ---- sidebar ---- */
 
 /* The sidebar is always fixed to the left edge and starts off-screen: this
@@ -23,7 +27,7 @@ body { overflow: hidden; }
   border-right: 1px solid var(--border);
   transform: translateX(-100%);
   visibility: hidden;
-  transition: transform 0.2s ease, visibility 0s 0.2s;
+  transition: transform 0.2s var(--ease-out), visibility 0s 0.2s;
 }
 
 .sidebar-head {
@@ -57,14 +61,27 @@ body { overflow: hidden; }
   flex-shrink: 0;
 }
 .collapse-btn {
-  width: 28px;
-  height: 28px;
+  width: 40px;
+  height: 40px;
+  /* Pull the box out over the head's padding so the icon stays where the
+     28px button put it, at the filter's right edge. */
+  margin: -6px -6px -6px 0;
   color: var(--text-muted);
   border-color: transparent;
+  transition: color 0.15s, opacity 0.1s, transform 0.05s;
 }
 .collapse-btn svg { width: 16px; height: 16px; }
 @media (hover: hover) {
   .collapse-btn:hover { color: var(--text); }
+}
+/* The tool header's toggle takes over the moment the sidebar starts to
+   leave; fade this one out so there is never a second icon riding out with
+   the sidebar. It stays hidden while collapsed, so the Drawer opened over a
+   collapsed sidebar does not offer a Hide button that has nothing to hide. */
+body.sidebar-collapsed .collapse-btn {
+  opacity: 0;
+  visibility: hidden;
+  transition: color 0.15s, opacity 0.1s, transform 0.05s, visibility 0s 0.1s;
 }
 
 .filter-wrap { position: relative; }
@@ -135,7 +152,7 @@ body { overflow: hidden; }
   height: 100%;
   display: flex;
   flex-direction: column;
-  transition: margin-left 0.2s ease;
+  transition: margin-left 0.2s var(--ease-out);
 }
 
 .tool-header {
@@ -147,8 +164,8 @@ body { overflow: hidden; }
 .tool-title { min-width: 0; }
 
 .menu-btn {
-  width: 36px;
-  height: 36px;
+  width: 40px;
+  height: 40px;
 }
 .menu-btn svg { width: 16px; height: 16px; }
 /* Hamburger for the drawer on narrow screens, panel icon on wide ones. */
@@ -179,18 +196,22 @@ body { overflow: hidden; }
   background: rgb(0 0 0 / 0.5);
   opacity: 0;
   visibility: hidden;
-  transition: opacity 0.2s ease, visibility 0s 0.2s;
+  transition: opacity 0.2s var(--ease-out), visibility 0s 0.2s;
 }
 
+/* The drawer floats over the main pane, so unlike the inline sidebar it
+   gets a shadow: the backdrop dims what is behind, the shadow lifts the
+   drawer off it. */
 body.drawer-open .sidebar {
   transform: none;
   visibility: visible;
-  transition: transform 0.2s ease;
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 0.3), 12px 0 32px rgb(0 0 0 / 0.4);
+  transition: transform 0.2s var(--ease-out);
 }
 body.drawer-open .drawer-backdrop {
   opacity: 1;
   visibility: visible;
-  transition: opacity 0.2s ease;
+  transition: opacity 0.2s var(--ease-out);
 }
 
 /* ---- wide layout: the sidebar sits inline unless collapsed ---- */
@@ -200,7 +221,7 @@ body.drawer-open .drawer-backdrop {
   body:not(.sidebar-collapsed) .sidebar {
     transform: none;
     visibility: visible;
-    transition: transform 0.2s ease;
+    transition: transform 0.2s var(--ease-out);
   }
   body:not(.sidebar-collapsed) .content { margin-left: var(--sidebar-width); }
   /* Exactly one toggle on screen: the sidebar's own while inline, the
@@ -222,13 +243,14 @@ body.drawer-open .drawer-backdrop {
 
   .tool-header { padding-top: 0.75rem; padding-bottom: 0.5rem; }
 
-  .tool-list button { padding: 10px 12px; font-size: 14px; }
+  /* 44px rows: these are touch targets here. */
+  .tool-list button { padding: 12px; font-size: 14px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .sidebar, .drawer-backdrop, .content,
+  .sidebar, .drawer-backdrop, .content, .collapse-btn,
   body.drawer-open .sidebar, body.drawer-open .drawer-backdrop,
-  body:not(.sidebar-collapsed) .sidebar {
+  body:not(.sidebar-collapsed) .sidebar, body.sidebar-collapsed .collapse-btn {
     transition: none;
   }
 }

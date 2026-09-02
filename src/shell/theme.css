@@ -11,6 +11,16 @@
   --text-muted: #a0a09a;
   --accent: #c96442;
   --accent-soft: rgba(201, 100, 66, 0.15);
+  /* Focus and selection ring: an outline pulled 1px inward so it paints
+     over the element's edge, plus a soft halo shadow behind it. Not the
+     0.5px border recoloured (a hairline stroke is snapped to device pixels
+     along the curve and comes out ragged), and not a 1px shadow either (its
+     inner edge and the element's background edge are two antialiased shapes
+     meeting on the same curve, and page background leaks through the seam
+     in the corners). A rule using these also sets border-color: transparent
+     and outline-offset: -1px. */
+  --ring-line: 1.5px solid var(--accent);
+  --ring-halo: 0 0 0 3.5px var(--accent-soft);
   --danger-bg: #501313;
   --danger-text: #f7c1c1;
   --ok: #9fbf7f;
@@ -31,18 +41,23 @@ body {
   background: var(--bg);
   color: var(--text);
   line-height: 1.5;
+  /* Light text on a dark surface renders heavy with subpixel smoothing. */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 h1 {
   font-size: 22px;
   font-weight: 500;
   margin: 0 0 4px;
+  text-wrap: balance;
 }
 
 .subtitle {
   color: var(--text-muted);
   font-size: 14px;
   margin: 0;
+  text-wrap: pretty;
 }
 
 button {
@@ -54,10 +69,10 @@ button {
   border: 0.5px solid var(--border-strong);
   border-radius: var(--radius-md);
   cursor: pointer;
-  transition: background 0.15s, transform 0.05s;
+  transition: background 0.15s, filter 0.15s, transform 0.05s;
 }
 
-button:active { transform: scale(0.98); }
+button:active { transform: scale(0.96); }
 
 button.primary {
   background: var(--accent);
@@ -85,9 +100,10 @@ textarea {
 }
 
 textarea:focus {
-  outline: none;
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
+  outline: var(--ring-line);
+  outline-offset: -1px;
+  border-color: transparent;
+  box-shadow: var(--ring-halo);
 }
 
 textarea::placeholder { color: var(--text-muted); opacity: 0.7; }
@@ -122,9 +138,24 @@ input[type="text"] {
 input:focus-visible,
 select:focus-visible,
 button:focus-visible {
-  outline: none;
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
+  outline: var(--ring-line);
+  outline-offset: -1px;
+  border-color: transparent;
+  box-shadow: var(--ring-halo);
+}
+
+/* The compact buttons in pane heads and toolbars are 23px tall. Extend their
+   hit area 4px above and below without moving anything visible: every row
+   they sit in wraps with a gap of at least 8px, so neighbours never overlap. */
+.pane-head button,
+.toolbar button {
+  position: relative;
+}
+.pane-head button::after,
+.toolbar button::after {
+  content: "";
+  position: absolute;
+  inset: -4px 0;
 }
 
 .error-box {
@@ -139,4 +170,10 @@ button:focus-visible {
 @media (max-width: 767px) {
   /* Label text that only fits in the wide layout, e.g. "Paste[ from clipboard]". */
   .wide-only { display: none; }
+
+  /* Touch targets: 36px tall plus the 4px extension above is 44px. */
+  .pane-head button,
+  .toolbar button {
+    min-height: 36px;
+  }
 }
