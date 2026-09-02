@@ -7,5 +7,6 @@ import imageMetadata from "./tools/image-metadata";
 import jsoncSorter from "./tools/jsonc-sorter";
 import qrGenerator from "./tools/qr-generator";
 import saveDecoder from "./tools/save-decoder";
+import whoami from "./tools/whoami";
 
-export const tools: Tool[] = [base64ToImage, dependencyAudit, dnsLookup, imageMetadata, jsoncSorter, qrGenerator, saveDecoder];
+export const tools: Tool[] = [base64ToImage, dependencyAudit, dnsLookup, imageMetadata, jsoncSorter, qrGenerator, saveDecoder, whoami];

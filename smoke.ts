@@ -15,8 +15,10 @@ const page = await browser.newPage();
 const errors: string[] = [];
 page.on("pageerror", (e) => errors.push("pageerror: " + e.message));
 page.on("console", (m) => {
-  // Probing a repository for lockfiles that are not there is a 404 by design; the browser logs each one.
-  if (m.type() === "error" && !m.location().url.startsWith("https://raw.githubusercontent.com/")) errors.push("console: " + m.text());
+  // Probing a repository for lockfiles that are not there is a 404 by design, and the
+  // Whoami test cuts the IPv6 trace on purpose; the browser logs each one.
+  const byDesign = m.location().url.startsWith("https://raw.githubusercontent.com/") || m.location().url.startsWith("https://[2606:4700:4700::1001]/");
+  if (m.type() === "error" && !byDesign) errors.push("console: " + m.text());
 });
 
 const url = "file://" + import.meta.dir + "/dist/index.html";
@@ -28,7 +30,7 @@ function check(label: string, ok: boolean, detail = "") {
 
 await page.goto(url);
 const names = await page.locator(".tool-list button").allTextContents();
-check("sidebar lists all tools", names.length === 7, names.join(", "));
+check("sidebar lists all tools", names.length === 8, names.join(", "));
 
 // base64 tool: paste a tiny valid png via direct input.
 await page.goto(url + "#base64-to-image");
@@ -631,6 +633,54 @@ check("audit deep link restores the repository and filters",
   (await page.locator(".tool-dependency-audit .f-scope").inputValue()) === "d" &&
   (await page.locator(".tool-dependency-audit .f-group").inputValue()) === "p" &&
   (await page.locator(".tool-dependency-audit .card:not([hidden])").count()) === 2);
+
+// Whoami: both Traces answered from canned bodies, one per IP literal. What
+// this proves is that each protocol is asked on its own, that the four cards
+// fill from the traces and nothing else, and that a failed protocol is
+// reported as unreachable rather than as a missing address.
+const traceBody = (ip: string, loc: string) =>
+  "fl=1\nh=1.1.1.1\nip=" + ip + "\nts=1.0\nvisit_scheme=https\nuag=Mozilla/5.0 (smoke)\ncolo=MXP\nhttp=http/2\nloc=" + loc + "\ntls=TLSv1.3\n";
+let traceMode: "both" | "v4only" | "split" = "both";
+const traceHits: string[] = [];
+await page.route(/^https:\/\/(1\.0\.0\.1|\[2606:4700:4700::1001\])\/cdn-cgi\/trace/, (route) => {
+  const v6 = route.request().url().includes("[2606");
+  traceHits.push(v6 ? "ipv6" : "ipv4");
+  if (v6 && traceMode === "v4only") return route.abort("connectionfailed");
+  const body = v6 ? traceBody("2001:db8::1", traceMode === "split" ? "DE" : "IT") : traceBody("203.0.113.9", "IT");
+  return route.fulfill({ status: 200, contentType: "text/plain", headers: cors, body });
+});
+const whoamiValue = (row: string) => page.locator('.tool-whoami [data-row="' + row + '"] .value').textContent();
+await page.goto(url + "#whoami");
+await page.waitForSelector(".tool-whoami .value");
+await page.waitForFunction(() => !document.querySelector(".tool-whoami .value.pending"));
+check("whoami asks each protocol once on selection", traceHits.join(",") === "ipv4,ipv6" || traceHits.join(",") === "ipv6,ipv4", traceHits.join(","));
+check("whoami shows both addresses", (await whoamiValue("ipv4")) === "203.0.113.9" && (await whoamiValue("ipv6")) === "2001:db8::1");
+check("whoami shows the user agent Cloudflare received", (await whoamiValue("ua")) === "Mozilla/5.0 (smoke)");
+check("whoami names the country", (await whoamiValue("country")) === "IT · Italy");
+check("whoami copy all lists the four rows", await page.evaluate(() => {
+  let out = "";
+  navigator.clipboard.writeText = async (t: string) => { out = t; };
+  (document.querySelector(".tool-whoami .btn-copy-all") as HTMLButtonElement).click();
+  return new Promise<boolean>((resolve) => setTimeout(() =>
+    resolve(out === "IPv4: 203.0.113.9\nIPv6: 2001:db8::1\nCountry: IT · Italy\nUser agent: Mozilla/5.0 (smoke)"), 50));
+}));
+
+// IPv6 failing is "not reachable", never "no address"; the shared rows still fill from IPv4.
+traceMode = "v4only";
+await page.locator(".tool-whoami .btn-refresh").click();
+await page.waitForFunction(() => !document.querySelector(".tool-whoami .value.pending"));
+check("whoami reports an unreachable protocol without claiming no address",
+  (await whoamiValue("ipv6"))!.startsWith("Not reachable over IPv6") &&
+  (await page.locator('.tool-whoami [data-row="ipv6"] .btn-copy').isDisabled()) &&
+  (await whoamiValue("ipv4")) === "203.0.113.9" && (await whoamiValue("country")) === "IT · Italy",
+  (await whoamiValue("ipv6")) ?? "");
+
+// The two traces disagreeing on the country shows both, labeled.
+traceMode = "split";
+await page.locator(".tool-whoami .btn-refresh").click();
+await page.waitForFunction(() => !document.querySelector(".tool-whoami .value.pending"));
+check("whoami shows both countries when the traces disagree",
+  (await whoamiValue("country"))!.startsWith("IT · Italy via IPv4, DE · Germany via IPv6"), (await whoamiValue("country")) ?? "");
 
 // Narrow layout: below 768px the sidebar becomes an on-demand drawer.
 await page.setViewportSize({ width: 375, height: 667 });
