@@ -127,6 +127,8 @@
 /* ---- empty state ---- */
 
 .tool-doc-to-markdown .empty-hint {
+  /* Same width as Image Metadata's drop area; the result pane below is the one thing that earns the full width. */
+  max-width: 760px;
   border: 1px dashed var(--border-strong);
   border-radius: var(--radius-lg);
   padding: 40px 20px;

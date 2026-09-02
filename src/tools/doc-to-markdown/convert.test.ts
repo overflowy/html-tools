@@ -1,7 +1,7 @@
 // Unit tests for the engine-free parts of Document to Markdown. Run: bun test
 import { describe, expect, test } from "bun:test";
 import { ACCEPT, detect, extensionOf } from "./detect";
-import { cleanParagraphs, joinLines, ocrMarkdown } from "./ocr-text";
+import { cleanLines, cleanParagraphs, ocrMarkdown } from "./ocr-text";
 import { joinPages, paragraphsFromTextItems, splitByMarkers } from "./pages";
 
 const bytes = (...b: (number | string)[]) => {
@@ -48,17 +48,17 @@ describe("detect", () => {
 });
 
 describe("ocr text", () => {
-  test("lines join with spaces; a hyphen before a lowercase continuation is a broken word", () => {
-    expect(joinLines(["The quick", "brown fox"])).toBe("The quick brown fox");
-    expect(joinLines(["a well-", "known fact"])).toBe("a wellknown fact");
-    expect(joinLines(["the Franco-", "Prussian war"])).toBe("the Franco- Prussian war");
-    expect(joinLines(["  ", "x", ""])).toBe("x");
+  test("lines are kept one per line; a hyphen before a lowercase continuation is a broken word", () => {
+    expect(cleanLines(["The quick", "brown fox"])).toEqual(["The quick", "brown fox"]);
+    expect(cleanLines(["a well-", "known fact"])).toEqual(["a wellknown fact"]);
+    expect(cleanLines(["the Franco-", "Prussian war"])).toEqual(["the Franco-", "Prussian war"]);
+    expect(cleanLines(["  ", "x", ""])).toEqual(["x"]);
   });
-  test("cleanParagraphs drops empties and collapses runs of spaces", () => {
-    expect(cleanParagraphs([["a  b", "c"], [""], ["   "], ["d"]])).toEqual(["a b c", "d"]);
+  test("cleanParagraphs drops empties, collapses runs of spaces, keeps line breaks", () => {
+    expect(cleanParagraphs([["a  b", "c"], [""], ["   "], ["d"]])).toEqual(["a b\nc", "d"]);
   });
   test("ocrMarkdown marks the page with a comment", () => {
-    expect(ocrMarkdown("page 3", [["One"], ["Two", "lines"]])).toBe("<!-- page 3, OCR -->\n\nOne\n\nTwo lines\n");
+    expect(ocrMarkdown("page 3", [["One"], ["Two", "lines"]])).toBe("<!-- page 3, OCR -->\n\nOne\n\nTwo\nlines\n");
     expect(ocrMarkdown("image", [])).toBe("<!-- image, OCR: no text found -->\n");
   });
 });

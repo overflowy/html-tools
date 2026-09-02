@@ -68,7 +68,8 @@ const tool: Tool = {
       <input type="file" class="file-input" accept="${ACCEPT}" hidden>
       <div class="empty-hint">
         <strong>Drop a document anywhere here</strong>, choose a file, or paste an image with &#8984;V.
-        <span>Word, PowerPoint, Excel, OpenDocument, RTF, EPUB, CSV, PDF, or an image. Pages without a text layer and images go through OCR.</span>
+        <span>Word, PowerPoint, Excel, OpenDocument, RTF, EPUB, CSV, PDF, or an image.</span>
+        <span>Pages without a text layer and images go through OCR.</span>
         <span>Nothing you drop leaves the browser. The converters are downloaded on first use and kept locally.</span>
       </div>
       <div class="progress">

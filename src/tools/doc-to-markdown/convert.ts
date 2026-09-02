@@ -390,7 +390,7 @@ async function convertPdf(run: Run, bytes: ArrayBuffer, languages: string[]): Pr
         } else {
           // The converter had nothing for a page whose text layer exists: use the text layer as plain paragraphs.
           const paragraphs = paragraphsFromTextItems(textItems.get(n) ?? []);
-          segments.push({ page: n, markdown: paragraphs.map((p) => p.join(" ")).join("\n\n") + "\n" });
+          segments.push({ page: n, markdown: paragraphs.map((p) => p.join("\n")).join("\n\n") + "\n" });
         }
       }
     }
