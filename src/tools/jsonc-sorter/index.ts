@@ -1,6 +1,6 @@
 import LZString from "lz-string";
-import "./tool.css";
 import type { Tool } from "../../shell/types";
+import "./tool.css";
 
 /** Longest compressed input we are willing to put in the Deep Link. */
 const STATE_CAP = 30000;
@@ -18,12 +18,20 @@ type Tok = {
 
 function tokenize(src: string): Tok[] {
   const tokens: Tok[] = [];
-  let i = 0, line = 1;
+  let i = 0,
+    line = 1;
   const n = src.length;
   while (i < n) {
     const c = src[i]!;
-    if (c === "\n") { line++; i++; continue; }
-    if (c === " " || c === "\t" || c === "\r" || c === "\f" || c === "\v" || c === " ") { i++; continue; }
+    if (c === "\n") {
+      line++;
+      i++;
+      continue;
+    }
+    if (c === " " || c === "\t" || c === "\r" || c === "\f" || c === "\v" || c === " ") {
+      i++;
+      continue;
+    }
 
     if (c === "/" && src[i + 1] === "/") {
       let j = i;
@@ -50,7 +58,13 @@ function tokenize(src: string): Tok[] {
         j++;
       }
       if (j >= n) throw new SyntaxError("Unterminated string at line " + line);
-      tokens.push({ type: "string", raw: src.slice(i, j + 1), inner: src.slice(i + 1, j), quote: c, line });
+      tokens.push({
+        type: "string",
+        raw: src.slice(i, j + 1),
+        inner: src.slice(i + 1, j),
+        quote: c,
+        line,
+      });
       i = j + 1;
       continue;
     }
@@ -62,7 +76,8 @@ function tokenize(src: string): Tok[] {
     // number / true / false / null / anything atom-like
     let j = i;
     while (j < n && !/[\s{}[\]:,"'/]/.test(src[j]!)) j++;
-    if (j === i) throw new SyntaxError("Unexpected character " + JSON.stringify(c) + " at line " + line);
+    if (j === i)
+      throw new SyntaxError("Unexpected character " + JSON.stringify(c) + " at line " + line);
     tokens.push({ type: "atom", text: src.slice(i, j), line });
     i = j;
   }
@@ -102,8 +117,14 @@ function parse(tokens: Tok[]) {
     if (!t) throw new SyntaxError("Unexpected end of input");
     if (t.type === "punct" && t.text === "{") return parseObject();
     if (t.type === "punct" && t.text === "[") return parseArray();
-    if (t.type === "string") { next(); return { kind: "string", raw: t.raw, inner: t.inner, endLine: t.line }; }
-    if (t.type === "atom") { next(); return { kind: "literal", raw: t.text, endLine: t.line }; }
+    if (t.type === "string") {
+      next();
+      return { kind: "string", raw: t.raw, inner: t.inner, endLine: t.line };
+    }
+    if (t.type === "atom") {
+      next();
+      return { kind: "literal", raw: t.text, endLine: t.line };
+    }
     throw new SyntaxError("Unexpected token '" + t.text + "' at line " + t.line);
   }
 
@@ -124,9 +145,9 @@ function parse(tokens: Tok[]) {
       }
       if (t.type !== "string") throw new SyntaxError("Expected a quoted key at line " + t.line);
       const keyTok = next()!;
-      leading.push(...collectComments());   // comments between key and ':' get kept, moved above the key
+      leading.push(...collectComments()); // comments between key and ':' get kept, moved above the key
       expectPunct(":");
-      leading.push(...collectComments());   // comments between ':' and value
+      leading.push(...collectComments()); // comments between ':' and value
       const value = parseValue();
 
       const trailing = takeSameLine(value.endLine);
@@ -139,7 +160,9 @@ function parse(tokens: Tok[]) {
       props.push({
         keyRaw: keyTok.raw,
         keyValue: decodeKey(keyTok),
-        leading, trailing, value
+        leading,
+        trailing,
+        value,
       });
       if (!hasComma) {
         const dc = collectComments();
@@ -200,13 +223,24 @@ function parse(tokens: Tok[]) {
   const leadingDoc = collectComments();
   const root = parseValue();
   const trailingDoc = collectComments();
-  if (peek()) throw new SyntaxError("Unexpected token '" + (peek()!.text || peek()!.raw) + "' after end of document (line " + peek()!.line + ")");
+  if (peek())
+    throw new SyntaxError(
+      "Unexpected token '" +
+        (peek()!.text || peek()!.raw) +
+        "' after end of document (line " +
+        peek()!.line +
+        ")",
+    );
   return { leadingDoc, root, trailingDoc };
 }
 
 function decodeKey(tok: Tok): string {
   if (tok.quote === '"') {
-    try { return JSON.parse(tok.raw!); } catch { /* fall through */ }
+    try {
+      return JSON.parse(tok.raw!);
+    } catch {
+      /* fall through */
+    }
   }
   return tok.inner!;
 }
@@ -232,7 +266,9 @@ function sortTree(node: Node, order: string, sortBrackets: boolean) {
       }
       sortTree(p.value, order, sortBrackets);
     }
-    node.props.sort((a: Node, b: Node) => cmpKeys(a.keyValue, b.keyValue) * (order === "desc" ? -1 : 1));
+    node.props.sort(
+      (a: Node, b: Node) => cmpKeys(a.keyValue, b.keyValue) * (order === "desc" ? -1 : 1),
+    );
   } else if (node.kind === "array") {
     for (const it of node.items) sortTree(it.value, order, sortBrackets);
   }
@@ -325,7 +361,8 @@ function serialize(doc: Node, indentStr: string): string {
 function highlight(src: string): string {
   const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const span = (cls: string, s: string) => '<span class="' + cls + '">' + esc(s) + "</span>";
-  let html = "", i = 0;
+  let html = "",
+    i = 0;
   while (i < src.length) {
     const rest = src.slice(i);
     let m;
@@ -334,10 +371,13 @@ function highlight(src: string): string {
     else if ((m = rest.match(/^"(?:[^"\\\n]|\\.)*"/))) {
       const after = src.slice(i + m[0].length);
       html += span(/^\s*:/.test(after) ? "k" : "s", m[0]);
-    }
-    else if ((m = rest.match(/^-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/))) html += span("n", m[0]);
+    } else if ((m = rest.match(/^-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/))) html += span("n", m[0]);
     else if ((m = rest.match(/^(?:true|false|null)\b/))) html += span("b", m[0]);
-    else { html += esc(src[i]!); i++; continue; }
+    else {
+      html += esc(src[i]!);
+      i++;
+      continue;
+    }
     i += m[0].length;
   }
   return html;
@@ -367,7 +407,7 @@ function countStats(node: Node, acc: { keys: number; comments: number }) {
 
 const tool: Tool = {
   id: "jsonc-sorter",
-  name: "JSONC Key Sorter",
+  name: "JSON/JSONC Key Sorter",
   subtitle: "Sorts keys in JSON and JSONC, keeps every comment where it belongs.",
   keywords: ["json", "jsonc", "sort", "keys", "comments", "settings", "format"],
   mount(el, ctx) {
@@ -441,7 +481,9 @@ const tool: Tool = {
         if (compressed.length <= STATE_CAP) packed = compressed;
         else fits = false;
       }
-      ctx.setState([$optIndent.value, $optOrder.value, $optBrackets.checked ? "1" : "0", packed].join("."));
+      ctx.setState(
+        [$optIndent.value, $optOrder.value, $optBrackets.checked ? "1" : "0", packed].join("."),
+      );
       return fits;
     }
 
@@ -462,9 +504,17 @@ const tool: Tool = {
         $output.innerHTML = highlight(lastResult);
         const s = countStats(doc.root, { keys: 0, comments: 0 });
         const linked = publishState();
-        setStatus("ok", s.keys + " key" + (s.keys === 1 ? "" : "s") + " sorted" +
-          (s.comments ? " · " + s.comments + " comment" + (s.comments === 1 ? "" : "s") + " preserved" : "") +
-          (linked ? "" : " · too large to keep in the URL"));
+        setStatus(
+          "ok",
+          s.keys +
+            " key" +
+            (s.keys === 1 ? "" : "s") +
+            " sorted" +
+            (s.comments
+              ? " · " + s.comments + " comment" + (s.comments === 1 ? "" : "s") + " preserved"
+              : "") +
+            (linked ? "" : " · too large to keep in the URL"),
+        );
       } catch (e) {
         publishState();
         setStatus("error", (e as Error).message);
@@ -511,7 +561,9 @@ const tool: Tool = {
       }
       const old = $btnCopy.textContent;
       $btnCopy.textContent = "Copied";
-      setTimeout(() => { $btnCopy.textContent = old; }, 1200);
+      setTimeout(() => {
+        $btnCopy.textContent = old;
+      }, 1200);
     });
 
     $btnPaste.addEventListener("click", async () => {
