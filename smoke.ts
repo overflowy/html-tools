@@ -5,6 +5,7 @@ import jsQR from "jsqr";
 import dnsFixtures from "./src/tools/dns-lookup/fixtures.json";
 import { DKIM_SELECTORS } from "./src/tools/dns-lookup/email";
 import osvFixtures from "./src/tools/dependency-audit/fixtures/osv.json";
+import { buildDocx, buildPdf } from "./src/tools/doc-to-markdown/fixtures";
 
 const exe =
   process.env.CHROMIUM_PATH ??
@@ -30,7 +31,7 @@ function check(label: string, ok: boolean, detail = "") {
 
 await page.goto(url);
 const names = await page.locator(".tool-list button").allTextContents();
-check("sidebar lists all tools", names.length === 8, names.join(", "));
+check("sidebar lists all tools", names.length === 9, names.join(", "));
 
 // base64 tool: paste a tiny valid png via direct input.
 await page.goto(url + "#base64-to-image");
@@ -633,6 +634,143 @@ check("audit deep link restores the repository and filters",
   (await page.locator(".tool-dependency-audit .f-scope").inputValue()) === "d" &&
   (await page.locator(".tool-dependency-audit .f-group").inputValue()) === "p" &&
   (await page.locator(".tool-dependency-audit .card:not([hidden])").count()) === 2);
+
+// Document to Markdown: real conversions over the real CDN, from file://.
+// The fixtures are built here: a text PDF, a scanned one (a JPEG of text
+// drawn on a canvas, no text layer), a mixed one, a PNG, a DOCX. What this
+// proves is that every engine loads from file:// (data: URL workers), that
+// pages are told apart by their text layer, that OCR text is spliced in
+// page order with its comment, that a cancelled run leaves a clean screen,
+// and that a second visit fetches nothing.
+await page.goto("about:blank");
+await page.goto(url + "#doc-to-markdown");
+const shot = await page.evaluate(() => {
+  const c = document.createElement("canvas");
+  c.width = 1200;
+  c.height = 400;
+  const ctx = c.getContext("2d")!;
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, c.width, c.height);
+  ctx.fillStyle = "#000";
+  ctx.font = "48px Helvetica, Arial, sans-serif";
+  ctx.fillText("The quick brown fox", 60, 120);
+  ctx.fillText("jumps over the lazy dog", 60, 200);
+  return { jpeg: c.toDataURL("image/jpeg", 0.92).split(",")[1]!, png: c.toDataURL("image/png").split(",")[1]!, w: c.width, h: c.height };
+});
+const scanJpeg = { bytes: Uint8Array.from(atob(shot.jpeg), (ch) => ch.charCodeAt(0)), width: shot.w, height: shot.h };
+const docFixtures: Record<string, Uint8Array> = {
+  "text.pdf": buildPdf([{ text: ["Hello from a text PDF.", "Second line here.", "Third line."] }]),
+  "scan.pdf": buildPdf([{ jpeg: scanJpeg }]),
+  "mixed.pdf": buildPdf([
+    { text: ["Page one has text.", "It goes on for a few lines,", "enough to look like a page."] },
+    { jpeg: scanJpeg },
+    { text: ["Page three has text too.", "Also several lines long,", "so the converter trusts it."] },
+  ]),
+  "six.pdf": buildPdf(Array.from({ length: 6 }, () => ({ jpeg: scanJpeg }))),
+  "photo.png": Uint8Array.from(atob(shot.png), (ch) => ch.charCodeAt(0)),
+  "note.docx": buildDocx("A heading", ["First paragraph.", "Second paragraph."]),
+  "bad.txt": new TextEncoder().encode("hello"),
+};
+async function dropDoc(name: string) {
+  await page.evaluate(([n, s]) => {
+    const b = Uint8Array.from(atob(s!), (c) => c.charCodeAt(0));
+    const dt = new DataTransfer();
+    dt.items.add(new File([b], n!, { type: "application/octet-stream" }));
+    document.querySelector(".tool-doc-to-markdown")!.dispatchEvent(new DragEvent("drop", { dataTransfer: dt, bubbles: true, cancelable: true }));
+  }, [name, Buffer.from(docFixtures[name]!).toString("base64")]);
+}
+const docDone = () => page.waitForFunction(() => !document.querySelector(".tool-doc-to-markdown .progress")!.classList.contains("on"), null, { timeout: 180000 });
+const docOutput = () => page.locator(".tool-doc-to-markdown .output").inputValue();
+const docMeta = async () => (await page.locator(".tool-doc-to-markdown .meta").textContent()) ?? "";
+const docError = () => page.locator(".tool-doc-to-markdown .error-box").evaluate((e) => (e.classList.contains("on") ? e.textContent! : ""));
+const docPhases: string[] = [];
+await page.exposeFunction("docPhase", (t: string) => docPhases.push(t));
+const watchPhases = () => page.evaluate(() => {
+  const el = document.querySelector(".tool-doc-to-markdown .phase")!;
+  new MutationObserver(() => (window as unknown as { docPhase(t: string): void }).docPhase(el.textContent ?? "")).observe(el, { childList: true, characterData: true, subtree: true });
+});
+await watchPhases();
+
+await dropDoc("note.docx");
+await docDone();
+check("docx converts through anydoc", (await docOutput()) === "# A heading\n\nFirst paragraph.\n\nSecond paragraph.\n" && (await docMeta()) === "Word", (await docOutput()).replace(/\n/g, "⏎"));
+
+await dropDoc("text.pdf");
+await docDone();
+check("text PDF converts without OCR", (await docOutput()).includes("Hello from a text PDF.") && (await docMeta()) === "PDF · 1 page" && !(await docOutput()).includes("OCR"), (await docMeta()) + " " + (await docOutput()).slice(0, 60));
+
+await dropDoc("scan.pdf");
+await docDone();
+check("scanned PDF goes through OCR and is marked", (await docOutput()).startsWith("<!-- page 1, OCR -->\n\n") && /quick brown fox/.test(await docOutput()) && (await docMeta()) === "PDF · 1 page · 1 via OCR (eng)", (await docMeta()) + " " + (await docOutput()).slice(0, 80));
+
+await dropDoc("mixed.pdf");
+await docDone();
+const mixedOut = await docOutput();
+const mixedOrder = [mixedOut.indexOf("Page one has text."), mixedOut.indexOf("<!-- page 2, OCR -->"), mixedOut.indexOf("quick brown fox"), mixedOut.indexOf("Page three has text too.")];
+check("mixed PDF: text pages converted, scanned page recognized, spliced in page order",
+  mixedOrder.every((i, k) => i >= 0 && (k === 0 || i > mixedOrder[k - 1]!)) && !mixedOut.includes("<!-- page 1") && !mixedOut.includes("<!-- page 3") && (await docMeta()) === "PDF · 3 pages · 1 via OCR (eng)",
+  mixedOrder.join(",") + " " + (await docMeta()));
+
+await dropDoc("photo.png");
+await docDone();
+check("image goes straight to OCR", (await docOutput()).startsWith("<!-- image, OCR -->") && /quick brown fox/.test(await docOutput()) && (await docMeta()) === "png · OCR eng", (await docMeta()));
+
+await dropDoc("bad.txt");
+await docDone();
+check("unsupported file refused by name", (await docError()).startsWith(".txt is not a supported format") &&
+  !(await page.locator(".tool-doc-to-markdown .result").evaluate((e) => e.classList.contains("on"))), await docError());
+
+// Cancel mid-way through a six-page scan: no error, empty state back, and the next run is unaffected.
+await dropDoc("six.pdf");
+await page.waitForFunction(() => (document.querySelector(".tool-doc-to-markdown .phase")!.textContent ?? "").startsWith("OCR page 2"), null, { timeout: 60000 });
+await page.locator(".tool-doc-to-markdown .cancel-btn").click();
+await docDone();
+check("cancel leaves a clean screen", (await docError()) === "" &&
+  !(await page.locator(".tool-doc-to-markdown .result").evaluate((e) => e.classList.contains("on"))) &&
+  (await page.locator(".tool-doc-to-markdown .empty-hint").evaluate((e) => getComputedStyle(e).display)) === "block");
+await dropDoc("scan.pdf");
+await docDone();
+check("conversion works again after cancel", (await docMeta()) === "PDF · 1 page · 1 via OCR (eng)" && /quick brown fox/.test(await docOutput()));
+
+// Languages: picked in the picker, carried in the Deep Link and localStorage, model fetched on next OCR.
+await page.locator(".tool-doc-to-markdown .langs summary").click();
+await page.locator(".tool-doc-to-markdown .lang-filter").fill("germ");
+check("language filter narrows the list", (await page.locator(".tool-doc-to-markdown .lang-list label:not([hidden])").count()) === 2);
+await page.locator(".tool-doc-to-markdown .lang-list input[value=deu]").check();
+await page.keyboard.press("Escape");
+check("languages picked land in the Deep Link and are remembered",
+  (await page.evaluate(() => location.hash)) === "#doc-to-markdown/eng+deu" &&
+  (await page.evaluate(() => localStorage.getItem("html-tools:doc-to-markdown:langs"))) === "eng+deu" &&
+  (await page.locator(".tool-doc-to-markdown .langs summary").textContent()) === "OCR: English, German" &&
+  !(await page.locator(".tool-doc-to-markdown .langs").evaluate((e) => (e as HTMLDetailsElement).open)));
+docPhases.length = 0;
+await dropDoc("photo.png");
+await docDone();
+check("OCR runs with both models, fetching only the new one",
+  (await docMeta()) === "png · OCR eng+deu" && /quick brown fox/.test(await docOutput()) &&
+  docPhases.some((p) => p.startsWith("Downloading tesseract deu")) && !docPhases.some((p) => p.startsWith("Downloading tesseract eng")),
+  docPhases.filter((p) => p.startsWith("Downloading")).map((p) => p.split(" (")[0]).filter((v, i, a) => a.indexOf(v) === i).join(", "));
+await page.evaluate(() => localStorage.removeItem("html-tools:doc-to-markdown:langs"));
+
+// Second visit: every engine comes from IndexedDB, nothing is downloaded.
+await page.goto("about:blank");
+await page.goto(url + "#doc-to-markdown/eng+ron");
+await page.waitForFunction(() => (document.querySelector(".tool-doc-to-markdown .engines-text")!.textContent ?? "").startsWith("Engines cached"));
+check("deep link restores the languages", (await page.locator(".tool-doc-to-markdown .langs summary").textContent()) === "OCR: English, Romanian");
+await page.evaluate(() => { const b = document.querySelector(".tool-doc-to-markdown .lang-list input[value=ron]") as HTMLInputElement; b.checked = false; b.dispatchEvent(new Event("change", { bubbles: true })); });
+await watchPhases();
+docPhases.length = 0;
+await dropDoc("mixed.pdf");
+await docDone();
+check("second visit converts from cached engines with no download",
+  (await docMeta()) === "PDF · 3 pages · 1 via OCR (eng)" && !docPhases.some((p) => p.startsWith("Downloading")),
+  docPhases.join(" | ").slice(0, 200));
+const cachedText = await page.locator(".tool-doc-to-markdown .engines-text").textContent();
+check("engines footer lists what is cached", /^Engines cached \([\d.]+ MB\): /.test(cachedText!) && cachedText!.includes("anydoc") && cachedText!.includes("tesseract eng"), cachedText!.slice(0, 80));
+await page.locator(".tool-doc-to-markdown .engines-clear").click();
+await page.waitForFunction(() => (document.querySelector(".tool-doc-to-markdown .engines-text")!.textContent ?? "").startsWith("No engines cached"));
+check("clear cached engines empties the store", true);
+await page.evaluate(() => localStorage.removeItem("html-tools:doc-to-markdown:langs"));
 
 // Whoami: both Traces answered from canned bodies, one per IP literal. What
 // this proves is that each protocol is asked on its own, that the four cards

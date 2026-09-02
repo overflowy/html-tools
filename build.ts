@@ -1,9 +1,28 @@
 // Bundles the app and inlines JS + CSS into a single self-contained dist/index.html.
 
+// The Document to Markdown worker is its own bundle: the main bundle receives
+// its source as the DOC_WORKER_SRC constant and spawns it from a blob: URL, so
+// the artifact stays one file and the worker still runs from file://.
+const worker = await Bun.build({
+  entrypoints: ["src/tools/doc-to-markdown/worker.ts"],
+  target: "browser",
+  format: "esm",
+  minify: true,
+});
+
+if (!worker.success) {
+  for (const log of worker.logs) console.error(log);
+  process.exit(1);
+}
+
+let workerJs = "";
+for (const output of worker.outputs) workerJs += await output.text();
+
 const result = await Bun.build({
   entrypoints: ["src/shell/main.ts"],
   target: "browser",
   minify: true,
+  define: { DOC_WORKER_SRC: JSON.stringify(workerJs) },
 });
 
 if (!result.success) {
