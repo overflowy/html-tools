@@ -368,7 +368,7 @@ function countStats(node: Node, acc: { keys: number; comments: number }) {
 const tool: Tool = {
   id: "jsonc-sorter",
   name: "JSONC Key Sorter",
-  subtitle: "Sorts keys, keeps every comment where it belongs.",
+  subtitle: "Sorts keys in JSON and JSONC, keeps every comment where it belongs.",
   keywords: ["json", "jsonc", "sort", "keys", "comments", "settings", "format"],
   mount(el, ctx) {
     el.innerHTML = `
@@ -400,7 +400,7 @@ const tool: Tool = {
             <button class="btn-clear" type="button">Clear</button>
           </div>
           <textarea class="src" spellcheck="false" autocapitalize="off" autocomplete="off"
-            placeholder="Paste JSONC here. Comments (// and /* */) survive the sort."></textarea>
+            placeholder="Paste JSON or JSONC here. Comments (// and /* */) survive the sort; trailing commas are dropped."></textarea>
           <div class="statusbar"><span class="dot">&#9679;</span><span class="status-text">Waiting for input</span></div>
         </section>
         <section class="pane">
@@ -462,8 +462,8 @@ const tool: Tool = {
         $output.innerHTML = highlight(lastResult);
         const s = countStats(doc.root, { keys: 0, comments: 0 });
         const linked = publishState();
-        setStatus("ok", s.keys + " key" + (s.keys === 1 ? "" : "s") + " sorted · " +
-          s.comments + " comment" + (s.comments === 1 ? "" : "s") + " preserved" +
+        setStatus("ok", s.keys + " key" + (s.keys === 1 ? "" : "s") + " sorted" +
+          (s.comments ? " · " + s.comments + " comment" + (s.comments === 1 ? "" : "s") + " preserved" : "") +
           (linked ? "" : " · too large to keep in the URL"));
       } catch (e) {
         publishState();

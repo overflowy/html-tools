@@ -61,7 +61,17 @@ check("dropped image encodes to base64", true);
 await page.goto(url + "#jsonc-sorter");
 await page.locator(".tool-jsonc-sorter .src").fill('{\n  // b first\n  "b": 1,\n  "a": 2\n}');
 await page.waitForSelector(".tool-jsonc-sorter .statusbar.ok");
-check("jsonc sorts", (await page.locator(".tool-jsonc-sorter .status-text").textContent())!.includes("2 keys sorted"));
+check("jsonc sorts", (await page.locator(".tool-jsonc-sorter .status-text").textContent())!.includes("2 keys sorted · 1 comment preserved"));
+
+// Plain JSON, with trailing commas at every depth, comes out as strict JSON.
+await page.locator(".tool-jsonc-sorter .src").fill('{"b": [1, {"y": 2, "x": 3,},], "a": {"d": {"f": 1,}, "c": 2,},}');
+await page.waitForFunction(() => document.querySelector(".tool-jsonc-sorter .status-text")!.textContent!.includes("7 keys"));
+const jsonOut = (await page.locator(".tool-jsonc-sorter .output").textContent())!;
+let jsonOk = false;
+try { jsonOk = JSON.stringify(JSON.parse(jsonOut)) === '{"a":{"c":2,"d":{"f":1}},"b":[1,{"x":3,"y":2}]}'; } catch { /* invalid */ }
+check("jsonc accepts plain JSON, drops nested trailing commas", jsonOk, jsonOut.replace(/\s+/g, " "));
+check("jsonc status omits comment count when there are none",
+  (await page.locator(".tool-jsonc-sorter .status-text").textContent()) === "7 keys sorted");
 
 // save decoder: encode JSON on the right, verify base64 appears, then round-trip it back.
 await page.goto(url + "#save-decoder");
