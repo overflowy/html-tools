@@ -139,11 +139,17 @@
 .tool-markdown-editor[data-view="edit"] .editor-pane { border-right: none; }
 .tool-markdown-editor[data-view="preview"] .editor-pane { display: none; }
 
+/* Both scrolling panes are size containers, so the tall bottom padding that
+   lets the last line reach mid-pane is measured against the pane (cqh), not
+   the viewport: on a phone in a stacked Split, 45vh alone was taller than
+   the pane, and the padding pushed the textarea out of it. */
 .tool-markdown-editor .editor-wrap {
   position: relative;
   flex: 1;
   min-height: 0;
   display: flex;
+  overflow: hidden;
+  container-type: size;
 }
 /* The textarea and the mirror of its text behind it must wrap identically:
    one set of metrics for both, and a stable scrollbar gutter so a scrollbar
@@ -154,7 +160,7 @@
   font-size: 13px;
   line-height: 1.7;
   letter-spacing: normal;
-  padding: 24px 28px 45vh;
+  padding: 24px 28px 45cqh;
   tab-size: 2;
   white-space: pre-wrap;
   overflow-wrap: break-word;
@@ -192,6 +198,7 @@
   overflow-y: auto;
   background: var(--doc-bg);
   color: var(--doc-text);
+  container-type: size;
 }
 
 /* ---- status bar ---- */
@@ -416,7 +423,7 @@
   max-width: 760px;
   width: 100%;
   margin: 0 auto;
-  padding: 32px 40px 45vh;
+  padding: 32px 40px 45cqh;
   min-width: 0;
   font-size: 14.5px;
   line-height: 1.65;
@@ -550,8 +557,8 @@
 
 .tool-markdown-editor.stacked[data-view="split"] .body { flex-direction: column; }
 .tool-markdown-editor.stacked[data-view="split"] .editor-pane { border-right: none; border-bottom: 1px solid var(--border); }
-.tool-markdown-editor.stacked .doc { padding: 20px 18px 40vh; }
-.tool-markdown-editor.stacked .editor, .tool-markdown-editor.stacked .editor-marks { padding: 18px 18px 40vh; }
+.tool-markdown-editor.stacked .doc { padding: 20px 18px 40cqh; }
+.tool-markdown-editor.stacked .editor, .tool-markdown-editor.stacked .editor-marks { padding: 18px 18px 40cqh; }
 
 @media (max-width: 767px) {
   .tool-markdown-editor .filename { width: 12ch; }
@@ -579,6 +586,8 @@
   .tool-markdown-editor .preview-pane {
     display: block !important;
     overflow: visible;
+    /* Size containment would print an empty pane: the page count comes from the content's height. */
+    container-type: normal;
     --doc-bg: #ffffff;
     --doc-text: #18181b;
     --doc-text-soft: #52525b;
