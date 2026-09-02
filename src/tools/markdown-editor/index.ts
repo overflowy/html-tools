@@ -1,7 +1,7 @@
 import "./tool.css";
 import LZString from "lz-string";
 import type { Tool } from "../../shell/types";
-import { loadDiagrams, loadMath, type LoadProgress } from "./engines";
+import { loadDiagrams, loadMath } from "./engines";
 import { escapeHtml, headings, renderMarkdown, type Heading } from "./render";
 import { welcome } from "./welcome";
 
@@ -188,14 +188,10 @@ const tool: Tool = {
       if (engines[kind] !== "idle") return;
       engines[kind] = "loading";
       const label = kind === "math" ? "math typesetter" : "diagram renderer";
-      const progress: LoadProgress = (loaded, total) => {
-        const pct = total ? Math.min(100, Math.round((loaded / total) * 100)) : 0;
-        setStatus("Loading the " + label + "… " + pct + "%", true);
-      };
-      (kind === "math" ? loadMath(progress) : loadDiagrams(progress)).then(
+      // Quietly: the document reads fine meanwhile, and the result speaks for itself.
+      (kind === "math" ? loadMath() : loadDiagrams()).then(
         () => {
           engines[kind] = "ready";
-          setStatus("Loaded the " + label + "; it stays in this browser.");
           render();
         },
         (e: unknown) => {
