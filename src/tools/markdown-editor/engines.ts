@@ -1,12 +1,14 @@
 // The Engines the Markdown Editor fetches: the math typesetter (KaTeX, with
-// its stylesheet and fonts) and the diagram renderer (Mermaid). Neither is
-// fetched before a Draft actually contains math or a diagram; until then
-// math reads as its source and a mermaid fence is an ordinary code block.
+// its stylesheet and fonts), the diagram renderer (Mermaid), and the
+// formatter (Prettier with its Markdown plugin). None is fetched before it
+// is needed: math reads as its source and a mermaid fence is an ordinary
+// code block until then, and the formatter arrives on the first Format.
 
 import { getEngine, type EngineAsset, type Progress } from "../../shared/engines";
 
 export const KATEX_VERSION = "0.18.5";
 export const MERMAID_VERSION = "11.17.2";
+export const PRETTIER_VERSION = "3.9.6";
 
 const NPM = "https://cdn.jsdelivr.net/npm/";
 const KATEX = `${NPM}katex@${KATEX_VERSION}/dist/`;
@@ -23,6 +25,14 @@ export const ENGINES = {
   mermaid: {
     id: "mermaid", label: "Mermaid", version: MERMAID_VERSION,
     url: `${NPM}mermaid@${MERMAID_VERSION}/dist/mermaid.min.js`, approxBytes: 3_570_000,
+  },
+  prettier: {
+    id: "prettier", label: "Prettier", version: PRETTIER_VERSION,
+    url: `${NPM}prettier@${PRETTIER_VERSION}/standalone.mjs`, approxBytes: 82_000,
+  },
+  prettierMarkdown: {
+    id: "prettier-markdown", label: "Prettier Markdown plugin", version: PRETTIER_VERSION,
+    url: `${NPM}prettier@${PRETTIER_VERSION}/plugins/markdown.mjs`, approxBytes: 292_000,
   },
 } satisfies Record<string, EngineAsset>;
 
@@ -42,6 +52,9 @@ export interface MermaidApi {
   initialize(config: { startOnLoad: boolean; securityLevel: string; theme: string; fontFamily: string }): void;
   render(id: string, text: string): Promise<{ svg: string }>;
 }
+
+/** Formats Markdown source in Prettier's style. */
+export type Formatter = (src: string) => Promise<string>;
 
 /** Bytes loaded so far across everything one Engine needs, for a status line. */
 export type LoadProgress = (loaded: number, total: number) => void;
@@ -142,4 +155,32 @@ export function loadDiagrams(onProgress?: LoadProgress): Promise<MermaidApi> {
   })();
   diagramsLoading.catch(() => (diagramsLoading = null));
   return diagramsLoading;
+}
+
+/** Imports an ES module from its bytes. */
+async function importModule<T>(bytes: ArrayBuffer): Promise<T> {
+  const url = URL.createObjectURL(new Blob([bytes], { type: "text/javascript" }));
+  try {
+    return (await import(url)) as T;
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+interface PrettierModule {
+  format(src: string, options: { parser: string; plugins: unknown[] }): Promise<string>;
+}
+
+let formatterLoading: Promise<Formatter> | null = null;
+
+export function loadFormatter(onProgress?: LoadProgress): Promise<Formatter> {
+  if (formatterLoading) return formatterLoading;
+  const report = combined(onProgress);
+  formatterLoading = (async () => {
+    const [core, plugin] = await Promise.all([getEngine(ENGINES.prettier, report), getEngine(ENGINES.prettierMarkdown, report)]);
+    const [prettier, markdown] = await Promise.all([importModule<PrettierModule>(core), importModule<unknown>(plugin)]);
+    return (src) => prettier.format(src, { parser: "markdown", plugins: [markdown] });
+  })();
+  formatterLoading.catch(() => (formatterLoading = null));
+  return formatterLoading;
 }

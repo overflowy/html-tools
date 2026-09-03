@@ -1008,6 +1008,14 @@ await page.keyboard.press(process.platform === "darwin" ? "Meta+e" : "Control+e"
 check("the editor keeps its scroll position across preview and back",
   (await page.locator(mv + ".editor").evaluate((t) => t.scrollTop)) === 900);
 
+// Format: the formatter is fetched on first use, the Draft comes back in one style, math untouched.
+await page.locator(mv + ".editor").fill("# Title\nText with *emph* and __strong__.\n* one\n* two\n\n|a|b|\n|-|-|\n|1|2|\n\nMath $x_1 * y$ stays.\n");
+await page.locator(mv + ".format-btn").click();
+await page.waitForFunction(() => (document.querySelector(".tool-markdown-editor .editor") as HTMLTextAreaElement).value.startsWith("# Title\n\n"), null, { timeout: 120000 });
+check("format rewrites the draft in one style",
+  (await page.locator(mv + ".editor").inputValue()) === "# Title\n\nText with _emph_ and **strong**.\n\n- one\n- two\n\n| a   | b   |\n| --- | --- |\n| 1   | 2   |\n\nMath $x_1 * y$ stays.\n",
+  JSON.stringify(await page.locator(mv + ".editor").inputValue()));
+
 // New asks first when there is text: the button becomes the confirmation, a second click discards.
 const beforeNew = await page.locator(mv + ".editor").inputValue();
 await page.locator(mv + ".new-btn").click();

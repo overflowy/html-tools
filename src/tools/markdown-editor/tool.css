@@ -100,6 +100,7 @@
   color: var(--accent);
 }
 .tool-markdown-editor .light-btn.toggled svg { transform: scaleX(-1); }
+.tool-markdown-editor .format-btn[aria-busy] { opacity: 0.6; cursor: progress; }
 
 /* ---- the pane: Contents | editor | preview, with a status bar ---- */
 

@@ -66,7 +66,7 @@ The math and diagram engines are fetched the first time a document needs them, t
 ### Callouts
 
 > [!TIP]
-> The list button toggles **Contents**, the half-filled circle switches the page to light, and ${mod}F opens find and replace.
+> The list button toggles **Contents**, the half-filled circle switches the page to light, the sparkle formats the Markdown, and ${mod}F opens find and replace.
 
 > [!WARNING]
 > A renamed file is saved as a new one: Save asks where to put it.

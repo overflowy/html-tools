@@ -1,7 +1,7 @@
 import "./tool.css";
 import LZString from "lz-string";
 import type { Tool } from "../../shell/types";
-import { loadDiagrams, loadMath } from "./engines";
+import { loadDiagrams, loadFormatter, loadMath } from "./engines";
 import { escapeHtml, headings, renderMarkdown, type Heading } from "./render";
 import { welcome } from "./welcome";
 
@@ -50,6 +50,8 @@ const ICON_CONTENTS = SVG + '<path d="M2.5 4h11M2.5 8h7M2.5 12h9"/></svg>';
 const ICON_EXPORT = SVG + '<path d="M9 1.5H4a.5.5 0 0 0-.5.5v12a.5.5 0 0 0 .5.5h8a.5.5 0 0 0 .5-.5V5z"/><path d="M9 1.5V5h3.5M8 7v5M6 10l2 2 2-2"/></svg>';
 /** A half-filled disc: the light toggle, mirrored while on. */
 const ICON_CONTRAST = SVG + '<circle cx="8" cy="8" r="6"/><path d="M8 2a6 6 0 0 1 0 12z" fill="currentColor" stroke="none"/></svg>';
+/** A large four-point star with a small one beside it: Format. */
+const ICON_SPARKLE = SVG + '<path d="M6.5 2.5l1.2 3.3 3.3 1.2-3.3 1.2-1.2 3.3-1.2-3.3L2 7l3.3-1.2z"/><path d="M12 9.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z"/></svg>';
 
 function read(key: string): string | null {
   try {
@@ -99,6 +101,7 @@ const tool: Tool = {
         </div>
         <button type="button" class="toc-btn icon" title="Contents" aria-label="Contents" aria-pressed="false">${ICON_CONTENTS}</button>
         <button type="button" class="light-btn icon" title="Light document" aria-label="Light document" aria-pressed="false">${ICON_CONTRAST}</button>
+        <button type="button" class="format-btn icon" title="Format the Markdown" aria-label="Format the Markdown">${ICON_SPARKLE}</button>
         <button type="button" class="pdf-btn" title="Print the rendered document, or save it as a PDF">${ICON_EXPORT}<span class="wide-only">Export PDF</span></button>
         <button type="button" class="save-btn primary" title="Save (${MOD}S)">Save</button>
       </div>
@@ -876,6 +879,36 @@ const tool: Tool = {
     $(".open-btn").addEventListener("click", openPicker);
     $(".save-btn").addEventListener("click", save);
     $(".pdf-btn").addEventListener("click", exportPdf);
+
+    /* ---- Format: the Draft rewritten in one canonical style, as one undo step ---- */
+
+    const formatBtn = $<HTMLButtonElement>(".format-btn");
+    async function formatDraft() {
+      if (formatBtn.disabled || !editor.value.trim()) return;
+      formatBtn.disabled = true;
+      formatBtn.setAttribute("aria-busy", "true");
+      try {
+        const format = await loadFormatter();
+        const before = editor.value;
+        const after = await format(before);
+        if (before !== editor.value) return; // edited meanwhile: leave it
+        if (after === before) {
+          setStatus("Already formatted");
+          return;
+        }
+        const top = editor.scrollTop;
+        keepingFocus(() => replaceRange(0, before.length, after));
+        editor.scrollTop = top;
+        afterEdit();
+        setStatus("Formatted");
+      } catch (e) {
+        setStatus("Could not format: " + (e instanceof Error ? e.message : String(e)));
+      } finally {
+        formatBtn.disabled = false;
+        formatBtn.removeAttribute("aria-busy");
+      }
+    }
+    formatBtn.addEventListener("click", formatDraft);
 
     window.addEventListener("keydown", (e) => {
       if (el.hidden) return;
