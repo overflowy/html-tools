@@ -991,6 +991,15 @@ check("replace all rewrites the draft",
   (await page.locator(mv + ".find-count").textContent()) === "0/0");
 await page.locator(mv + ".find-close").click();
 
+// Mod+E trades Edit for Preview and back; the choice is remembered like the buttons'.
+await page.keyboard.press(process.platform === "darwin" ? "Meta+e" : "Control+e");
+check("mod+e switches to preview", (await mvHost().getAttribute("data-view")) === "preview");
+await page.keyboard.press(process.platform === "darwin" ? "Meta+e" : "Control+e");
+check("mod+e switches back to edit with the editor focused",
+  (await mvHost().getAttribute("data-view")) === "edit" &&
+  (await page.locator(mv + ".editor").evaluate((t) => t === document.activeElement)) &&
+  (await page.evaluate(() => localStorage.getItem("html-tools:markdown-editor:view"))) === "edit");
+
 // New asks first when there is text: the button becomes the confirmation, a second click discards.
 await page.locator(mv + ".new-btn").click();
 check("new arms a confirmation and keeps the text",

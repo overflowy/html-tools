@@ -878,6 +878,12 @@ const tool: Tool = {
       } else if (k === "f" && view !== "preview") {
         e.preventDefault();
         openFind();
+      } else if (k === "e") {
+        // Edit and Preview trade places; Split counts as editing.
+        e.preventDefault();
+        setView(view === "preview" ? "edit" : "preview");
+        write(VIEW_KEY, view);
+        if (view === "edit") editor.focus();
       }
     });
 

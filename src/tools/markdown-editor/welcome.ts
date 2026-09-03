@@ -79,6 +79,6 @@ Numbered on first use[^why], gathered at the end.
 
 ---
 
-Keys: **${mod}S** save, **${mod}⇧S** save as, **${mod}O** open, **${mod}F** find, **Tab** and **⇧Tab** indent and outdent.
+Keys: **${mod}S** save, **${mod}⇧S** save as, **${mod}O** open, **${mod}E** edit or preview, **${mod}F** find, **Tab** and **⇧Tab** indent and outdent.
 `;
 }
