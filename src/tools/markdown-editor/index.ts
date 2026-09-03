@@ -675,7 +675,12 @@ const tool: Tool = {
 
     /* ---- View Mode ---- */
 
+    // A pane hidden with display: none forgets its scroll position, so each
+    // pane's position is kept across the modes that hide it.
+    const kept = { editor: 0, preview: 0 };
     function setView(mode: View) {
+      if (view !== "preview") kept.editor = editor.scrollTop;
+      if (view !== "edit") kept.preview = previewPane.scrollTop;
       view = mode;
       el.dataset.view = mode;
       el.querySelectorAll<HTMLElement>(".seg button").forEach((b) => {
@@ -683,6 +688,15 @@ const tool: Tool = {
         b.classList.toggle("active", on);
         b.setAttribute("aria-selected", String(on));
       });
+      if (mode !== "preview") {
+        expected.set(editor, kept.editor);
+        editor.scrollTop = kept.editor;
+        marks.scrollTop = kept.editor;
+      }
+      if (mode !== "edit") {
+        expected.set(previewPane, kept.preview);
+        previewPane.scrollTop = kept.preview;
+      }
       spy();
     }
     el.querySelectorAll<HTMLElement>(".seg button").forEach((btn) => {

@@ -1000,11 +1000,20 @@ check("mod+e switches back to edit with the editor focused",
   (await page.locator(mv + ".editor").evaluate((t) => t === document.activeElement)) &&
   (await page.evaluate(() => localStorage.getItem("html-tools:markdown-editor:view"))) === "edit");
 
+// A hidden pane forgets where it was scrolled; the Tool remembers for it.
+await page.locator(mv + ".editor").fill("line\n".repeat(400));
+await page.locator(mv + ".editor").evaluate((t) => (t.scrollTop = 900));
+await page.keyboard.press(process.platform === "darwin" ? "Meta+e" : "Control+e");
+await page.keyboard.press(process.platform === "darwin" ? "Meta+e" : "Control+e");
+check("the editor keeps its scroll position across preview and back",
+  (await page.locator(mv + ".editor").evaluate((t) => t.scrollTop)) === 900);
+
 // New asks first when there is text: the button becomes the confirmation, a second click discards.
+const beforeNew = await page.locator(mv + ".editor").inputValue();
 await page.locator(mv + ".new-btn").click();
 check("new arms a confirmation and keeps the text",
   (await page.locator(mv + ".new-btn").textContent()) === "Discard?" &&
-  (await page.locator(mv + ".editor").inputValue()) === "gamma beta gamma\n");
+  (await page.locator(mv + ".editor").inputValue()) === beforeNew && beforeNew.length > 0);
 await page.locator(mv + ".editor").click();
 check("clicking elsewhere disarms it", (await page.locator(mv + ".new-btn").textContent()) === "New");
 await page.locator(mv + ".new-btn").click();
