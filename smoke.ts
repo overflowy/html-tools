@@ -917,6 +917,13 @@ check("welcome draft renders a table, a task list, a callout, highlighted code, 
   (await page.locator(mv + ".doc pre code.hljs .hljs-keyword").count()) >= 1 &&
   (await page.locator(mv + ".doc .footnotes li").count()) === 1);
 
+// A code block's Copy button puts the block on the clipboard and says so briefly.
+await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+await page.locator(mv + ".doc .code-wrap .copy-btn").first().click();
+await page.waitForFunction(() => document.querySelector(".tool-markdown-editor .doc .copy-btn")?.textContent === "Copied");
+const copiedText = await page.evaluate(() => navigator.clipboard.readText());
+check("copy button copies the code block", copiedText.startsWith("export function slug"), copiedText.slice(0, 40));
+
 // Engines: the welcome Draft has math and a diagram, so both load, from the CDN the first time.
 await page.waitForFunction(() => document.querySelectorAll(".tool-markdown-editor .doc .katex").length >= 2, null, { timeout: 120000 });
 await page.waitForFunction(() => document.querySelector(".tool-markdown-editor .doc .mermaid-block svg"), null, { timeout: 120000 });

@@ -545,6 +545,32 @@
 .tool-markdown-editor .doc .math-err { color: var(--doc-danger); font-family: var(--mono); font-size: 0.85em; }
 .tool-markdown-editor .doc .mermaid-block { margin: 0 0 0.9em; overflow-x: auto; text-align: center; }
 .tool-markdown-editor .doc .mermaid-block svg { max-width: 100%; height: auto; }
+/* Copy on code blocks: shown on hover, or always where there is no hover. */
+.tool-markdown-editor .doc .code-wrap { position: relative; margin: 0 0 0.9em; }
+.tool-markdown-editor .doc .code-wrap pre { margin: 0; }
+.tool-markdown-editor .doc .copy-btn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 2px 7px;
+  border: 1px solid var(--doc-border);
+  border-radius: 5px;
+  background: var(--doc-bg);
+  color: var(--doc-text-soft);
+  opacity: 0;
+  transition: opacity 0.12s, background 0.15s;
+}
+.tool-markdown-editor .doc .code-wrap:hover .copy-btn,
+.tool-markdown-editor .doc .copy-btn:focus-visible { opacity: 1; }
+@media (hover: hover) {
+  .tool-markdown-editor .doc .copy-btn:hover { color: var(--doc-accent); border-color: var(--doc-accent); background: var(--doc-bg); }
+}
+@media (hover: none) {
+  .tool-markdown-editor .doc .copy-btn { opacity: 1; }
+}
 .tool-markdown-editor .doc pre.mermaid-err {
   text-align: left;
   border-color: var(--doc-danger);
@@ -580,7 +606,8 @@
   body.md-print .tool-host { display: none; }
   body.md-print .tool-markdown-editor { display: block; padding: 0; overflow: visible; height: auto; }
   .tool-markdown-editor .toolbar, .tool-markdown-editor .toc, .tool-markdown-editor .toc-backdrop,
-  .tool-markdown-editor .editor-pane, .tool-markdown-editor .footer, .tool-markdown-editor .drop-overlay { display: none !important; }
+  .tool-markdown-editor .editor-pane, .tool-markdown-editor .footer, .tool-markdown-editor .drop-overlay,
+  .tool-markdown-editor .copy-btn { display: none !important; }
   .tool-markdown-editor .pane { display: block; border: none; border-radius: 0; overflow: visible; background: #fff; min-height: 0; }
   .tool-markdown-editor .body { display: block; }
   .tool-markdown-editor .preview-pane {

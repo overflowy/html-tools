@@ -214,6 +214,19 @@ export function renderMarkdown(src: string, root: HTMLElement, opts: RenderOptio
       code.parentElement!.replaceWith(div);
     });
   }
+  // Every remaining code block gets a Copy button; the click is handled by the Tool.
+  root.querySelectorAll<HTMLElement>("pre").forEach((pre) => {
+    const wrap = document.createElement("div");
+    wrap.className = "code-wrap";
+    pre.replaceWith(wrap);
+    wrap.appendChild(pre);
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "copy-btn";
+    btn.textContent = "Copy";
+    btn.title = "Copy this code block";
+    wrap.appendChild(btn);
+  });
   return {
     needsMath: math.length > 0 && !katex(),
     needsDiagrams: fences.length > 0 && !mermaid(),

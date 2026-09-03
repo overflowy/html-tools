@@ -612,12 +612,41 @@ const tool: Tool = {
 
     // Links within the document jump within it, without touching the Deep Link.
     doc.addEventListener("click", (e) => {
+      const btn = (e.target as HTMLElement).closest<HTMLButtonElement>(".copy-btn");
+      if (btn) {
+        copyCode(btn);
+        return;
+      }
       const a = (e.target as HTMLElement).closest<HTMLAnchorElement>('a[href^="#"]');
       if (!a) return;
       e.preventDefault();
       const target = doc.querySelector<HTMLElement>("#" + CSS.escape(a.getAttribute("href")!.slice(1)));
       if (target) scrollDocTo(target, 40);
     });
+
+    async function copyCode(btn: HTMLButtonElement) {
+      const text = btn.parentElement?.querySelector("pre")?.textContent ?? "";
+      let ok = false;
+      try {
+        await navigator.clipboard.writeText(text);
+        ok = true;
+      } catch {
+        // the async clipboard needs a secure context; this keeps copy working from file://
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.cssText = "position:fixed;left:-9999px;top:0";
+        document.body.appendChild(ta);
+        ta.select();
+        try {
+          ok = document.execCommand("copy");
+        } catch {
+          ok = false;
+        }
+        ta.remove();
+      }
+      btn.textContent = ok ? "Copied" : "Failed";
+      setTimeout(() => (btn.textContent = "Copy"), 1200);
+    }
 
     // The entry for the heading at the top of the preview is highlighted as it scrolls.
     let spyPending = false;
