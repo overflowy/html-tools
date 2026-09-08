@@ -1086,7 +1086,19 @@ class Ide {
     dialog.innerHTML = `
       <form method="dialog" class="settings-form">
         <h2>Project settings</h2>
-        <p class="settings-note">Stored in <code>pyproject.toml</code>; edit that file directly for anything not here.</p>
+        <p class="settings-note">Stored in <code>pyproject.toml</code>; edit it directly for anything not displayed here.</p>
+        <div class="settings-scroll" tabindex="-1">
+        <div class="settings-grid">
+        <fieldset><legend>Editor</legend>
+          <label>Tab size <input name="tabSize" type="number" min="1" max="8" value="${st.ide.tabSize}"></label>
+          <label class="check"><input name="formatOnRun" type="checkbox"${st.ide.formatOnRun ? " checked" : ""}> Format on Run</label>
+          <label class="check"><input name="minimap" type="checkbox"${st.ide.minimap ? " checked" : ""}> Minimap</label>
+          <label class="check"><input name="wordWrap" type="checkbox"${st.ide.wordWrap ? " checked" : ""}> Word wrap</label>
+        </fieldset>
+        <fieldset><legend>Run</legend>
+          <label>Arguments (sys.argv[1:]) <input name="args" value="${esc(st.ide.args.join(" "))}" placeholder="--verbose input.txt"></label>
+          <label><span>Environment (<code>KEY=VALUE</code> per line)</span> <textarea name="env" rows="3">${esc(Object.entries(st.ide.env).map(([k, v]) => `${k}=${v}`).join("\n"))}</textarea></label>
+        </fieldset>
         <fieldset><legend>Pyright</legend>
           <label>Type checking mode <select name="typeCheckingMode">${["off", "basic", "standard", "strict"].map((m) => `<option value="${m}"${st.pyright.typeCheckingMode === m ? " selected" : ""}>${m}</option>`).join("")}</select></label>
         </fieldset>
@@ -1096,16 +1108,8 @@ class Ide {
           <label>Rules (ignore) <input name="ignore" value="${esc((ruff.lint?.ignore ?? []).join(", "))}"></label>
           <label>Quote style <select name="quoteStyle">${["double", "single", "preserve"].map((q) => `<option value="${q}"${(ruff.format?.["quote-style"] ?? "double") === q ? " selected" : ""}>${q}</option>`).join("")}</select></label>
         </fieldset>
-        <fieldset><legend>Editor</legend>
-          <label>Tab size <input name="tabSize" type="number" min="1" max="8" value="${st.ide.tabSize}"></label>
-          <label class="check"><input name="formatOnRun" type="checkbox"${st.ide.formatOnRun ? " checked" : ""}> Format on Run</label>
-          <label class="check"><input name="minimap" type="checkbox"${st.ide.minimap ? " checked" : ""}> Minimap</label>
-          <label class="check"><input name="wordWrap" type="checkbox"${st.ide.wordWrap ? " checked" : ""}> Word wrap</label>
-        </fieldset>
-        <fieldset><legend>Run</legend>
-          <label>Arguments (sys.argv[1:]) <input name="args" value="${esc(st.ide.args.join(" "))}" placeholder="--verbose input.txt"></label>
-          <label>Environment (KEY=VALUE per line) <textarea name="env" rows="3">${esc(Object.entries(st.ide.env).map(([k, v]) => `${k}=${v}`).join("\n"))}</textarea></label>
-        </fieldset>
+        </div>
+        </div>
         <div class="prompt-actions"><button type="button" class="settings-cancel">Cancel</button><button type="submit" class="primary">Save</button></div>
       </form>`;
     const form = dialog.querySelector("form") as HTMLFormElement;
@@ -1144,6 +1148,8 @@ class Ide {
       void this.writeText(PROJECT_FILE, next);
     };
     dialog.showModal();
+    // showModal focuses the first field; nothing should look chosen until the user chooses.
+    (dialog.querySelector(".settings-scroll") as HTMLElement).focus();
   }
 
   /* ---------------- the Checker ---------------- */

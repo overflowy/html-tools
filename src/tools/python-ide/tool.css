@@ -495,8 +495,11 @@
 }
 .tool-python-ide dialog legend { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); padding: 0 4px; }
 .tool-python-ide dialog label { display: flex; flex-direction: column; gap: 3px; font-size: 12.5px; }
+.tool-python-ide dialog label code { font-family: var(--mono); font-size: 12px; }
 .tool-python-ide dialog label.check { flex-direction: row; align-items: center; gap: 8px; }
 .tool-python-ide dialog input:not([type="checkbox"]), .tool-python-ide dialog select, .tool-python-ide dialog textarea {
+  /* Native spinners and pickers drawn for a dark surface, as the QR tool's size input has them. */
+  color-scheme: dark;
   font-family: var(--mono);
   font-size: 12.5px;
   padding: 5px 8px;
@@ -514,7 +517,31 @@
 .tool-python-ide .prompt-label { margin-bottom: 8px; font-size: 13px; }
 .tool-python-ide .prompt-input { width: 100%; }
 .tool-python-ide .prompt-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
-.tool-python-ide .settings-form { max-height: 80vh; overflow: auto; }
+.tool-python-ide .settings-dialog { max-width: min(820px, 92vw); width: 820px; }
+/* Only the sections scroll, never the title or the buttons; a thin scrollbar
+   in its own gutter, so it neither overlaps fields nor shifts them. */
+.tool-python-ide .settings-form { display: flex; flex-direction: column; max-height: 85vh; min-height: 0; }
+.tool-python-ide .settings-scroll {
+  outline: none;
+  min-height: 0;
+  overflow: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+  scrollbar-gutter: stable;
+  margin-right: -8px;
+  padding-right: 8px;
+}
+/* The four sections as a 2 by 2 grid, each cell stretching to its row's height. */
+.tool-python-ide .settings-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 12px;
+  align-items: stretch;
+}
+.tool-python-ide .settings-grid fieldset { margin: 0; }
+@media (max-width: 900px) {
+  .tool-python-ide .settings-grid { grid-template-columns: 1fr; }
+}
 
 /* ---- drop, narrow ---- */
 
