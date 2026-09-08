@@ -1,28 +1,42 @@
 // Bundles the app and inlines JS + CSS into a single self-contained dist/index.html.
 
-// The Document to Markdown worker is its own bundle: the main bundle receives
-// its source as the DOC_WORKER_SRC constant and spawns it from a blob: URL, so
-// the artifact stays one file and the worker still runs from file://.
-const worker = await Bun.build({
-  entrypoints: ["src/tools/doc-to-markdown/worker.ts"],
-  target: "browser",
-  format: "esm",
-  minify: true,
-});
+// Workers are their own bundles: the main bundle receives each one's source
+// as a constant and spawns it from a data: or blob: URL, so the artifact
+// stays one file and the workers still run from file://.
+const WORKERS = [
+  { entry: "src/tools/doc-to-markdown/worker.ts", constant: "DOC_WORKER_SRC" },
+  { entry: "src/tools/python-ide/py-worker.ts", constant: "PYIDE_PY_WORKER_SRC" },
+  { entry: "src/tools/python-ide/ruff-worker.ts", constant: "PYIDE_RUFF_WORKER_SRC" },
+];
 
-if (!worker.success) {
-  for (const log of worker.logs) console.error(log);
-  process.exit(1);
+// Python source files are imported as text: the interpreter worker writes
+// them into its filesystem at boot.
+const loader = { ".py": "text" } as const;
+
+const define: Record<string, string> = {};
+for (const w of WORKERS) {
+  const worker = await Bun.build({
+    entrypoints: [w.entry],
+    target: "browser",
+    format: "esm",
+    minify: true,
+    loader,
+  });
+  if (!worker.success) {
+    for (const log of worker.logs) console.error(log);
+    process.exit(1);
+  }
+  let src = "";
+  for (const output of worker.outputs) src += await output.text();
+  define[w.constant] = JSON.stringify(src);
 }
-
-let workerJs = "";
-for (const output of worker.outputs) workerJs += await output.text();
 
 const result = await Bun.build({
   entrypoints: ["src/shell/main.ts"],
   target: "browser",
   minify: true,
-  define: { DOC_WORKER_SRC: JSON.stringify(workerJs) },
+  loader,
+  define,
 });
 
 if (!result.success) {

@@ -31,7 +31,7 @@ function check(label: string, ok: boolean, detail = "") {
 
 await page.goto(url);
 const names = await page.locator(".tool-list button").allTextContents();
-check("sidebar lists all tools", names.length === 10, names.join(", "));
+check("sidebar lists all tools", names.length === 11, names.join(", "));
 
 // base64 tool: paste a tiny valid png via direct input.
 await page.goto(url + "#base64-to-image");
@@ -1031,6 +1031,48 @@ check("a second click starts a new document",
   (await page.locator(mv + ".filename").inputValue()) === "untitled.md" &&
   (await page.locator(mv + ".new-btn").textContent()) === "New");
 
+// Python IDE: every Engine comes from the CDN on this first visit (about
+// 50 MB), the Interpreter boots in its worker, and a Run's output reaches
+// the Terminal. A second boot must come from the caches alone.
+await page.goto(url + "#python-ide");
+const ide = ".tool-python-ide ";
+const ideReady = () => page.waitForFunction(() =>
+  document.querySelector(".tool-python-ide .st-interp")?.textContent === "ready" &&
+  (document.querySelector(".tool-python-ide .st-checker")?.textContent ?? "").includes("ready"), null, { timeout: 300000 });
+const ideTerm = async () => (await page.locator(ide + ".xterm-rows").innerText()).trim();
+await ideReady();
+check("ide: interpreter and checker boot", (await page.locator(ide + ".st-python").textContent())!.startsWith("Python 3."));
+check("ide: a fresh project opens on main.py", (await page.locator(ide + ".tab.active").textContent()) === "main.py");
+await page.locator(ide + ".run-btn").click();
+await page.waitForFunction(() => document.querySelector(".tool-python-ide .st-interp")?.textContent === "ready", null, { timeout: 60000 });
+await page.waitForFunction(() => document.querySelector(".tool-python-ide .xterm-rows")?.textContent?.includes("Hello from Python!"));
+check("ide: run prints to the terminal, then the REPL returns", (await ideTerm()).endsWith(">>>"));
+await page.evaluate(() => {
+  const monaco = (globalThis as unknown as { monaco: { editor: { getModels(): { uri: { path: string }; setValue(v: string): void }[] } } }).monaco;
+  monaco.editor.getModels().find((m) => m.uri.path.endsWith("main.py"))!.setValue("import os\nx: int = 'a'\n");
+});
+await page.waitForFunction(() => {
+  const monaco = (globalThis as unknown as { monaco: { editor: { getModelMarkers(f: object): { owner: string }[] } } }).monaco;
+  const owners = new Set(monaco.editor.getModelMarkers({}).map((m) => m.owner));
+  return owners.has("ruff") && owners.has("lsp");
+}, null, { timeout: 30000 });
+check("ide: Ruff and Pyright both report on the file", true);
+await page.locator(ide + ".terminal-host").click();
+await page.keyboard.type("6 * 7");
+await page.keyboard.press("Enter");
+await page.waitForFunction(() => document.querySelector(".tool-python-ide .xterm-rows")?.textContent?.includes("42"), null, { timeout: 30000 });
+check("ide: the REPL evaluates a line", true);
+await page.reload();
+await ideReady();
+check("ide: the project comes back after a reload with its edit",
+  (await page.evaluate(() => {
+    const monaco = (globalThis as unknown as { monaco: { editor: { getModels(): { uri: { path: string }; getValue(): string }[] } } }).monaco;
+    return monaco.editor.getModels().find((m) => m.uri.path.endsWith("main.py"))!.getValue();
+  })) === "import os\nx: int = 'a'\n");
+check("ide: the second boot downloaded nothing", (await page.locator(ide + ".st-engine").textContent()) === "");
+
+await page.goto(url + "#markdown-editor");
+await page.waitForSelector(mv + ".editor");
 // Contents in the Narrow Layout is a drawer, closed on load, opened by the button.
 await page.setViewportSize({ width: 600, height: 800 });
 await page.locator(mv + ".seg button[data-mode=preview]").click();

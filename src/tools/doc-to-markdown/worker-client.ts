@@ -5,7 +5,7 @@
 // reloads the engines from the cache, which is cheap.
 
 import type { OfficeFormat } from "./detect";
-import { scriptDataUrl } from "./script-url";
+import { scriptDataUrl } from "../../shared/script-url";
 import type { WorkerRequest, WorkerResponse } from "./worker";
 
 export class ConvertError extends Error {

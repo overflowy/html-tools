@@ -7,7 +7,7 @@
 // the worker never touches the network itself.
 
 import type { OfficeFormat } from "./detect";
-import { scriptDataUrl } from "./script-url";
+import { scriptDataUrl } from "../../shared/script-url";
 
 export type WorkerRequest =
   | { type: "load"; engine: "anydoc" | "pdf-inspector"; glue: string; wasm: ArrayBuffer }

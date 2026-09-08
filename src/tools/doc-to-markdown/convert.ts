@@ -10,7 +10,7 @@ import { ENGINES, getEngine, languageAsset, pdfjsAsset, type EngineAsset, type P
 import { languageName } from "./languages";
 import { gateByConfidence, ocrBody, ocrMarkdown, type OcrLine, type OcrParagraph } from "./ocr-text";
 import { joinPages, markPage, paragraphsFromTextItems, splitByMarkers, type TextItem } from "./pages";
-import { scriptBlobUrl, scriptDataUrl } from "./script-url";
+import { scriptBlobUrl, scriptDataUrl } from "../../shared/script-url";
 import { ConvertError, ConvertWorker } from "./worker-client";
 
 export interface Phase {
