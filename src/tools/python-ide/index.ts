@@ -113,9 +113,9 @@ const tool: Tool = {
             <div class="section packages">
               <div class="section-head"><span>Packages</span></div>
               <form class="install-row">
-                <input class="install-input" list="pyide-catalog" placeholder="Add a package (numpy, requests==2.33)" spellcheck="false" autocomplete="off" aria-label="Package to install">
-                <datalist id="pyide-catalog"></datalist>
+                <input class="install-input" placeholder="Add a package" title="A name, or a pinned spec like requests==2.33" spellcheck="false" autocomplete="off" aria-label="Package to install" role="combobox" aria-expanded="false" aria-autocomplete="list">
                 <button type="submit" class="install-btn">Add</button>
+                <div class="catalog-list" role="listbox" hidden></div>
               </form>
               <div class="pkg-direct"></div>
               <details class="pkg-transitive-wrap"><summary>Dependencies of dependencies</summary><div class="pkg-transitive"></div></details>
@@ -274,17 +274,99 @@ class Ide {
     try {
       const lock = JSON.parse(lockJson) as { packages: Record<string, { name: string; version: string; package_type: string }> };
       this.catalog = Object.values(lock.packages).filter((p) => p.package_type === "package").map((p) => ({ name: p.name, version: p.version })).toSorted((a, b) => a.name.localeCompare(b.name));
-      const list = this.$("#pyide-catalog");
-      list.replaceChildren();
-      for (const p of this.catalog) {
-        const opt = document.createElement("option");
-        opt.value = p.name;
-        opt.label = `${p.name} ${p.version} (prebuilt)`;
-        list.appendChild(opt);
-      }
     } catch {
       // the catalog is a convenience
     }
+  }
+
+  /**
+   * Catalog suggestions under the install field, in the quick open's style:
+   * the native datalist cannot be styled. Names starting with the typed text
+   * come first, then names containing it; up to eight.
+   */
+  private bindCatalog() {
+    const input = this.$(".install-input") as HTMLInputElement;
+    const list = this.$(".catalog-list");
+    let cursor = -1;
+    let matches: { name: string; version: string }[] = [];
+    const render = () => {
+      const q = specName(input.value.trim());
+      const raw = input.value.trim().toLowerCase();
+      if (!raw) {
+        // Nothing typed yet: say what the field takes, where the suggestions will appear.
+        list.replaceChildren();
+        const hint = document.createElement("div");
+        hint.className = "catalog-hint";
+        hint.innerHTML = 'A name, like <code>numpy</code>, or a pinned spec, like <code>requests==2.33</code> or <code>pydantic>=2</code>. Prebuilt packages are suggested as you type; anything else comes from PyPI.';
+        list.appendChild(hint);
+        list.hidden = false;
+        matches = [];
+        return;
+      }
+      if (/[=<>!~\s]/.test(raw)) return this.hideCatalog();
+      const starts = this.catalog.filter((p) => p.name.toLowerCase().startsWith(q));
+      const contains = this.catalog.filter((p) => !p.name.toLowerCase().startsWith(q) && p.name.toLowerCase().includes(q));
+      matches = [...starts, ...contains].slice(0, 8);
+      if (matches.length === 0) return this.hideCatalog();
+      cursor = Math.min(cursor, matches.length - 1);
+      list.replaceChildren();
+      matches.forEach((p, i) => {
+        const row = document.createElement("div");
+        row.className = "catalog-row" + (i === cursor ? " cursor" : "");
+        row.setAttribute("role", "option");
+        row.innerHTML = `<span class="catalog-name"></span><span class="catalog-version"></span>`;
+        row.querySelector(".catalog-name")!.textContent = p.name;
+        row.querySelector(".catalog-version")!.textContent = p.version;
+        row.addEventListener("mousedown", (e) => {
+          e.preventDefault();
+          choose(p.name);
+        });
+        list.appendChild(row);
+      });
+      list.hidden = false;
+      input.setAttribute("aria-expanded", "true");
+    };
+    const choose = (name: string) => {
+      input.value = name;
+      this.hideCatalog();
+      input.focus();
+    };
+    input.addEventListener("input", () => {
+      cursor = -1;
+      render();
+    });
+    input.addEventListener("focus", render);
+    input.addEventListener("blur", () => this.hideCatalog());
+    input.addEventListener("keydown", (e) => {
+      if (list.hidden) {
+        if (e.key === "ArrowDown") {
+          cursor = 0;
+          render();
+          e.preventDefault();
+        }
+        return;
+      }
+      if (e.key === "ArrowDown") {
+        cursor = Math.min(cursor + 1, matches.length - 1);
+        render();
+        e.preventDefault();
+      } else if (e.key === "ArrowUp") {
+        cursor = Math.max(cursor - 1, -1);
+        render();
+        e.preventDefault();
+      } else if (e.key === "Enter" && cursor >= 0) {
+        choose(matches[cursor]!.name);
+        e.preventDefault();
+      } else if (e.key === "Escape") {
+        this.hideCatalog();
+        e.stopPropagation();
+      }
+    });
+  }
+
+  private hideCatalog() {
+    this.$(".catalog-list").hidden = true;
+    this.$(".install-input").setAttribute("aria-expanded", "false");
   }
 
   /* ---------------- status ---------------- */
@@ -950,10 +1032,15 @@ class Ide {
   }
 
   private showMenu(path: string, isFolder: boolean, x: number, y: number) {
-    const menu = this.$(".context-menu");
     const items: [string, () => void][] = isFolder
       ? [["New file here", () => void this.newFile(path)], ["New folder here", () => void this.newFolder(path)], ["Rename", () => void this.renamePath(path, true)], ["Delete", () => void this.deletePath(path, true)]]
       : [["Open", () => this.openFile(path)], ["Rename", () => void this.renamePath(path, false)], ["Download", () => this.downloadPath(path)], ["Delete", () => void this.deletePath(path, false)]];
+    this.popupMenu(items, x, y);
+  }
+
+  /** The one context menu, at a viewport position; closes on a click outside or Escape. */
+  private popupMenu(items: [string, () => void][], x: number, y: number) {
+    const menu = this.$(".context-menu");
     menu.replaceChildren();
     for (const [label, action] of items) {
       const b = document.createElement("button");
@@ -1447,6 +1534,10 @@ class Ide {
     }));
     renderPackages(this.$(".pkg-direct"), this.$(".pkg-transitive"), s.project.settings.dependencies, rows, {
       onRemove: (spec) => void this.removeSpec(spec),
+      onMenu: (spec, x, y) => this.popupMenu([
+        ["Copy name", () => void navigator.clipboard?.writeText(spec)],
+        ["Remove from the project", () => void this.removeSpec(spec)],
+      ], x, y),
     });
   }
 
@@ -1650,8 +1741,10 @@ class Ide {
       const spec = input.value.trim();
       if (!spec) return;
       input.value = "";
+      this.hideCatalog();
       void this.installSpecs([spec], true);
     });
+    this.bindCatalog();
     this.bindResizers();
     this.bindDrop();
     this.el.addEventListener("keydown", (e) => {
@@ -1670,41 +1763,14 @@ class Ide {
   }
 
   private showProjectMenu(x: number, y: number) {
-    const menu = this.$(".context-menu");
-    const items: [string, () => void][] = [
+    this.popupMenu([
       ["New project", () => void this.newProject()],
       ["Rename project", () => void this.renameProject()],
       ["Duplicate project", () => void this.duplicateProject()],
       ["Export as zip", () => void this.exportProject()],
       ["Import from zip", () => (this.$(".zip-input") as HTMLInputElement).click()],
       ["Delete project", () => void this.deleteProject()],
-    ];
-    menu.replaceChildren();
-    for (const [label, action] of items) {
-      const b = document.createElement("button");
-      b.type = "button";
-      b.textContent = label;
-      b.addEventListener("click", () => {
-        menu.hidden = true;
-        action();
-      });
-      menu.appendChild(b);
-    }
-    const rect = this.el.getBoundingClientRect();
-    menu.style.left = x - rect.left + "px";
-    menu.style.top = y - rect.top + "px";
-    menu.hidden = false;
-    const close = (e: Event) => {
-      if (e instanceof KeyboardEvent && e.key !== "Escape") return;
-      if (e instanceof MouseEvent && menu.contains(e.target as Node)) return;
-      menu.hidden = true;
-      document.removeEventListener("mousedown", close, true);
-      document.removeEventListener("keydown", close, true);
-    };
-    setTimeout(() => {
-      document.addEventListener("mousedown", close, true);
-      document.addEventListener("keydown", close, true);
-    });
+    ], x, y);
   }
 
   /** Shows or hides the Terminal (with the Figures beside it). A Preference. */

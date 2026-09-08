@@ -131,7 +131,45 @@
   display: flex;
   gap: 6px;
   padding: 2px 10px 8px;
+  position: relative;
 }
+/* Catalog suggestions: the quick open's look, anchored under the field. */
+.tool-python-ide .catalog-list {
+  position: absolute;
+  z-index: 20;
+  left: 10px;
+  right: 10px;
+  top: calc(100% - 4px);
+  padding: 4px;
+  background: var(--surface-2);
+  border: 0.5px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.4);
+}
+.tool-python-ide .catalog-hint {
+  padding: 6px 8px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--text-muted);
+  text-wrap: pretty;
+}
+.tool-python-ide .catalog-hint code { font-family: var(--mono); color: var(--text); font-size: 11px; }
+.tool-python-ide .catalog-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: var(--radius-sm);
+  cursor: default;
+  font-size: 12px;
+}
+.tool-python-ide .catalog-row.cursor { background: var(--accent-soft); }
+@media (hover: hover) {
+  .tool-python-ide .catalog-row:hover { background: var(--accent-soft); }
+}
+.tool-python-ide .catalog-name { font-family: var(--mono); font-size: 12.5px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tool-python-ide .catalog-version { font-family: var(--mono); font-size: 11.5px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
 .tool-python-ide .install-input {
   flex: 1;
   min-width: 0;
@@ -149,7 +187,7 @@
   border-color: transparent;
   box-shadow: var(--ring-halo);
 }
-.tool-python-ide .pkg-direct { padding: 0 6px; overflow: auto; }
+.tool-python-ide .pkg-direct { padding: 0 4px; overflow: auto; }
 .tool-python-ide .pkg-transitive-wrap {
   margin: 4px 10px 8px;
   font-size: 11.5px;
@@ -157,35 +195,56 @@
   overflow: auto;
   min-height: 0;
 }
-.tool-python-ide .pkg-transitive-wrap summary { cursor: pointer; padding: 3px 0; }
+.tool-python-ide .pkg-transitive-wrap summary { cursor: pointer; padding: 3px 0; user-select: none; }
+/* Name, version, and an end slot as three columns, so versions line up on
+   their right edge and the end slot sits flush with the Add button above
+   (4px of list padding plus 6px of row padding, against the row's 10px). */
 .tool-python-ide .pkg-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   padding: 3px 6px;
   font-size: 12px;
   border-radius: var(--radius-sm);
 }
+@media (hover: hover) {
+  .tool-python-ide .pkg-row:not(.transitive):hover { background: var(--surface-2); }
+}
 .tool-python-ide .pkg-row.pending .pkg-version { color: var(--text-muted); font-style: italic; }
-.tool-python-ide .pkg-name { font-family: var(--mono); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.tool-python-ide .pkg-version { color: var(--text-muted); font-family: var(--mono); font-size: 11.5px; }
+.tool-python-ide .pkg-name { font-family: var(--mono); min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.tool-python-ide .pkg-version {
+  color: var(--text-muted);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.tool-python-ide .pkg-end {
+  display: grid;
+  justify-items: end;
+  align-items: center;
+  min-width: 52px;
+}
+.tool-python-ide .pkg-end > * { grid-area: 1 / 1; }
 .tool-python-ide .pkg-origin {
   font-size: 10px;
-  padding: 1px 5px;
+  line-height: 16px;
+  padding: 0 6px;
   border-radius: 999px;
   background: var(--surface-3);
   color: var(--text-muted);
 }
 .tool-python-ide .pkg-origin:empty { display: none; }
 .tool-python-ide .pkg-remove {
-  padding: 0 4px;
-  border: none;
-  color: var(--text-muted);
-  font-size: 11px;
-  opacity: 0;
+  padding: 0 2px;
+  height: 18px;
+  visibility: hidden;
 }
-.tool-python-ide .pkg-row:hover .pkg-remove, .tool-python-ide .pkg-remove:focus-visible { opacity: 1; }
-.tool-python-ide .pkg-row.transitive { padding: 1px 0; }
+.tool-python-ide .pkg-remove svg { width: 14px; height: 14px; }
+.tool-python-ide .pkg-row:hover .pkg-origin, .tool-python-ide .pkg-row:focus-within .pkg-origin { visibility: hidden; }
+.tool-python-ide .pkg-row:hover .pkg-remove, .tool-python-ide .pkg-row:focus-within .pkg-remove { visibility: visible; }
+.tool-python-ide .pkg-row.transitive { grid-template-columns: minmax(0, 1fr) auto; padding: 1px 0; }
 .tool-python-ide .pkg-empty { padding: 4px 6px; font-size: 12px; color: var(--text-muted); }
 
 .tool-python-ide .explorer-resizer {

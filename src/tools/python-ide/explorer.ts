@@ -2,7 +2,7 @@
 // the Packages section. Pure rendering: the Tool hands them data and
 // callbacks and re-renders on change.
 
-import { ICON_CHEVRON, ICON_FILE, ICON_FOLDER, ICON_FOLDER_OPEN, ICON_PYTHON } from "./icons";
+import { ICON_CHEVRON, ICON_FILE, ICON_FOLDER, ICON_FOLDER_OPEN, ICON_PYTHON, ICON_TRASH } from "./icons";
 import { basename, dirname } from "./project";
 
 export interface TreeCallbacks {
@@ -126,6 +126,7 @@ export interface PackageRow {
 
 export interface PackagesCallbacks {
   onRemove(spec: string): void;
+  onMenu(spec: string, x: number, y: number): void;
 }
 
 /** The distribution name a spec names: `requests==2.33` gives `requests`. */
@@ -150,18 +151,23 @@ export function renderPackages(
     const p = byName.get(name);
     const row = document.createElement("div");
     row.className = "pkg-row" + (p ? "" : " pending");
-    row.innerHTML = `<span class="pkg-name"></span><span class="pkg-version"></span><span class="pkg-origin"></span><button type="button" class="pkg-remove" title="Remove">&#10005;</button>`;
+    // The badge and the remove button share one slot: hovering the row swaps them, and nothing shifts.
+    row.innerHTML = `<span class="pkg-name"></span><span class="pkg-version"></span><span class="pkg-end"><span class="pkg-origin"></span><button type="button" class="icon pkg-remove" title="Remove from the project">${ICON_TRASH}</button></span>`;
     row.querySelector(".pkg-name")!.textContent = spec;
     row.querySelector(".pkg-version")!.textContent = p ? p.version : "not installed";
     const origin = row.querySelector(".pkg-origin")!;
     origin.textContent = p ? { catalog: "prebuilt", pypi: "PyPI", wasm: "PyPI wasm" }[p.origin] : "";
     row.querySelector(".pkg-remove")!.addEventListener("click", () => cb.onRemove(spec));
+    row.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      cb.onMenu(spec, e.clientX, e.clientY);
+    });
     direct.appendChild(row);
   }
   if (specs.length === 0) {
     const empty = document.createElement("div");
     empty.className = "pkg-empty";
-    empty.textContent = "No dependencies yet.";
+    empty.textContent = "No dependencies yet. Add one above.";
     direct.appendChild(empty);
   }
   transitive.replaceChildren();
