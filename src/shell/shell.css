@@ -164,6 +164,12 @@ body.sidebar-collapsed .collapse-btn {
   padding: 1.5rem var(--gutter) 0.75rem;
 }
 .tool-title { min-width: 0; }
+/* A full-height Tool takes the header's place and brings its own Sidebar
+   toggle. In the Narrow Layout the header stays: its hamburger is the Drawer's
+   only button. */
+@media (min-width: 768px) {
+  body.tool-full-height .tool-header { display: none; }
+}
 
 .menu-btn {
   width: 40px;

@@ -28,4 +28,6 @@ export const ICON_PANEL = SVG + '<rect x="1.75" y="2.75" width="12.5" height="10
 export const ICON_CLEAR = SVG + '<path d="M2.5 10.5l6-6a1.4 1.4 0 0 1 2 0l3 3a1.4 1.4 0 0 1 0 2l-3.5 3.5H6.5l-4-4z"/><path d="M6.5 13H14M6 6.5l4 4"/></svg>';
 export const ICON_COPY = SVG + '<rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 5.5v-2a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2"/></svg>';
 export const ICON_CHECK = SVG + '<path d="M3 8.5l3.2 3.2L13 5"/></svg>';
+/** The Shell's own Sidebar glyph. */
+export const ICON_SIDEBAR = SVG + '<rect x="1.75" y="2.75" width="12.5" height="10.5" rx="2"/><path d="M6 2.75v10.5"/></svg>';
 export const ICON_SEARCH = SVG + '<circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5l3 3"/></svg>';

@@ -105,6 +105,8 @@ function setDrawer(open: boolean) {
   }
 }
 
+const collapseListeners = new Set<(collapsed: boolean) => void>();
+
 function setCollapsed(next: boolean) {
   if (next === collapsed) return;
   // A Drawer opened over a collapsed Sidebar is closed first, so expanding
@@ -120,6 +122,7 @@ function setCollapsed(next: boolean) {
   const active = document.activeElement;
   if (next && $sidebar.contains(active)) $menuBtn.focus();
   else if (!next && active === $menuBtn) $collapseBtn.focus();
+  for (const fn of collapseListeners) fn(next);
 }
 
 const hosts = new Map<string, HTMLElement>();
@@ -203,6 +206,7 @@ function selectTool(id: string, payload = "") {
   current = tool;
   localStorage.setItem(LAST_KEY, tool.id);
   document.title = tool.name + " · html tools";
+  document.body.classList.toggle("tool-full-height", !!tool.fullHeight);
   $h1.textContent = tool.name;
   $subtitle.textContent = tool.subtitle;
 
@@ -220,6 +224,15 @@ function selectTool(id: string, payload = "") {
       },
       onRestore(fn) {
         restorers.set(tool.id, fn);
+      },
+      sidebar: {
+        get collapsed() {
+          return collapsed;
+        },
+        setCollapsed,
+        onChange(fn) {
+          collapseListeners.add(fn);
+        },
       },
     });
     const stored = payloads.get(tool.id);

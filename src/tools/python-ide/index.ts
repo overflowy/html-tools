@@ -92,6 +92,7 @@ const tool: Tool = {
   name: "Python IDE",
   subtitle: "Edit and run Python projects in the browser: Pyodide, Pyright, Ruff, and a terminal, with packages per project.",
   keywords: ["python", "ide", "pyodide", "pyright", "ruff", "editor", "repl", "terminal", "pip", "notebook", "matplotlib"],
+  fullHeight: true,
   mount(el, ctx) {
     el.innerHTML = `
       <div class="ide">
@@ -132,6 +133,7 @@ const tool: Tool = {
               <button type="button" class="icon stdin-btn" title="Stdin: text for input() to read first" aria-pressed="false">${I.ICON_STDIN}</button>
               <span class="spacer"></span>
               <button type="button" class="icon figures-btn" title="Figures" aria-pressed="false" hidden>${I.ICON_FIGURE}<span class="badge"></span></button>
+              <button type="button" class="icon sidebar-btn" title="Show or hide the tool list" aria-label="Tool list" aria-pressed="true">${I.ICON_SIDEBAR}</button>
               <button type="button" class="icon panel-btn" title="Terminal and Problems (${MOD}J)" aria-pressed="true">${I.ICON_PANEL}</button>
               <button type="button" class="icon quickopen-btn" title="Open a file by name (${MOD}P)">${I.ICON_SEARCH}</button>
               <button type="button" class="icon settings-btn" title="Project settings">${I.ICON_SETTINGS}</button>
@@ -1713,6 +1715,10 @@ class Ide {
     });
     $(".figures-clear").addEventListener("click", () => this.clearFigures());
     $(".panel-btn").addEventListener("click", () => this.togglePanel());
+    const syncSidebar = (collapsed: boolean) => $(".sidebar-btn").setAttribute("aria-pressed", String(!collapsed));
+    $(".sidebar-btn").addEventListener("click", () => this.ctx.sidebar.setCollapsed(!this.ctx.sidebar.collapsed));
+    this.ctx.sidebar.onChange(syncSidebar);
+    syncSidebar(this.ctx.sidebar.collapsed);
     for (const tab of this.el.querySelectorAll<HTMLElement>(".panel-tab")) tab.addEventListener("click", () => this.showPanelTab(tab.dataset.panel as PanelTab));
     $(".terminal-close").addEventListener("click", () => this.togglePanel(false));
     $(".terminal-copy").addEventListener("click", () => void this.copyTerminal());
