@@ -336,6 +336,9 @@
   overflow: hidden;
 }
 .tool-python-ide .terminal-host .xterm { height: 100%; }
+/* xterm paints its viewport black; the sliver below the last row after a
+   resize (the height not being a whole number of rows) must be the Theme's. */
+.tool-python-ide .terminal-host .xterm .xterm-viewport { background-color: var(--bg) !important; }
 .tool-python-ide .figures {
   width: 42%;
   flex: none;
