@@ -21,4 +21,7 @@ export const ICON_MORE = SVG + '<circle cx="3.5" cy="8" r="1" fill="currentColor
 export const ICON_DOWNLOAD = SVG + '<path d="M8 3v8M5 8l3 3 3-3"/><path d="M2.5 11.5v1a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1v-1"/></svg>';
 export const ICON_TRASH = SVG + '<path d="M3 4.5h10M6.5 4.5v-1a1 1 0 0 1 1-1h1a1 1 0 0 1 1 1v1M4.5 4.5l.6 8.1a1 1 0 0 0 1 .9h3.8a1 1 0 0 0 1-.9l.6-8.1"/></svg>';
 export const ICON_FIGURE = SVG + '<rect x="2" y="3" width="12" height="10" rx="1.5"/><path d="M4.5 10.5l2.5-3 2 2 2.5-3.5"/></svg>';
+export const ICON_TERMINAL = SVG + '<rect x="1.75" y="2.75" width="12.5" height="10.5" rx="2"/><path d="M4.5 6l2.5 2-2.5 2M8 10.5h3.5"/></svg>';
+/** A tilted eraser: clear the Terminal. */
+export const ICON_CLEAR = SVG + '<path d="M2.5 10.5l6-6a1.4 1.4 0 0 1 2 0l3 3a1.4 1.4 0 0 1 0 2l-3.5 3.5H6.5l-4-4z"/><path d="M6.5 13H14M6 6.5l4 4"/></svg>';
 export const ICON_SEARCH = SVG + '<circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5l3 3"/></svg>';

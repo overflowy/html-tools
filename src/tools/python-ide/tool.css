@@ -304,9 +304,30 @@
   height: var(--panel-height);
   flex: none;
   display: flex;
+  flex-direction: column;
   border-top: 0.5px solid var(--border);
   background: var(--bg);
   min-height: 0;
+}
+.tool-python-ide .panel-head {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 6px 2px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  background: var(--surface);
+  border-bottom: 0.5px solid var(--border);
+  flex: none;
+}
+.tool-python-ide .panel-head button.icon { padding: 2px 3px; }
+.tool-python-ide .panel-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
 }
 .tool-python-ide .terminal-host {
   flex: 1;

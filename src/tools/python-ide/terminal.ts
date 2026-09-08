@@ -102,8 +102,11 @@ export class IdeTerminal {
     this.term.focus();
   }
 
-  clear() {
+  /** Empties the scrollback; the line being edited, if any, stays as the top row. */
+  clearScreen() {
     this.term.clear();
+    this.cursorRow = 0;
+    if (this.mode !== "off") this.redraw();
   }
 
   reset() {
@@ -345,9 +348,7 @@ export class IdeTerminal {
         return;
       }
       case "\x0c":
-        this.term.clear();
-        this.cursorRow = 0;
-        this.redraw();
+        this.clearScreen();
         return;
       case "\x03":
         if (this.mode === "repl") {

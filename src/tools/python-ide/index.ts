@@ -21,6 +21,7 @@ const LAST_PROJECT_KEY = "html-tools:python-ide:project";
 const WHEELS_KEY = "html-tools:python-ide:wheels-pyodide";
 const EXPLORER_WIDTH_KEY = "html-tools:python-ide:explorer-width";
 const PANEL_HEIGHT_KEY = "html-tools:python-ide:panel-height";
+const PANEL_OPEN_KEY = "html-tools:python-ide:panel-open";
 
 const isMac = /Mac|iPhone|iPad/.test(navigator.platform || "");
 const MOD = isMac ? "⌘" : "Ctrl+";
@@ -130,6 +131,7 @@ const tool: Tool = {
               <button type="button" class="icon stdin-btn" title="Stdin: text for input() to read first" aria-pressed="false">${I.ICON_STDIN}</button>
               <span class="spacer"></span>
               <button type="button" class="icon figures-btn" title="Figures" aria-pressed="false" hidden>${I.ICON_FIGURE}<span class="badge"></span></button>
+              <button type="button" class="icon terminal-btn" title="Terminal (${MOD}J)" aria-pressed="true">${I.ICON_TERMINAL}</button>
               <button type="button" class="icon quickopen-btn" title="Open a file by name (${MOD}P)">${I.ICON_SEARCH}</button>
               <button type="button" class="icon settings-btn" title="Project settings">${I.ICON_SETTINGS}</button>
             </div>
@@ -141,10 +143,18 @@ const tool: Tool = {
             <div class="editor-empty">No file open. Pick one in the Explorer, or press ${MOD}P.</div>
             <div class="panel-resizer" role="separator" aria-orientation="horizontal"></div>
             <div class="panel">
-              <div class="terminal-host"></div>
-              <div class="figures" hidden>
-                <div class="figures-head"><span>Figures</span><span class="spacer"></span><button type="button" class="icon figures-clear" title="Clear figures">${I.ICON_CLOSE}</button></div>
-                <div class="figures-list"></div>
+              <div class="panel-head">
+                <span>Terminal</span>
+                <span class="spacer"></span>
+                <button type="button" class="icon terminal-clear" title="Clear the terminal">${I.ICON_CLEAR}</button>
+                <button type="button" class="icon terminal-close" title="Close the terminal (${MOD}J)">${I.ICON_CLOSE}</button>
+              </div>
+              <div class="panel-body">
+                <div class="terminal-host"></div>
+                <div class="figures" hidden>
+                  <div class="figures-head"><span>Figures</span><span class="spacer"></span><button type="button" class="icon figures-clear" title="Clear figures">${I.ICON_CLOSE}</button></div>
+                  <div class="figures-list"></div>
+                </div>
               </div>
             </div>
           </div>
@@ -238,6 +248,7 @@ class Ide {
     this.editor = createEditor(monaco, this.$(".editor-host"), 4);
     this.editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => void this.run());
     this.editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyP, () => this.openQuickOpen());
+    this.editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyJ, () => this.togglePanel());
     this.editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => this.message("Saved as you type."));
     this.editor.onDidChangeCursorPosition((e) => {
       this.$(".st-cursor").textContent = `Ln ${e.position.lineNumber}, Col ${e.position.column}`;
@@ -1308,6 +1319,7 @@ class Ide {
     this.flushSaves();
     await this.syncDirty();
     if (this.session !== s || s.generation !== gen || s.state !== "ready") return;
+    this.togglePanel(true);
     this.terminal?.stopLine();
     this.terminal?.flush();
     this.terminal?.newLine();
@@ -1441,6 +1453,7 @@ class Ide {
     if (!s?.interpreter?.alive) return;
     const gen = s.generation;
     const interpreter = s.interpreter;
+    this.togglePanel(true);
     this.terminal?.stopLine();
     this.terminal?.newLine();
     this.setState("installing");
@@ -1595,6 +1608,13 @@ class Ide {
       this.terminal?.layout();
     });
     $(".figures-clear").addEventListener("click", () => this.clearFigures());
+    $(".terminal-btn").addEventListener("click", () => this.togglePanel());
+    $(".terminal-close").addEventListener("click", () => this.togglePanel(false));
+    $(".terminal-clear").addEventListener("click", () => {
+      this.terminal?.clearScreen();
+      this.terminal?.focus();
+    });
+    this.togglePanel(read(PANEL_OPEN_KEY) !== "closed");
     $(".quickopen-btn").addEventListener("click", () => this.openQuickOpen());
     $(".settings-btn").addEventListener("click", () => this.openSettings());
     $(".new-file-btn").addEventListener("click", () => void this.newFile());
@@ -1636,6 +1656,9 @@ class Ide {
       } else if (mod && e.key.toLowerCase() === "p" && !e.shiftKey) {
         e.preventDefault();
         this.openQuickOpen();
+      } else if (mod && e.key.toLowerCase() === "j") {
+        e.preventDefault();
+        this.togglePanel();
       }
     });
   }
@@ -1676,6 +1699,18 @@ class Ide {
       document.addEventListener("mousedown", close, true);
       document.addEventListener("keydown", close, true);
     });
+  }
+
+  /** Shows or hides the Terminal (with the Figures beside it). A Preference. */
+  private togglePanel(open = this.$(".panel").hidden) {
+    this.$(".panel").hidden = !open;
+    this.$(".panel-resizer").hidden = !open;
+    this.$(".terminal-btn").setAttribute("aria-pressed", String(open));
+    write(PANEL_OPEN_KEY, open ? "open" : "closed");
+    if (open) {
+      this.terminal?.layout();
+      this.terminal?.focus();
+    } else this.editor?.focus();
   }
 
   private bindResizers() {
