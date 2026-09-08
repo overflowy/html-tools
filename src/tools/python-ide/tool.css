@@ -383,11 +383,74 @@
   flex: none;
 }
 .tool-python-ide .panel-head button.icon { padding: 2px 3px; }
+.tool-python-ide .panel-tab {
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  color: var(--text-muted);
+  border: none;
+  padding: 4px 8px;
+  margin: 0 2px 0 -6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  position: relative;
+}
+.tool-python-ide .panel-tab + .panel-tab { margin-left: 4px; }
+.tool-python-ide .panel-tab[aria-selected="true"] { color: var(--text); }
+.tool-python-ide .panel-tab[aria-selected="true"]::after {
+  content: "";
+  position: absolute;
+  left: 8px; right: 8px; bottom: -3px;
+  height: 1.5px;
+  background: var(--accent);
+}
+.tool-python-ide .panel-tab .badge {
+  font-size: 10px;
+  letter-spacing: 0;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  color: var(--text);
+}
+.tool-python-ide .panel-tab .badge.has-errors { background: var(--danger-bg); color: var(--danger-text); }
 .tool-python-ide .panel-body {
   flex: 1;
   min-height: 0;
   display: flex;
 }
+/* One tab's content at a time; the Terminal keeps its size while hidden, so it needs no re-fit. */
+.tool-python-ide .panel-body[data-panel="problems"] .terminal-host,
+.tool-python-ide .panel-body[data-panel="problems"] .figures { display: none; }
+.tool-python-ide .panel-body[data-panel="terminal"] .problems { display: none; }
+.tool-python-ide .problems {
+  flex: 1;
+  overflow: auto;
+  padding: 6px 8px 8px;
+  font-size: 12px;
+}
+.tool-python-ide .problems-empty, .tool-python-ide .problems-file { padding: 4px 6px; color: var(--text-muted); }
+.tool-python-ide .problems-file { font-family: var(--mono); font-size: 11.5px; margin-top: 4px; }
+.tool-python-ide .problems-file:first-child { margin-top: 0; }
+.tool-python-ide .problem {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  padding: 3px 6px 3px 10px;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+}
+.tool-python-ide .problem-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-muted); }
+.tool-python-ide .problem.error .problem-dot { background: #f28b82; }
+.tool-python-ide .problem.warning .problem-dot { background: #e3c17a; }
+.tool-python-ide .problem.info .problem-dot { background: #8ab4f8; }
+.tool-python-ide .problem-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tool-python-ide .problem-source, .tool-python-ide .problem-pos { color: var(--text-muted); font-size: 11.5px; font-family: var(--mono); }
+.tool-python-ide .problem-pos { font-variant-numeric: tabular-nums; }
 .tool-python-ide .terminal-host {
   flex: 1;
   min-width: 0;

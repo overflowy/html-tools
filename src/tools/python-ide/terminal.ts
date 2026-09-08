@@ -146,6 +146,15 @@ export class IdeTerminal {
     this.term.write(DIM + text + RESET);
   }
 
+  /** Everything on screen and in the scrollback, trailing blank lines dropped. */
+  text(): string {
+    const buffer = this.term.buffer.active;
+    const lines: string[] = [];
+    for (let i = 0; i < buffer.length; i++) lines.push(buffer.getLine(i)?.translateToString(true) ?? "");
+    while (lines.length && lines[lines.length - 1] === "") lines.pop();
+    return lines.join("\n");
+  }
+
   /** Flushes any partial character left in the decoders, at the end of a run. */
   flush() {
     for (const s of ["stdout", "stderr"] as const) {

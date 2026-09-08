@@ -30,6 +30,7 @@ const MOD = isMac ? "⌘" : "Ctrl+";
 const JS_STUB = "from typing import Any\n\ndef __getattr__(name: str) -> Any: ...\n";
 
 type InterpState = "off" | "booting" | "ready" | "running" | "installing" | "rebooting";
+type PanelTab = "terminal" | "problems";
 
 interface Session {
   project: Project;
@@ -131,7 +132,7 @@ const tool: Tool = {
               <button type="button" class="icon stdin-btn" title="Stdin: text for input() to read first" aria-pressed="false">${I.ICON_STDIN}</button>
               <span class="spacer"></span>
               <button type="button" class="icon figures-btn" title="Figures" aria-pressed="false" hidden>${I.ICON_FIGURE}<span class="badge"></span></button>
-              <button type="button" class="icon terminal-btn" title="Terminal (${MOD}J)" aria-pressed="true">${I.ICON_TERMINAL}</button>
+              <button type="button" class="icon panel-btn" title="Terminal and Problems (${MOD}J)" aria-pressed="true">${I.ICON_PANEL}</button>
               <button type="button" class="icon quickopen-btn" title="Open a file by name (${MOD}P)">${I.ICON_SEARCH}</button>
               <button type="button" class="icon settings-btn" title="Project settings">${I.ICON_SETTINGS}</button>
             </div>
@@ -143,18 +144,21 @@ const tool: Tool = {
             <div class="editor-empty">No file open. Pick one in the Explorer, or press ${MOD}P.</div>
             <div class="panel-resizer" role="separator" aria-orientation="horizontal"></div>
             <div class="panel">
-              <div class="panel-head">
-                <span>Terminal</span>
+              <div class="panel-head" role="tablist">
+                <button type="button" class="panel-tab" role="tab" data-panel="terminal" aria-selected="true">Terminal</button>
+                <button type="button" class="panel-tab" role="tab" data-panel="problems" aria-selected="false">Problems<span class="badge problems-count" hidden></span></button>
                 <span class="spacer"></span>
+                <button type="button" class="icon terminal-copy" title="Copy the terminal's output">${I.ICON_COPY}</button>
                 <button type="button" class="icon terminal-clear" title="Clear the terminal">${I.ICON_CLEAR}</button>
-                <button type="button" class="icon terminal-close" title="Close the terminal (${MOD}J)">${I.ICON_CLOSE}</button>
+                <button type="button" class="icon terminal-close" title="Close the panel (${MOD}J)">${I.ICON_CLOSE}</button>
               </div>
-              <div class="panel-body">
+              <div class="panel-body" data-panel="terminal">
                 <div class="terminal-host"></div>
                 <div class="figures" hidden>
                   <div class="figures-head"><span>Figures</span><span class="spacer"></span><button type="button" class="icon figures-clear" title="Clear figures">${I.ICON_CLOSE}</button></div>
                   <div class="figures-list"></div>
                 </div>
+                <div class="problems" role="list"></div>
               </div>
             </div>
           </div>
@@ -249,6 +253,8 @@ class Ide {
     this.editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => void this.run());
     this.editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyP, () => this.openQuickOpen());
     this.editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyJ, () => this.togglePanel());
+    this.editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyM, () => this.showPanelTab("problems"));
+    monaco.editor.onDidChangeMarkers(() => this.scheduleProblems());
     this.editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => this.message("Saved as you type."));
     this.editor.onDidChangeCursorPosition((e) => {
       this.$(".st-cursor").textContent = `Ln ${e.position.lineNumber}, Col ${e.position.column}`;
@@ -526,6 +532,7 @@ class Ide {
     if (this.monaco) for (const m of this.monaco.editor.getModels()) if (!m.uri.path.startsWith("/project/")) m.dispose();
     this.terminal?.stopLine();
     this.session = null;
+    this.scheduleProblems();
   }
 
   private async newProject() {
@@ -1705,8 +1712,10 @@ class Ide {
       this.terminal?.layout();
     });
     $(".figures-clear").addEventListener("click", () => this.clearFigures());
-    $(".terminal-btn").addEventListener("click", () => this.togglePanel());
+    $(".panel-btn").addEventListener("click", () => this.togglePanel());
+    for (const tab of this.el.querySelectorAll<HTMLElement>(".panel-tab")) tab.addEventListener("click", () => this.showPanelTab(tab.dataset.panel as PanelTab));
     $(".terminal-close").addEventListener("click", () => this.togglePanel(false));
+    $(".terminal-copy").addEventListener("click", () => void this.copyTerminal());
     $(".terminal-clear").addEventListener("click", () => {
       this.terminal?.clearScreen();
       this.terminal?.focus();
@@ -1758,6 +1767,9 @@ class Ide {
       } else if (mod && e.key.toLowerCase() === "j") {
         e.preventDefault();
         this.togglePanel();
+      } else if (mod && e.shiftKey && e.key.toLowerCase() === "m") {
+        e.preventDefault();
+        this.showPanelTab("problems");
       }
     });
   }
@@ -1773,16 +1785,127 @@ class Ide {
     ], x, y);
   }
 
-  /** Shows or hides the Terminal (with the Figures beside it). A Preference. */
-  private togglePanel(open = this.$(".panel").hidden) {
+  /** Shows or hides the panel (Terminal, Figures, Problems). A Preference. */
+  private togglePanel(open = this.$(".panel").hidden, tab?: PanelTab) {
     this.$(".panel").hidden = !open;
     this.$(".panel-resizer").hidden = !open;
-    this.$(".terminal-btn").setAttribute("aria-pressed", String(open));
+    this.$(".panel-btn").setAttribute("aria-pressed", String(open));
     write(PANEL_OPEN_KEY, open ? "open" : "closed");
     if (open) {
+      if (tab) this.showPanelTab(tab);
+      else if (this.panelTab === "terminal") {
+        this.terminal?.layout();
+        this.terminal?.focus();
+      }
+    } else this.editor?.focus();
+  }
+
+  private panelTab: PanelTab = "terminal";
+
+  private showPanelTab(tab: PanelTab) {
+    if (this.$(".panel").hidden) this.togglePanel(true);
+    this.panelTab = tab;
+    this.$(".panel-body").dataset.panel = tab;
+    for (const t of this.el.querySelectorAll<HTMLElement>(".panel-tab")) t.setAttribute("aria-selected", String(t.dataset.panel === tab));
+    (this.$(".terminal-clear") as HTMLButtonElement).hidden = tab !== "terminal";
+    (this.$(".terminal-copy") as HTMLButtonElement).hidden = tab !== "terminal";
+    if (tab === "terminal") {
       this.terminal?.layout();
       this.terminal?.focus();
-    } else this.editor?.focus();
+    }
+  }
+
+  private async copyTerminal() {
+    const text = this.terminal?.text() ?? "";
+    const btn = this.$(".terminal-copy");
+    let ok = false;
+    try {
+      await navigator.clipboard.writeText(text);
+      ok = true;
+    } catch {
+      // the async clipboard needs a secure context; this keeps copy working from file://
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.cssText = "position:fixed;left:-9999px;top:0";
+      document.body.appendChild(ta);
+      ta.select();
+      try {
+        ok = document.execCommand("copy");
+      } catch {
+        ok = false;
+      }
+      ta.remove();
+    }
+    btn.innerHTML = ok ? I.ICON_CHECK : I.ICON_CLOSE;
+    this.message(ok ? `Copied ${text.split("\n").length} line(s) from the terminal.` : "Could not copy.");
+    setTimeout(() => (btn.innerHTML = I.ICON_COPY), 1200);
+  }
+
+  /* ---------------- problems ---------------- */
+
+  private problemsTimer = 0;
+
+  private scheduleProblems() {
+    clearTimeout(this.problemsTimer);
+    this.problemsTimer = window.setTimeout(() => this.renderProblems(), 150);
+  }
+
+  /** Every marker on the Project's files, from the Checker and the Linter alike, grouped by file. */
+  private renderProblems() {
+    const list = this.$(".problems");
+    const count = this.$(".problems-count");
+    const s = this.session;
+    if (!s || !this.monaco) {
+      list.replaceChildren();
+      count.hidden = true;
+      return;
+    }
+    const { MarkerSeverity } = this.monaco;
+    const markers = this.monaco.editor.getModelMarkers({}).filter((m) => m.resource.path.startsWith("/project/"));
+    markers.sort((a, b) => a.resource.path.localeCompare(b.resource.path) || b.severity - a.severity || a.startLineNumber - b.startLineNumber || a.startColumn - b.startColumn);
+    const errors = markers.filter((m) => m.severity === MarkerSeverity.Error).length;
+    count.textContent = String(markers.length);
+    count.hidden = markers.length === 0;
+    count.classList.toggle("has-errors", errors > 0);
+    list.replaceChildren();
+    if (markers.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "problems-empty";
+      empty.textContent = s.checker ? "No problems found." : "Pyright has not started yet.";
+      list.appendChild(empty);
+      return;
+    }
+    const names: Record<number, string> = { [MarkerSeverity.Error]: "error", [MarkerSeverity.Warning]: "warning", [MarkerSeverity.Info]: "info", [MarkerSeverity.Hint]: "hint" };
+    let lastPath = "";
+    for (const m of markers) {
+      const path = m.resource.path.slice("/project/".length);
+      if (path !== lastPath) {
+        lastPath = path;
+        const head = document.createElement("div");
+        head.className = "problems-file";
+        head.textContent = path;
+        list.appendChild(head);
+      }
+      const row = document.createElement("button");
+      row.type = "button";
+      row.className = "problem " + (names[m.severity] ?? "hint");
+      row.setAttribute("role", "listitem");
+      const code = m.code ? (typeof m.code === "string" ? m.code : m.code.value) : "";
+      // The Linter's markers carry their code in the message; here it has a column of its own.
+      const message = (m.message.split("\n")[0] ?? m.message).replace(code ? ` (${code})` : "\u0000", "");
+      row.innerHTML = `<span class="problem-dot"></span><span class="problem-text"></span><span class="problem-source"></span><span class="problem-pos"></span>`;
+      row.querySelector(".problem-text")!.textContent = message;
+      row.title = m.message;
+      row.querySelector(".problem-source")!.textContent = (m.source === "lsp" || m.owner === "lsp" ? "pyright" : m.source ?? m.owner) + (code ? ` (${code})` : "");
+      row.querySelector(".problem-pos")!.textContent = `${m.startLineNumber}:${m.startColumn}`;
+      row.addEventListener("click", () => {
+        this.openFile(path);
+        this.editor.setPosition({ lineNumber: m.startLineNumber, column: m.startColumn });
+        this.editor.revealRangeInCenterIfOutsideViewport(m);
+        this.editor.focus();
+      });
+      list.appendChild(row);
+    }
   }
 
   private bindResizers() {
