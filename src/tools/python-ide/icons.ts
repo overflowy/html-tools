@@ -13,7 +13,7 @@ export const ICON_NEW_FILE = SVG + '<path d="M9 1.5H4a.5.5 0 0 0-.5.5v12a.5.5 0 
 export const ICON_NEW_FOLDER = SVG + '<path d="M1.5 4.5a1 1 0 0 1 1-1h3l1.5 1.5h6.5a1 1 0 0 1 1 1v6.5a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1z"/><path d="M8 7.5v4M6 9.5h4"/></svg>';
 export const ICON_UPLOAD = SVG + '<path d="M8 11V3.5M5 6.5l3-3 3 3"/><path d="M2.5 11.5v1a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1v-1"/></svg>';
 export const ICON_FOLDER = SVG + '<path d="M1.5 4.5a1 1 0 0 1 1-1h3l1.5 1.5h6.5a1 1 0 0 1 1 1v6.5a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1z"/></svg>';
-export const ICON_FOLDER_OPEN = SVG + '<path d="M1.5 4.5a1 1 0 0 1 1-1h3l1.5 1.5h6.5a1 1 0 0 1 1 1V7"/><path d="M1.5 13.5l1.7-5.2a1 1 0 0 1 .95-.7H14.5l-1.8 5.2a1 1 0 0 1-.95.7z"/></svg>';
+export const ICON_FOLDER_OPEN = SVG + '<path d="M1.5 13.5V4.5a1 1 0 0 1 1-1h3l1.5 1.5h6.5a1 1 0 0 1 1 1V7"/><path d="M1.5 13.5l1.7-5.2a1 1 0 0 1 .95-.7H14.5l-1.8 5.2a1 1 0 0 1-.95.7z"/></svg>';
 export const ICON_FILE = SVG + '<path d="M9 1.5H4a.5.5 0 0 0-.5.5v12a.5.5 0 0 0 .5.5h8a.5.5 0 0 0 .5-.5V5z"/><path d="M9 1.5V5h3.5"/></svg>';
 export const ICON_PYTHON = SVG + '<path d="M8 1.5c-2.2 0-3.5.8-3.5 2.2V6h3.7v.6H3.3c-1.2 0-1.8 1-1.8 2.4 0 1.5.6 2.4 1.8 2.4h1.2V9.6c0-1.2 1-2.1 2.2-2.1h3.4c1 0 1.9-.8 1.9-1.8V3.7c0-1.4-1.6-2.2-4-2.2z"/><path d="M8 14.5c2.2 0 3.5-.8 3.5-2.2V10H7.8v-.6h4.9c1.2 0 1.8-1 1.8-2.4 0-1.5-.6-2.4-1.8-2.4h-1.2v1.8c0 1.2-1 2.1-2.2 2.1H5.9c-1 0-1.9.8-1.9 1.8v2c0 1.4 1.6 2.2 4 2.2z"/></svg>';
 export const ICON_CLOSE = SVG + '<path d="M4 4l8 8M12 4l-8 8"/></svg>';

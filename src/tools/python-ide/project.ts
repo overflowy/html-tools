@@ -213,6 +213,7 @@ export class Project {
       lock: null,
       lockPyodide: null,
       packages: [],
+      folders: [],
     };
     const initial = files ?? [
       { path: ENTRY_FILE, text: DEFAULT_MAIN, mtime: now },

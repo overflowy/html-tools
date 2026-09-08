@@ -75,7 +75,7 @@ export type ReplResult =
 
 export type PyRequest =
   | ({ type: "boot"; id: number } & BootOptions)
-  | { type: "files"; id: number; files: FileEntry[]; removed: string[] }
+  | { type: "files"; id: number; files: FileEntry[]; removed: string[]; folders: string[] }
   | ({ type: "run"; id: number } & RunOptions)
   | { type: "install"; id: number; specs: string[] }
   | { type: "uninstall"; id: number; names: string[] }
@@ -254,6 +254,7 @@ function writeFiles(msg: Extract<PyRequest, { type: "files" }>) {
     }
     pruneEmptyDirs(fs, full);
   }
+  for (const dir of msg.folders) fs.mkdirTree(PROJECT_ROOT + "/" + dir);
   for (const f of msg.files) {
     const full = PROJECT_ROOT + "/" + f.path;
     const dir = full.slice(0, full.lastIndexOf("/"));

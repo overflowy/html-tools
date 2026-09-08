@@ -3,17 +3,17 @@ import type * as Monaco from "monaco-editor";
 import type { Tool, ToolContext } from "../../shell/types";
 import { Checker } from "./checker";
 import { configureJson, createEditor, defineTheme, LinterBinding, registerToml } from "./editor";
-import { loadMonaco, loadPyodideAssets, loadPyrightWorkerUrl, loadTerminal, PYODIDE_VERSION, type LoadProgress, type MonacoApi } from "./engines";
+import { loadMonaco, loadPyodideAssets, loadPyrightScript, loadTerminal, PYODIDE_VERSION, type LoadProgress, type MonacoApi } from "./engines";
 import { renderPackages, renderTree, specName, type PackageRow } from "./explorer";
 import * as I from "./icons";
 import { Interpreter } from "./interpreter";
 import {
-  basename, defaultPyproject, isText, isTextPath, languageFor, looksLikeText, normalizePath,
+  basename, defaultPyproject, dirname, isText, isTextPath, languageFor, looksLikeText, normalizePath,
   Project, PROJECT_FILE, updatePyproject, type ProjectFile,
 } from "./project";
 import type { RunResult } from "./py-worker";
 import { Linter } from "./ruff";
-import { clearWheels, getMirror, listProjects, putMirror, storageAvailable } from "./store";
+import { clearWheels, getMirror, listProjects, onStorageError, putMirror, storageAvailable, storageError } from "./store";
 import { IdeTerminal } from "./terminal";
 import { readZip, writeZip } from "./zip";
 
@@ -45,7 +45,7 @@ interface Session {
   tabs: string[];
   active: string | null;
   expanded: Set<string>;
-  /** Folders created but still empty: only files persist, so these live until reload. */
+  /** Folders with no file in them yet, kept in the Project record; the rest are implied by the files. */
   extraFolders: Set<string>;
   /** Paths edited since the interpreter last saw them. */
   dirty: Set<string>;
@@ -53,6 +53,10 @@ interface Session {
   figures: string[];
   /** Bumped when the session closes, so async work for it stops. */
   generation: number;
+  /** Set once doOpenProject has started everything; late engine arrivals act only after that. */
+  opened: boolean;
+  /** A Checker restart waiting for the current one to finish booting. */
+  checkerRestartPending: boolean;
 }
 
 function read(key: string): string | null {
@@ -214,9 +218,10 @@ class Ide {
     this.editorReady = this.setupEditor();
     this.terminalReady = this.setupTerminal();
     void this.linter.load(this.progress("Ruff")).then(() => this.message("Ruff " + this.linter.version + " ready")).catch((e) => this.message("Ruff failed: " + e.message));
-    void loadPyrightWorkerUrl(this.progress("Pyright")).then((url) => {
+    void loadPyrightScript(this.progress("Pyright")).then((url) => {
       this.pyrightUrl = url;
-      if (this.session && !this.session.checker) this.restartChecker();
+      // A Project opened before Pyright arrived is waiting for it; one still opening starts it itself.
+      if (this.session?.opened && !this.session.checker) this.restartChecker();
     }).catch((e) => this.message("Pyright failed: " + e.message));
     void loadPyodideAssets(this.progress("Pyodide")).then((assets) => this.readCatalog(assets.lock)).catch(() => {});
     ctx.onRestore((payload) => this.restore(payload));
@@ -226,7 +231,12 @@ class Ide {
   /* ---------------- startup ---------------- */
 
   private async start() {
-    if (!(await storageAvailable())) this.message("Storage is unavailable here: projects will not survive a reload.");
+    onStorageError((what, reason) => {
+      const text = `Not saved: ${what} (${reason})`;
+      this.message(text);
+      console.error(text);
+    });
+    if (!(await storageAvailable())) this.message(`Storage is unavailable here (${storageError()}): projects will not survive a reload.`);
     // Wheels of another Pyodide release are useless; the catalog names its release in every URL.
     if (read(WHEELS_KEY) !== PYODIDE_VERSION) {
       await clearWheels();
@@ -479,11 +489,13 @@ class Ide {
       tabs: [],
       active: null,
       expanded: new Set(project.folders()),
-      extraFolders: new Set(),
+      extraFolders: new Set(project.record.folders ?? []),
       dirty: new Set(),
       pendingInput: null,
       figures: [],
       generation: 0,
+      opened: false,
+      checkerRestartPending: false,
     };
     this.session = session;
     write(LAST_PROJECT_KEY, id);
@@ -512,6 +524,7 @@ class Ide {
     }
     if (this.session !== session) return;
     this.restartChecker();
+    session.opened = true;
     await this.terminalReady;
     if (this.session !== session) return;
     this.terminal?.reset();
@@ -869,19 +882,22 @@ class Ide {
     dialog.querySelector(".prompt-label")!.textContent = label;
     input.value = initial;
     return new Promise((resolve) => {
+      // Whether the form was submitted, tracked here: browsers disagree about
+      // what a method="dialog" submit leaves in returnValue.
+      let accepted = false;
       const finish = (value: string | null) => {
         dialog.removeEventListener("close", onClose);
         cancel.removeEventListener("click", onCancel);
         if (dialog.open) dialog.close();
         resolve(value);
       };
-      const onClose = () => finish(dialog.returnValue === "ok" ? input.value : null);
+      const onClose = () => finish(accepted ? input.value : null);
       const onCancel = () => finish(null);
       const cancel = dialog.querySelector(".prompt-cancel") as HTMLButtonElement;
       dialog.addEventListener("close", onClose);
       cancel.addEventListener("click", onCancel);
       (dialog.querySelector("form") as HTMLFormElement).onsubmit = () => {
-        dialog.returnValue = "ok";
+        accepted = true;
       };
       dialog.showModal();
       input.focus();
@@ -893,9 +909,9 @@ class Ide {
   private async newFile(folder = "") {
     const s = this.session;
     if (!s) return;
-    const name = await this.ask("New file (a path creates folders)", folder ? folder + "/" : "");
+    const name = await this.ask(folder ? `New file in ${folder}` : "New file", "");
     if (!name) return;
-    const path = normalizePath(name);
+    const path = normalizePath((folder ? folder + "/" : "") + name);
     if (!path) return;
     if (s.project.files.has(path)) {
       this.openFile(path);
@@ -910,21 +926,34 @@ class Ide {
   private async newFolder(folder = "") {
     const s = this.session;
     if (!s) return;
-    const name = await this.ask("New folder", folder ? folder + "/" : "");
+    const name = await this.ask(folder ? `New folder in ${folder}` : "New folder", "");
     if (!name) return;
-    const path = normalizePath(name);
+    const path = normalizePath((folder ? folder + "/" : "") + name);
     if (!path) return;
     s.extraFolders.add(path);
     s.expanded.add(path);
     this.renderTree();
+    await this.saveFolders();
+    if (s.interpreter?.alive) s.interpreter.writeFiles([], [], [path]).catch(() => {});
+  }
+
+  /** The empty folders go in the Project record, trimmed of any a file has since filled. */
+  private saveFolders() {
+    const s = this.session;
+    if (!s) return Promise.resolve();
+    const implied = s.project.folders();
+    for (const f of Array.from(s.extraFolders)) if (implied.has(f)) s.extraFolders.delete(f);
+    return s.project.saveRecord({ folders: [...s.extraFolders].toSorted() });
   }
 
   private async renamePath(path: string, isFolder: boolean) {
     const s = this.session;
     if (!s) return;
-    const name = await this.ask(isFolder ? "Rename folder" : "Rename file", path);
+    // The name alone is edited; the folder it sits in stays (moving is a drag).
+    const dir = dirname(path);
+    const name = await this.ask(isFolder ? "Rename folder" : "Rename file", basename(path));
     if (!name) return;
-    const to = normalizePath(name);
+    const to = normalizePath((dir ? dir + "/" : "") + name);
     if (!to || to === path) return;
     await this.movePath(path, to);
   }
@@ -935,7 +964,14 @@ class Ide {
     const isFolder = !s.project.files.has(from);
     if (isFolder) {
       if (s.extraFolders.delete(from)) s.extraFolders.add(to);
+      for (const f of Array.from(s.extraFolders)) {
+        if (f.startsWith(from + "/")) {
+          s.extraFolders.delete(f);
+          s.extraFolders.add(to + f.slice(from.length));
+        }
+      }
       if (s.expanded.delete(from)) s.expanded.add(to);
+      void this.saveFolders();
     }
     this.flushSaves();
     const pairs = await s.project.move(from, to);
@@ -975,6 +1011,7 @@ class Ide {
     if (isFolder) {
       s.extraFolders.delete(path);
       for (const f of Array.from(s.extraFolders)) if (f.startsWith(path + "/")) s.extraFolders.delete(f);
+      void this.saveFolders();
     }
     for (const p of paths) {
       const t = this.saveTimers.get(p);
@@ -1250,9 +1287,36 @@ class Ide {
 
   /* ---------------- the Checker ---------------- */
 
+  /**
+   * Replaces the Checker with one built from the current files, Mirror, and
+   * settings. A Checker still booting is left to finish first: Firefox
+   * crashes its content process when a worker is terminated while it is
+   * still evaluating the 18 MB script. Requests that pile up meanwhile are
+   * folded into the one restart.
+   */
+  private restartTimer = 0;
+
+  /** Restarts the Checker shortly; several requests in a row (a settings write, then a new Mirror) make one restart. */
   private restartChecker() {
+    clearTimeout(this.restartTimer);
+    this.restartTimer = window.setTimeout(() => this.restartCheckerNow(), 300);
+  }
+
+  private restartCheckerNow() {
     const s = this.session;
     if (!s || !this.pyrightUrl || !this.monaco) return;
+    if (s.checkerRestartPending) return;
+    const booting = s.checker && !s.checker.isReady;
+    if (booting) {
+      s.checkerRestartPending = true;
+      const gen = s.generation;
+      void Promise.race([s.checker!.ready, new Promise((r) => setTimeout(r, 20000))]).then(() => {
+        if (this.session !== s || s.generation !== gen) return;
+        s.checkerRestartPending = false;
+        this.restartCheckerNow();
+      });
+      return;
+    }
     s.checker?.dispose();
     const files: Record<string, string> = { ...s.mirror?.files, "/site-packages/js.pyi": JS_STUB, ...s.project.checkerFiles() };
     const config = {
@@ -1325,7 +1389,7 @@ class Ide {
       s.jspi = info.jspi;
       this.flushSaves();
       const files = [...s.project.files.values()].map((f) => ({ path: f.path, data: f.text !== undefined ? f.text : f.bytes!.slice(0) }));
-      await interpreter.writeFiles(files);
+      await interpreter.writeFiles(files, [], [...s.extraFolders]);
       if (this.session !== s || s.generation !== gen) return;
       this.terminal?.writeDim(`Python ${info.python} (Pyodide ${PYODIDE_VERSION})${info.jspi ? "" : ", input() reads Stdin only in this browser"}\n`);
       if (!current && s.project.settings.dependencies.length) {

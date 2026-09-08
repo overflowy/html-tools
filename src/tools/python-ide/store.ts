@@ -3,7 +3,9 @@
 // Collection's own cache (shared/engines.ts), which is a separate database.
 // Every call resolves to something usable when IndexedDB is missing (a
 // private window, a browser that refuses it on file://): the Tool then works
-// for the visit and forgets everything after.
+// for the visit and forgets everything after. But it never fails quietly:
+// every refused write is reported through `onStorageError`, so the Tool can
+// say what was not saved.
 
 const DB_NAME = "html-tools-python-ide";
 const DB_VERSION = 1;
@@ -22,6 +24,8 @@ export interface ProjectRecord {
   lockPyodide: string | null;
   /** Everything installed, direct and transitive, as micropip lists it. */
   packages: { name: string; version: string; source: string }[];
+  /** Folders with no file in them yet; folders holding files are implied by the files. Absent in older records. */
+  folders?: string[];
 }
 
 export interface FileRecord {
@@ -48,15 +52,36 @@ export interface MirrorRecord {
 }
 
 let dbPromise: Promise<IDBDatabase | null> | null = null;
+let openError = "";
+
+type StorageErrorHandler = (what: string, reason: string) => void;
+let storageErrorHandler: StorageErrorHandler = (what, reason) => console.error("Storage: " + what + ": " + reason);
+
+/** Registers the one handler told about every write that did not happen. */
+export function onStorageError(fn: StorageErrorHandler) {
+  storageErrorHandler = fn;
+}
+
+function describe(e: unknown): string {
+  if (e instanceof Error || (e && typeof e === "object" && "name" in e)) {
+    const { name, message } = e as { name?: string; message?: string };
+    return [name, message].filter(Boolean).join(": ") || "unknown error";
+  }
+  return String(e);
+}
 
 function openDb(): Promise<IDBDatabase | null> {
   if (dbPromise) return dbPromise;
   dbPromise = new Promise((resolve) => {
     let req: IDBOpenDBRequest;
     try {
-      if (typeof indexedDB === "undefined") return resolve(null);
+      if (typeof indexedDB === "undefined") {
+        openError = "this browser has no IndexedDB";
+        return resolve(null);
+      }
       req = indexedDB.open(DB_NAME, DB_VERSION);
-    } catch {
+    } catch (e) {
+      openError = describe(e);
       return resolve(null);
     }
     req.onupgradeneeded = () => {
@@ -70,8 +95,14 @@ function openDb(): Promise<IDBDatabase | null> {
       if (!db.objectStoreNames.contains("mirrors")) db.createObjectStore("mirrors", { keyPath: "projectId" });
     };
     req.onsuccess = () => resolve(req.result);
-    req.onerror = () => resolve(null);
-    req.onblocked = () => resolve(null);
+    req.onerror = () => {
+      openError = describe(req.error);
+      resolve(null);
+    };
+    req.onblocked = () => {
+      openError = "the database is open in another tab at an older version";
+      resolve(null);
+    };
   });
   return dbPromise;
 }
@@ -103,17 +134,27 @@ async function read<T>(store: StoreName, run: (s: IDBObjectStore) => IDBRequest<
   }
 }
 
-async function write(stores: StoreName[], run: (tx: IDBTransaction) => void): Promise<boolean> {
+/** A write, named by `what` (a file path, "the project record") for the error report. */
+async function write(what: string, stores: StoreName[], run: (tx: IDBTransaction) => void): Promise<boolean> {
   const db = await openDb();
-  if (!db) return false;
+  if (!db) {
+    storageErrorHandler(what, "IndexedDB could not be opened: " + openError);
+    return false;
+  }
   try {
     const tx = db.transaction(stores, "readwrite");
     run(tx);
     await done(tx);
     return true;
-  } catch {
+  } catch (e) {
+    storageErrorHandler(what, describe(e));
     return false;
   }
+}
+
+/** The reason the database could not be opened, once `storageAvailable` said so. */
+export function storageError(): string {
+  return openError;
 }
 
 export function storageAvailable(): Promise<boolean> {
@@ -132,12 +173,12 @@ export function getProject(id: string): Promise<ProjectRecord | undefined> {
 }
 
 export function putProject(p: ProjectRecord): Promise<boolean> {
-  return write(["projects"], (tx) => tx.objectStore("projects").put(p));
+  return write(`the project "${p.name}"`, ["projects"], (tx) => tx.objectStore("projects").put(p));
 }
 
 /** Removes a Project with its files and Mirror. The Wheel Cache is shared and stays. */
 export function deleteProject(id: string): Promise<boolean> {
-  return write(["projects", "files", "mirrors"], (tx) => {
+  return write("deleting the project", ["projects", "files", "mirrors"], (tx) => {
     tx.objectStore("projects").delete(id);
     tx.objectStore("mirrors").delete(id);
     const files = tx.objectStore("files").index("project");
@@ -157,14 +198,14 @@ export async function listFiles(projectId: string): Promise<FileRecord[]> {
 }
 
 export function putFiles(files: FileRecord[]): Promise<boolean> {
-  return write(["files"], (tx) => {
+  return write(files.map((f) => f.path).join(", "), ["files"], (tx) => {
     const s = tx.objectStore("files");
     for (const f of files) s.put(f);
   });
 }
 
 export function deleteFiles(projectId: string, paths: string[]): Promise<boolean> {
-  return write(["files"], (tx) => {
+  return write("deleting " + paths.join(", "), ["files"], (tx) => {
     const s = tx.objectStore("files");
     for (const p of paths) s.delete([projectId, p]);
   });
@@ -177,13 +218,13 @@ export function getWheel(url: string): Promise<WheelRecord | undefined> {
 }
 
 export function putWheel(w: WheelRecord): Promise<boolean> {
-  return write(["wheels"], (tx) => tx.objectStore("wheels").put(w));
+  return write("the wheel " + w.url.slice(w.url.lastIndexOf("/") + 1), ["wheels"], (tx) => tx.objectStore("wheels").put(w));
 }
 
 
 /** Drops Wheels of other Pyodide releases: the catalog ones name their release in the URL. */
 export function clearWheels(): Promise<boolean> {
-  return write(["wheels"], (tx) => tx.objectStore("wheels").clear());
+  return write("clearing the wheel cache", ["wheels"], (tx) => tx.objectStore("wheels").clear());
 }
 
 /* ---------------- mirrors ---------------- */
@@ -193,5 +234,5 @@ export function getMirror(projectId: string): Promise<MirrorRecord | undefined> 
 }
 
 export function putMirror(m: MirrorRecord): Promise<boolean> {
-  return write(["mirrors"], (tx) => tx.objectStore("mirrors").put(m));
+  return write("the package sources for Pyright", ["mirrors"], (tx) => tx.objectStore("mirrors").put(m));
 }

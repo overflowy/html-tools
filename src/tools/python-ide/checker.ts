@@ -10,6 +10,7 @@
 // patched, when the Environment or the Mirror changes.
 
 import type * as Monaco from "monaco-editor";
+import { scriptDataUrl } from "../../shared/script-url";
 
 type Json = Record<string, unknown>;
 
@@ -56,6 +57,28 @@ export interface CheckerOptions {
 
 export const PROJECT_URI = "file:///project";
 
+/**
+ * What each Pyright worker starts as: a module worker that imports the real
+ * script when told where it is, holding any message that arrives meanwhile
+ * and replaying it once the script has installed its own listener.
+ */
+const BOOTSTRAP = `
+const held = [];
+let loading = false;
+self.onmessage = (e) => {
+  if (!loading && e.data && e.data.load) {
+    loading = true;
+    import(e.data.load).then(() => {
+      self.onmessage = null;
+      for (const h of held) self.dispatchEvent(new MessageEvent("message", { data: h.data, ports: [...h.ports] }));
+    }, (err) => self.postMessage({ type: "browser/bootstrapError", message: String(err) }));
+    return;
+  }
+  held.push(e);
+};
+`;
+const BOOTSTRAP_URL = scriptDataUrl(BOOTSTRAP);
+
 export class Checker {
   private workers: Worker[] = [];
   private listener: Listener | undefined;
@@ -68,14 +91,20 @@ export class Checker {
   private resolveReady: (() => void) | null = null;
   /** Resolves when the server answered `initialize`. */
   readonly ready = new Promise<void>((resolve) => (this.resolveReady = resolve));
+  isReady = false;
+  /** Resolves on the foreground worker's first message: its script has been evaluated. */
+  private started: Promise<void>;
+  private resolveStarted: (() => void) | null = null;
   /** Lowercased URI to the real one: Monaco's client lowercases, Pyright's filesystem does not. */
   private realUris = new Map<string, string>();
 
-  constructor(private monaco: typeof Monaco, private workerUrl: string, private options: CheckerOptions) {}
+  /** `script` is the worker script as a data: URL (see loadPyrightScript). */
+  constructor(private monaco: typeof Monaco, private script: string, private options: CheckerOptions) {
+    this.started = new Promise((resolve) => (this.resolveStarted = resolve));
+  }
 
   start() {
-    const foreground = new Worker(this.workerUrl, { name: "pyright-foreground" });
-    this.workers.push(foreground);
+    const foreground = this.spawn("pyright-foreground");
     foreground.addEventListener("message", (ev: MessageEvent) => this.receive(foreground, ev.data));
     foreground.postMessage({ type: "browser/boot", mode: "foreground" });
 
@@ -111,12 +140,23 @@ export class Checker {
     this.client = new Client(transport as unknown as ConstructorParameters<typeof Base>[0]);
   }
 
+  private spawn(name: string): Worker {
+    const worker = new Worker(BOOTSTRAP_URL, { type: "module", name });
+    this.workers.push(worker);
+    worker.postMessage({ load: this.script });
+    return worker;
+  }
+
   private receive(foreground: Worker, data: unknown) {
+    this.resolveStarted?.();
     if (this.closed || !data || typeof data !== "object") return;
     const msg = data as Message & { type?: string; initialData?: unknown; port?: MessagePort };
+    if (msg.type === "browser/bootstrapError") {
+      console.error("Pyright could not load: " + (msg as { message?: string }).message);
+      return;
+    }
     if (msg.type === "browser/newWorker") {
-      const background = new Worker(this.workerUrl, { name: "pyright-background-" + this.workers.length });
-      this.workers.push(background);
+      const background = this.spawn("pyright-background-" + this.workers.length);
       background.postMessage({ type: "browser/boot", mode: "background", initialData: msg.initialData, port: msg.port }, [msg.port as MessagePort]);
       return;
     }
@@ -131,6 +171,7 @@ export class Checker {
       this.locating.delete(msg.id);
       this.ensureModels(msg.result);
     } else if (msg.id !== undefined && msg.id === this.initId) {
+      this.isReady = true;
       this.resolveReady?.();
     }
     this.listener?.(msg);
@@ -222,12 +263,40 @@ export class Checker {
     this.workers[0]?.postMessage({ jsonrpc: "2.0", method: "pyright/deleteFile", params: { uri } });
   }
 
+  /**
+   * Stops the Checker. Monaco stops hearing from it at once; the server is
+   * asked to shut down and the workers are terminated only once it has, or
+   * after a grace period, and never before the foreground worker has spoken.
+   * Firefox crashes its content process when a worker is terminated while
+   * its 18 MB script is still being compiled, so a hard stop is the last
+   * resort, never the first.
+   */
   dispose() {
     this.closed = true;
     this.features?.dispose();
     this.features = null;
     this.client = null;
-    for (const w of this.workers) w.terminate();
+    const workers = this.workers;
     this.workers = [];
+    const foreground = workers[0];
+    if (!foreground) return;
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      for (const w of workers) w.terminate();
+    };
+    foreground.addEventListener("message", (ev: MessageEvent) => {
+      const msg = ev.data as Message | undefined;
+      if (msg?.jsonrpc === "2.0" && msg.id === "shutdown") {
+        foreground.postMessage({ jsonrpc: "2.0", method: "exit" });
+        // The background worker may still be compiling; give both time to wind down.
+        setTimeout(finish, 2000);
+      }
+    });
+    void Promise.race([this.started, new Promise((r) => setTimeout(r, 10000))]).then(() => {
+      foreground.postMessage({ jsonrpc: "2.0", id: "shutdown", method: "shutdown" });
+      setTimeout(finish, 5000);
+    });
   }
 }

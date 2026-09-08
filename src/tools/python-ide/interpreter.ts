@@ -137,10 +137,10 @@ export class Interpreter {
     );
   }
 
-  /** Writes files into the Project directory; buffers are transferred. */
-  writeFiles(files: FileEntry[], removed: string[] = []): Promise<void> {
+  /** Writes files (and makes empty folders) in the Project directory; buffers are transferred. */
+  writeFiles(files: FileEntry[], removed: string[] = [], folders: string[] = []): Promise<void> {
     const transfer = files.map((f) => f.data).filter((d): d is ArrayBuffer => typeof d !== "string");
-    return this.ask<void>({ type: "files", id: this.nextId++, files, removed }, transfer);
+    return this.ask<void>({ type: "files", id: this.nextId++, files, removed, folders }, transfer);
   }
 
   run(opts: RunOptions): Promise<RunResult> {

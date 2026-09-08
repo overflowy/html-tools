@@ -7,6 +7,7 @@
 // bytes handed to its worker.
 
 import { getEngine, type EngineAsset, type Progress } from "../../shared/engines";
+import { scriptDataUrl } from "../../shared/script-url";
 import { AmdLoader } from "./amd";
 
 export const PYODIDE_VERSION = "314.0.6";
@@ -155,10 +156,16 @@ const PYRIGHT: EngineAsset = {
 
 let pyrightUrl: Promise<string> | null = null;
 
-/** A blob: URL of the Checker's worker script. Both of its workers are spawned from it. */
-export function loadPyrightWorkerUrl(onProgress?: LoadProgress): Promise<string> {
+/**
+ * The Checker's worker script as a data: URL, for its workers to import once
+ * they are running. Not a blob: URL for the worker's own script: Firefox
+ * crashes its content process when such a worker is terminated (or the page
+ * unloaded) while the 18 MB script is still being compiled, and a dynamic
+ * import of the same script can be cut short safely.
+ */
+export function loadPyrightScript(onProgress?: LoadProgress): Promise<string> {
   if (pyrightUrl) return pyrightUrl;
-  pyrightUrl = getEngine(PYRIGHT, combined(onProgress)).then((bytes) => URL.createObjectURL(new Blob([bytes], { type: "text/javascript" })));
+  pyrightUrl = getEngine(PYRIGHT, combined(onProgress)).then((bytes) => scriptDataUrl(bytes));
   pyrightUrl.catch(() => (pyrightUrl = null));
   return pyrightUrl;
 }
