@@ -174,7 +174,7 @@ async function ocrWorker(run: Run, languages: string[]): Promise<TessWorker> {
   // recognized!!") to stderr, which Emscripten maps to console.error; on a
   // figure page that is expected, not an error, so route it to a warning.
   const bootUrl = scriptBlobUrl(
-    `importScripts(${JSON.stringify(scriptDataUrl(coreSrc))}, ${JSON.stringify(scriptDataUrl(workerSrc))});
+    `importScripts(${JSON.stringify(scriptDataUrl(coreSrc, "tesseract-core.js"))}, ${JSON.stringify(scriptDataUrl(workerSrc, "tesseract-worker.js"))});
     const core = TesseractCore;
     TesseractCore = (m = {}) => core({ printErr: (s) => console.warn("tesseract: " + s), ...m });`,
   );
@@ -294,7 +294,7 @@ function pdfjs(run: Run): Promise<{ lib: PdfJs; workerUrl: string }> {
     const worker = await engineText(run, ENGINES.pdfjsWorker);
     const url = scriptBlobUrl(lib);
     try {
-      return { lib: (await import(url)) as PdfJs, workerUrl: scriptDataUrl(worker) };
+      return { lib: (await import(url)) as PdfJs, workerUrl: scriptDataUrl(worker, "pdf.worker.mjs") };
     } finally {
       URL.revokeObjectURL(url);
     }
@@ -318,7 +318,7 @@ const PDF_BOOT = `self.onmessage = async (e) => {
 };`;
 
 function spawnPdfWorker(lib: PdfJs, workerUrl: string) {
-  const worker = new Worker(scriptDataUrl(PDF_BOOT), { type: "module" });
+  const worker = new Worker(scriptDataUrl(PDF_BOOT, "pdf-bootstrap.js"), { type: "module" });
   const channel = new MessageChannel();
   worker.postMessage({ url: workerUrl, port: channel.port2 }, [channel.port2]);
   const pdfWorker = new lib.PDFWorker({ port: channel.port1 });

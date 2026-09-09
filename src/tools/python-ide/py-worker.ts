@@ -202,8 +202,8 @@ function writer(stream: "stdout" | "stderr") {
 async function boot(opts: BootOptions): Promise<{ python: string; jspi: boolean }> {
   preloaded.set(opts.cdnBase + "pyodide.asm.wasm", opts.wasm);
   preloaded.set(opts.cdnBase + "python_stdlib.zip", opts.stdlib);
-  const loaderUrl = scriptDataUrl(opts.loader);
-  const factoryUrl = scriptDataUrl(opts.factory);
+  const loaderUrl = scriptDataUrl(opts.loader, "pyodide.mjs");
+  const factoryUrl = scriptDataUrl(opts.factory, "pyodide.asm.mjs");
   post({ type: "progress", message: "Starting Python" });
   const { loadPyodide } = (await import(loaderUrl)) as { loadPyodide: (c: PyodideConfig) => Promise<PyodideAPI> };
   const { default: createPyodideModule } = (await import(factoryUrl)) as { default: PyodideConfig["createPyodideModule"] };

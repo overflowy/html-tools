@@ -10,7 +10,7 @@
 // patched, when the Environment or the Mirror changes.
 
 import type * as Monaco from "monaco-editor";
-import { scriptDataUrl } from "../../shared/script-url";
+import { scriptBlobUrl, scriptDataUrl } from "../../shared/script-url";
 
 type Json = Record<string, unknown>;
 
@@ -63,7 +63,9 @@ export const PROJECT_URI = "file:///project";
 /**
  * What each Pyright worker starts as: a module worker that imports the real
  * script when told where it is, holding any message that arrives meanwhile
- * and replaying it once the script has installed its own listener.
+ * and replaying it once the script has installed its own listener. Spawned
+ * from a blob: URL when the script is one (a blob: import needs a blob:
+ * importer, or the origins differ), from a data: URL otherwise.
  */
 const BOOTSTRAP = `
 const held = [];
@@ -80,7 +82,8 @@ self.onmessage = (e) => {
   held.push(e);
 };
 `;
-const BOOTSTRAP_URL = scriptDataUrl(BOOTSTRAP);
+const BOOTSTRAP_DATA_URL = scriptDataUrl(BOOTSTRAP, "pyright-bootstrap.js");
+let bootstrapBlobUrl = "";
 
 export class Checker {
   private workers: Worker[] = [];
@@ -107,7 +110,7 @@ export class Checker {
    */
   private realUris = new Map<string, string>();
 
-  /** `script` is the worker script as a data: URL (see loadPyrightScript). */
+  /** `script` is the worker script's URL, blob: or data: (see loadPyrightScript). */
   constructor(private monaco: typeof Monaco, private script: string, private options: CheckerOptions) {
     this.started = new Promise((resolve) => (this.resolveStarted = resolve));
   }
@@ -147,7 +150,9 @@ export class Checker {
   }
 
   private spawn(name: string): Worker {
-    const worker = new Worker(BOOTSTRAP_URL, { type: "module", name });
+    let url = BOOTSTRAP_DATA_URL;
+    if (this.script.startsWith("blob:")) url = bootstrapBlobUrl ||= scriptBlobUrl(BOOTSTRAP);
+    const worker = new Worker(url, { type: "module", name });
     this.workers.push(worker);
     worker.postMessage({ load: this.script });
     return worker;

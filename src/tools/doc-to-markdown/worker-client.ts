@@ -39,7 +39,7 @@ export class ConvertWorker {
   private dead = false;
 
   constructor() {
-    this.worker = new Worker(scriptDataUrl(DOC_WORKER_SRC), { type: "module" });
+    this.worker = new Worker(scriptDataUrl(DOC_WORKER_SRC, "doc-worker.js"), { type: "module" });
     this.worker.onmessage = (ev: MessageEvent<WorkerResponse>) => this.receive(ev.data);
     this.worker.onerror = (ev) => {
       this.failAll(new Error("The conversion worker crashed: " + (ev.message || "unknown error")));

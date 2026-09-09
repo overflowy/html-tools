@@ -21,7 +21,7 @@ export class Linter {
   version = "";
 
   constructor() {
-    this.worker = new Worker(scriptDataUrl(PYIDE_RUFF_WORKER_SRC), { type: "module", name: "ruff" });
+    this.worker = new Worker(scriptDataUrl(PYIDE_RUFF_WORKER_SRC, "ruff-worker.js"), { type: "module", name: "ruff" });
     this.worker.onmessage = (ev: MessageEvent<RuffResponse>) => this.receive(ev.data);
     this.worker.onerror = (ev) => this.failAll(new Error("Ruff crashed: " + (ev.message || "unknown error")));
   }

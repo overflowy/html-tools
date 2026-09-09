@@ -59,7 +59,7 @@ self.onmessage = async (ev: MessageEvent<RuffRequest>) => {
   const msg = ev.data;
   try {
     if (msg.type === "load") {
-      const mod = (await import(scriptDataUrl(msg.glue))) as RuffModule;
+      const mod = (await import(scriptDataUrl(msg.glue, "ruff_wasm.js"))) as RuffModule;
       await mod.default({ module_or_path: msg.wasm });
       ruff = mod;
       post({ type: "loaded", version: mod.Workspace.version() });

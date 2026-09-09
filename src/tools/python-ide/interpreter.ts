@@ -37,7 +37,7 @@ export class Interpreter {
   downloaded = 0;
 
   constructor(private events: InterpreterEvents) {
-    this.worker = new Worker(scriptDataUrl(PYIDE_PY_WORKER_SRC), { type: "module", name: "python-interpreter" });
+    this.worker = new Worker(scriptDataUrl(PYIDE_PY_WORKER_SRC, "py-worker.js"), { type: "module", name: "python-interpreter" });
     this.worker.onmessage = (ev: MessageEvent<PyResponse>) => this.receive(ev.data);
     this.worker.onerror = (ev) => {
       // Firefox can report an empty worker exception while terminate() tears

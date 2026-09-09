@@ -45,8 +45,8 @@ let pdfInspector: PdfInspectorModule | null = null;
 const post = (msg: WorkerResponse) => self.postMessage(msg);
 
 /** Import a module from its source text. The glue never resolves a sibling file when given the wasm bytes directly. */
-function importGlue<T>(glue: string): Promise<T> {
-  return import(scriptDataUrl(glue)) as Promise<T>;
+function importGlue<T>(glue: string, name: string): Promise<T> {
+  return import(scriptDataUrl(glue, name)) as Promise<T>;
 }
 
 function describe(e: unknown): { message: string; code?: string; pages?: number[]; pageCount?: number } {
@@ -62,11 +62,11 @@ self.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
   try {
     if (msg.type === "load") {
       if (msg.engine === "anydoc") {
-        const mod = await importGlue<AnydocModule>(msg.glue);
+        const mod = await importGlue<AnydocModule>(msg.glue, "anydoc.js");
         await mod.default({ module_or_path: msg.wasm });
         anydoc = mod;
       } else {
-        const mod = await importGlue<PdfInspectorModule>(msg.glue);
+        const mod = await importGlue<PdfInspectorModule>(msg.glue, "pdf-inspector.js");
         await mod.default({ module_or_path: msg.wasm });
         pdfInspector = mod;
       }
