@@ -544,6 +544,8 @@
 .tool-python-ide .st-interp[data-state="booting"]::before,
 .tool-python-ide .st-interp[data-state="rebooting"]::before { background: #e3c17a; animation: pyide-pulse 1s infinite alternate; }
 @keyframes pyide-pulse { from { opacity: 1; } to { opacity: 0.35; } }
+/* An empty status leaves no gap of its own. */
+.tool-python-ide .st-checker:empty { display: none; }
 .tool-python-ide .st-engine {
   position: relative;
   padding: 0 6px;

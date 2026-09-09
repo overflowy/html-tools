@@ -190,7 +190,7 @@ const tool: Tool = {
         </div>
         <div class="statusbar">
           <span class="st-python">Python</span>
-          <span class="st-interp">starting</span>
+          <span class="st-interp">Starting</span>
           <span class="st-checker">Pyright</span>
           <span class="st-engine"></span>
           <span class="spacer"></span>
@@ -332,7 +332,8 @@ class Ide {
     this.editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyJ, () => this.togglePanel());
     this.editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyM, () => this.showPanelTab("problems"));
     monaco.editor.onDidChangeMarkers(() => this.scheduleProblems());
-    this.editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => this.message("Saved as you type."));
+    // Every edit is saved as it happens; the browser's own save dialog would only confuse.
+    this.editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {});
     this.editor.onDidChangeCursorPosition((e) => {
       this.$(".st-cursor").textContent = `Ln ${e.position.lineNumber}, Col ${e.position.column}`;
     });
@@ -488,7 +489,7 @@ class Ide {
     if (!s) return;
     s.state = state;
     const labels: Record<InterpState, string> = {
-      off: "interpreter off", booting: "booting", ready: "ready", running: "running", installing: "installing", rebooting: "restarting",
+      off: "Interpreter off", booting: "Booting", ready: "Ready", running: "Running", installing: "Installing", rebooting: "Restarting",
     };
     this.$(".st-interp").textContent = labels[state];
     this.$(".st-interp").dataset.state = state;
@@ -502,8 +503,11 @@ class Ide {
     this.el.classList.toggle("running", running);
   }
 
-  private setCheckerStatus(text: string) {
-    this.$(".st-checker").textContent = text;
+  /** The Checker's state in the Status Bar: what it is doing while it is not ready, nothing once it is. */
+  private setCheckerStatus(state: "starting" | "reading" | "ready") {
+    const labels = { starting: "Pyright starting", reading: "Pyright reading packages", ready: "" };
+    this.$(".st-checker").textContent = labels[state];
+    this.$(".st-checker").dataset.state = state;
   }
 
   private isPython(path: string | null): boolean {
@@ -574,7 +578,7 @@ class Ide {
     this.renderTree();
     this.renderPackages();
     this.setState("off");
-    this.setCheckerStatus("Pyright: starting");
+    this.setCheckerStatus("starting");
     await this.editorReady;
     if (this.session !== session) return;
     for (const f of project.files.values()) if (isText(f)) this.ensureModel(f.path, f.text);
@@ -1515,11 +1519,11 @@ class Ide {
     const checker = new Checker(this.monaco, this.pyrightUrl, { files, config });
     s.checker = checker;
     s.checkerKey = key;
-    this.setCheckerStatus("Pyright: starting");
+    this.setCheckerStatus("starting");
     checker.start();
     const gen = s.generation;
     void checker.ready.then(() => {
-      if (this.session === s && s.checker === checker && s.generation === gen) this.setCheckerStatus(s.mirror ? "Pyright: ready" : "Pyright: ready (no packages)");
+      if (this.session === s && s.checker === checker && s.generation === gen) this.setCheckerStatus("ready");
     });
   }
 
@@ -1539,7 +1543,7 @@ class Ide {
     const key = s.project.environmentKey;
     if (s.mirror?.key === key) return;
     const gen = s.generation;
-    this.setCheckerStatus("Pyright: reading packages");
+    this.setCheckerStatus("reading");
     const files = await s.interpreter.mirror();
     if (this.session !== s || s.generation !== gen) return;
     s.mirror = { key, files };

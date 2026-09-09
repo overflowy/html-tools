@@ -1055,14 +1055,14 @@ await page.addInitScript(() => {
 await page.goto(url + "#python-ide");
 const ide = ".tool-python-ide ";
 const ideReady = () => page.waitForFunction(() =>
-  document.querySelector(".tool-python-ide .st-interp")?.textContent === "ready" &&
-  (document.querySelector(".tool-python-ide .st-checker")?.textContent ?? "").includes("ready"), null, { timeout: 300000 });
+  document.querySelector(".tool-python-ide .st-interp")?.textContent === "Ready" &&
+  (document.querySelector(".tool-python-ide .st-checker") as HTMLElement).dataset.state === "ready", null, { timeout: 300000 });
 const ideTerm = async () => (await page.locator(ide + ".xterm-rows").innerText()).trim();
 await ideReady();
 check("ide: interpreter and checker boot", (await page.locator(ide + ".st-python").textContent())!.startsWith("Python 3."));
 check("ide: a fresh project opens on main.py", (await page.locator(ide + ".tab.active").textContent()) === "main.py");
 await page.locator(ide + ".run-btn").click();
-await page.waitForFunction(() => document.querySelector(".tool-python-ide .st-interp")?.textContent === "ready", null, { timeout: 60000 });
+await page.waitForFunction(() => document.querySelector(".tool-python-ide .st-interp")?.textContent === "Ready", null, { timeout: 60000 });
 await page.waitForFunction(() => document.querySelector(".tool-python-ide .xterm-rows")?.textContent?.includes("Hello from Python!"));
 check("ide: run prints to the terminal, then the REPL returns", (await ideTerm()).endsWith(">>>"));
 await page.evaluate(() => {
@@ -1115,7 +1115,7 @@ const ideRun = async (file: string, until: string) => {
   await page.locator(ide + `.tree-row.file[data-path="${file}"]`).click();
   await page.locator(ide + ".run-btn").click();
   await page.waitForFunction((s) => document.querySelector(".tool-python-ide .xterm-rows")?.textContent?.includes(s), until, { timeout: 30000 });
-  await page.waitForFunction(() => document.querySelector(".tool-python-ide .st-interp")?.textContent === "ready", null, { timeout: 60000 });
+  await page.waitForFunction(() => document.querySelector(".tool-python-ide .st-interp")?.textContent === "Ready", null, { timeout: 60000 });
 };
 // A completion accepted replaces the word typed so far: Pyright's items carry no edit of their own.
 await page.evaluate(() => {
@@ -1193,7 +1193,7 @@ await ideSetText("lib.py", "V = 'module'\n");
 await ideSetText("app.py", "import lib, os, time\nos.makedirs('made/deep')\nopen('flip.txt', 'wb').write(bytes([0, 1, 2, 255]))\ntime.sleep(1.5)\nprint('via', lib.V)\n");
 await page.locator(ide + '.tree-row.file[data-path="app.py"]').click();
 await page.locator(ide + ".run-btn").click();
-await page.waitForFunction(() => document.querySelector(".tool-python-ide .st-interp")?.textContent === "running", null, { timeout: 30000 });
+await page.waitForFunction(() => document.querySelector(".tool-python-ide .st-interp")?.textContent === "Running", null, { timeout: 30000 });
 // Two edits: the first is saved while the program still runs, the second is still in its debounce when it ends.
 // A file removed from the Interpreter during the Run and recreated in the Tree must not be removed again by the Run's snapshot.
 await page.waitForTimeout(150);
@@ -1205,7 +1205,7 @@ await ideSetText("recreate.py", "NEW = True\n");
 await page.waitForTimeout(800);
 await ideSetText("lib.py", "V = 'module'\nTYPED_DURING_RUN = True\n");
 await page.waitForFunction(() => document.querySelector(".tool-python-ide .xterm-rows")?.textContent?.includes("via module"), null, { timeout: 30000 });
-await page.waitForFunction(() => document.querySelector(".tool-python-ide .st-interp")?.textContent === "ready", null, { timeout: 60000 });
+await page.waitForFunction(() => document.querySelector(".tool-python-ide .st-interp")?.textContent === "Ready", null, { timeout: 60000 });
 await page.waitForTimeout(400);
 check("ide: a renamed package does not shadow a new module of its name", true);
 check("ide: an edit typed during a Run stays", (await ideText("lib.py")) === "V = 'module'\nTYPED_DURING_RUN = True\n", JSON.stringify(await ideText("lib.py")));
@@ -1249,7 +1249,7 @@ const checkersBefore = (await checkerWorkers()).length;
 await ideSaveSettings((d) => { (d.querySelector("input[name=lineLength]") as HTMLInputElement).value = "100"; });
 await page.waitForTimeout(1500);
 check("ide: a Ruff-only settings save does not restart the Checker", (await checkerWorkers()).length === checkersBefore &&
-  (await page.locator(ide + ".st-checker").textContent())!.includes("ready"), (await page.locator(ide + ".st-checker").textContent())!);
+  (await page.locator(ide + ".st-checker").getAttribute("data-state")) === "ready", (await page.locator(ide + ".st-checker").getAttribute("data-state"))!);
 await ideSaveSettings((d) => { (d.querySelector("select[name=typeCheckingMode]") as HTMLSelectElement).value = "basic"; });
 await page.waitForFunction((n) => (globalThis as unknown as { smokeWorkers: WorkerLog }).smokeWorkers.filter((w) => w.name === "pyright-foreground").length === n + 1, checkersBefore, { timeout: 10000 });
 await ideReady();
@@ -1263,9 +1263,9 @@ const ideLspMessages = (path: string) => page.evaluate((p) => {
 await ideSetText("app.py", "import six\nprint(six.__version__)\n");
 await page.locator(ide + ".install-input").fill("six");
 await page.locator(ide + ".install-btn").click();
-await page.waitForFunction(() => document.querySelector(".tool-python-ide .st-interp")?.textContent === "installing", null, { timeout: 30000 });
+await page.waitForFunction(() => document.querySelector(".tool-python-ide .st-interp")?.textContent === "Installing", null, { timeout: 30000 });
 await ideReady();
-await page.waitForFunction(() => document.querySelector(".tool-python-ide .st-checker")?.textContent === "Pyright: ready", null, { timeout: 60000 });
+await page.waitForFunction(() => (document.querySelector(".tool-python-ide .st-checker") as HTMLElement).dataset.state === "ready", null, { timeout: 60000 });
 await page.waitForFunction(() => {
   const monaco = (globalThis as unknown as { monaco: { editor: { getModelMarkers(f: object): { owner: string; message: string; resource: { path: string } }[] } } }).monaco;
   return !monaco.editor.getModelMarkers({}).some((m) => m.owner === "lsp" && m.resource.path === "/project/app.py" && m.message.includes("six"));
@@ -1274,7 +1274,7 @@ check("ide: an installed package resolves for the Checker", true);
 await page.evaluate(() => {
   for (const row of document.querySelectorAll(".tool-python-ide .pkg-row")) if (row.textContent?.includes("six")) (row.querySelector(".pkg-remove") as HTMLElement).click();
 });
-await page.waitForFunction(() => document.querySelector(".tool-python-ide .st-interp")?.textContent !== "ready", null, { timeout: 30000 });
+await page.waitForFunction(() => document.querySelector(".tool-python-ide .st-interp")?.textContent !== "Ready", null, { timeout: 30000 });
 await ideReady();
 await page.waitForFunction(() => {
   const monaco = (globalThis as unknown as { monaco: { editor: { getModelMarkers(f: object): { owner: string; message: string; resource: { path: string } }[] } } }).monaco;
