@@ -11,6 +11,7 @@
 .tool-python-ide .ide {
   --explorer-width: 240px;
   --panel-height: 240px;
+  --figures-width: 360px;
   flex: 1;
   min-height: 0;
   display: flex;
@@ -260,8 +261,16 @@
   flex: none;
   z-index: 2;
 }
+.tool-python-ide .figures-resizer {
+  width: 5px;
+  margin: 0 -2px;
+  cursor: col-resize;
+  flex: none;
+  z-index: 2;
+}
+.tool-python-ide .figures-resizer[hidden] { display: none; }
 @media (hover: hover) {
-  .tool-python-ide .explorer-resizer:hover, .tool-python-ide .panel-resizer:hover { background: var(--accent-soft); }
+  .tool-python-ide .explorer-resizer:hover, .tool-python-ide .panel-resizer:hover, .tool-python-ide .figures-resizer:hover { background: var(--accent-soft); }
 }
 
 /* ---- workbench ---- */
@@ -462,7 +471,8 @@
    resize (the height not being a whole number of rows) must be the Theme's. */
 .tool-python-ide .terminal-host .xterm .xterm-viewport { background-color: var(--bg) !important; }
 .tool-python-ide .figures {
-  width: 42%;
+  width: var(--figures-width);
+  max-width: 80%;
   flex: none;
   border-left: 0.5px solid var(--border);
   display: flex;
@@ -481,18 +491,24 @@
   color: var(--text-muted);
   border-bottom: 0.5px solid var(--border);
 }
-.tool-python-ide .figures-list { overflow: auto; padding: 10px; display: flex; flex-direction: column; gap: 12px; }
-.tool-python-ide .figure { margin: 0; background: #fff; border-radius: var(--radius-sm); overflow: hidden; }
-.tool-python-ide .figure img { display: block; width: 100%; height: auto; }
+.tool-python-ide .figures-count { font-family: var(--mono); font-size: 11px; letter-spacing: 0; text-transform: none; min-width: 36px; text-align: center; }
+.tool-python-ide .figures-head button.icon:disabled { opacity: 0.35; }
+/* The Figure sits at the bottom of the panel, its caption beneath it; the room left is above. */
+.tool-python-ide .figures .figure { margin: 10px; flex: 1; min-height: 0; display: flex; flex-direction: column; justify-content: flex-end; }
+.tool-python-ide .figures .figure img { display: block; flex: none; width: 100%; height: auto; max-height: calc(100% - 26px); object-fit: contain; object-position: bottom; cursor: zoom-in; }
+/* The caption is a line beneath the image, not a bar: nothing frames the figure. */
 .tool-python-ide .figure figcaption {
   display: flex;
   align-items: center;
-  padding: 4px 8px;
+  flex: none;
+  height: 26px;
+  box-sizing: border-box;
+  padding: 6px 2px 0;
   font-size: 11.5px;
-  background: var(--surface-2);
   color: var(--text-muted);
 }
 .tool-python-ide .figure a { color: var(--text-muted); display: inline-flex; }
+.tool-python-ide .figure a:hover { color: var(--text); }
 .tool-python-ide .figure a svg { width: 14px; height: 14px; }
 
 /* ---- status bar ---- */
@@ -603,6 +619,26 @@
   box-shadow: 0 16px 48px rgb(0 0 0 / 0.5);
 }
 .tool-python-ide dialog::backdrop { background: rgb(0 0 0 / 0.5); }
+/* A Figure at full size: the image fills what the viewport allows, its bar beneath. */
+.tool-python-ide .figure-dialog { padding: 0; min-width: 0; max-width: none; background: #fff; overflow: hidden; }
+.tool-python-ide .figure-dialog::backdrop { background: rgb(0 0 0 / 0.7); }
+.tool-python-ide .figure-dialog img { display: block; max-width: 92vw; max-height: calc(90vh - 34px); width: auto; height: auto; }
+.tool-python-ide .figure-dialog-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 34px;
+  padding: 0 6px 0 12px;
+  font-size: 12px;
+  background: var(--surface);
+  color: var(--text);
+  border-top: 0.5px solid var(--border);
+}
+.tool-python-ide .figure-dialog-name { min-width: 110px; text-align: center; }
+.tool-python-ide .figure-dialog button.icon:disabled { opacity: 0.35; }
+.tool-python-ide .figure-dialog a { color: var(--text-muted); display: inline-flex; }
+.tool-python-ide .figure-dialog a:hover { color: var(--text); }
+.tool-python-ide .figure-dialog a svg { width: 16px; height: 16px; }
 .tool-python-ide dialog h2 { margin: 0 0 4px; font-size: 16px; font-weight: 500; }
 .tool-python-ide .settings-note { margin: 0 0 12px; font-size: 12px; color: var(--text-muted); }
 .tool-python-ide .settings-note code { font-family: var(--mono); }

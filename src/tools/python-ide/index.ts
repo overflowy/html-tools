@@ -21,9 +21,10 @@ const LAST_PROJECT_KEY = "html-tools:python-ide:project";
 const WHEELS_KEY = "html-tools:python-ide:wheels-pyodide";
 const EXPLORER_WIDTH_KEY = "html-tools:python-ide:explorer-width";
 const PANEL_HEIGHT_KEY = "html-tools:python-ide:panel-height";
+const FIGURES_WIDTH_KEY = "html-tools:python-ide:figures-width";
 const PANEL_OPEN_KEY = "html-tools:python-ide:panel-open";
-const PENDING_KEY = "html-tools:python-ide:pending";
 const TYPE_HINTS_KEY = "html-tools:python-ide:type-hints";
+const PENDING_KEY = "html-tools:python-ide:pending";
 
 /** An edit the page went away with before its save; see `journalPending`. */
 interface PendingEdit {
@@ -62,6 +63,8 @@ interface Session {
   dirty: Set<string>;
   pendingInput: number | null;
   figures: string[];
+  /** The Figure the panel shows; a new one takes its place as it arrives. */
+  figureIndex: number;
   /** Bumped when the session closes, so async work for it stops. */
   generation: number;
   /** Set once doOpenProject has started everything; late engine arrivals act only after that. */
@@ -147,10 +150,10 @@ const tool: Tool = {
               <button type="button" class="stop-btn" title="Stop the program" hidden>${I.ICON_STOP}<span>Stop</span></button>
               <button type="button" class="icon restart-btn" title="Restart the interpreter">${I.ICON_RESTART}</button>
               <button type="button" class="icon format-btn" title="Format with Ruff (Shift+Alt+F)">${I.ICON_FORMAT}</button>
+              <button type="button" class="icon hints-btn" title="Type Hints: inferred types and parameter names in the editor" aria-pressed="true">${I.ICON_TYPE_HINTS}</button>
               <button type="button" class="icon stdin-btn" title="Stdin: text for input() to read first" aria-pressed="false">${I.ICON_STDIN}</button>
               <span class="spacer"></span>
               <button type="button" class="icon figures-btn" title="Figures" aria-pressed="false" hidden>${I.ICON_FIGURE}<span class="badge"></span></button>
-              <button type="button" class="icon hints-btn" title="Type Hints: inferred types and parameter names in the editor" aria-pressed="true">${I.ICON_TYPE_HINTS}</button>
               <button type="button" class="icon sidebar-btn" title="Show or hide the tool list" aria-label="Tool list" aria-pressed="true">${I.ICON_SIDEBAR}</button>
               <button type="button" class="icon panel-btn" title="Terminal and Problems (${MOD}J)" aria-pressed="true">${I.ICON_PANEL}</button>
               <button type="button" class="icon quickopen-btn" title="Open a file by name (${MOD}P)">${I.ICON_SEARCH}</button>
@@ -174,9 +177,10 @@ const tool: Tool = {
               </div>
               <div class="panel-body" data-panel="terminal">
                 <div class="terminal-host"></div>
+                <div class="figures-resizer" role="separator" aria-orientation="vertical" hidden></div>
                 <div class="figures" hidden>
-                  <div class="figures-head"><span>Figures</span><span class="spacer"></span><button type="button" class="icon figures-clear" title="Clear figures">${I.ICON_CLOSE}</button></div>
-                  <div class="figures-list"></div>
+                  <div class="figures-head"><span>Figures</span><span class="spacer"></span><button type="button" class="icon figures-prev" title="Previous figure">${I.ICON_PREVIOUS}</button><span class="figures-count"></span><button type="button" class="icon figures-next" title="Next figure">${I.ICON_NEXT}</button><button type="button" class="icon figures-clear" title="Clear figures">${I.ICON_CLOSE}</button></div>
+                  <figure class="figure"><img alt="" title="Open at full size"><figcaption><span class="figure-name"></span><span class="spacer"></span><a download title="Download">${I.ICON_DOWNLOAD}</a></figcaption></figure>
                 </div>
                 <div class="problems" role="list"></div>
               </div>
@@ -201,6 +205,7 @@ const tool: Tool = {
       <input type="file" class="file-input" multiple hidden>
       <input type="file" class="zip-input" accept=".zip,application/zip" hidden>
       <dialog class="settings-dialog"></dialog>
+      <dialog class="figure-dialog"><img alt=""><div class="figure-dialog-bar"><button type="button" class="icon figure-dialog-prev" title="Previous figure (←)">${I.ICON_PREVIOUS}</button><span class="figure-dialog-name"></span><button type="button" class="icon figure-dialog-next" title="Next figure (→)">${I.ICON_NEXT}</button><span class="spacer"></span><a download title="Download">${I.ICON_DOWNLOAD}</a><button type="button" class="icon figure-dialog-close" title="Close (Esc)">${I.ICON_CLOSE}</button></div></dialog>
       <dialog class="prompt-dialog"><form method="dialog"><label class="prompt-label"></label><input class="prompt-input" spellcheck="false" autocomplete="off"><div class="prompt-actions"><button type="button" class="prompt-cancel">Cancel</button><button type="submit" class="primary prompt-ok">OK</button></div></form></dialog>`;
     // The instance lives on through the listeners it binds to `el`.
     void new Ide(el, ctx);
@@ -320,12 +325,12 @@ class Ide {
     registerToml(monaco);
     configureJson(monaco);
     this.editor = createEditor(monaco, this.$(".editor-host"), 4);
+    this.setTypeHints(read(TYPE_HINTS_KEY) !== "off");
     this.editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => void this.run());
     this.editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyP, () => this.openQuickOpen());
     this.editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyJ, () => this.togglePanel());
     this.editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyM, () => this.showPanelTab("problems"));
     monaco.editor.onDidChangeMarkers(() => this.scheduleProblems());
-    this.setTypeHints(read(TYPE_HINTS_KEY) !== "off");
     this.editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => this.message("Saved as you type."));
     this.editor.onDidChangeCursorPosition((e) => {
       this.$(".st-cursor").textContent = `Ln ${e.position.lineNumber}, Col ${e.position.column}`;
@@ -553,6 +558,7 @@ class Ide {
       dirty: new Set(),
       pendingInput: null,
       figures: [],
+      figureIndex: 0,
       generation: 0,
       opened: false,
       checkerRestartPending: false,
@@ -1900,22 +1906,54 @@ class Ide {
   private addFigure(png: Uint8Array) {
     const s = this.session;
     if (!s) return;
-    const url = URL.createObjectURL(new Blob([png as BlobPart], { type: "image/png" }));
-    s.figures.push(url);
-    const list = this.$(".figures-list");
-    const card = document.createElement("figure");
-    card.className = "figure";
-    card.innerHTML = `<img alt="Figure ${s.figures.length}"><figcaption><span>Figure ${s.figures.length}</span><span class="spacer"></span><a download="figure-${s.figures.length}.png" title="Download">${I.ICON_DOWNLOAD}</a></figcaption>`;
-    (card.querySelector("img") as HTMLImageElement).src = url;
-    (card.querySelector("a") as HTMLAnchorElement).href = url;
-    list.appendChild(card);
+    s.figures.push(URL.createObjectURL(new Blob([png as BlobPart], { type: "image/png" })));
     this.$(".figures").hidden = false;
+    this.$(".figures-resizer").hidden = false;
     this.el.classList.add("has-figures");
     const btn = this.$(".figures-btn");
     btn.hidden = false;
     btn.querySelector(".badge")!.textContent = String(s.figures.length);
     btn.setAttribute("aria-pressed", "true");
+    this.selectFigure(s.figures.length - 1);
     this.terminal?.layout();
+  }
+
+  /** Shows one Figure in the panel, and in the modal too while that is open. */
+  private selectFigure(index: number) {
+    const s = this.session;
+    if (!s || !s.figures.length) return;
+    const n = s.figures.length;
+    index = ((index % n) + n) % n;
+    s.figureIndex = index;
+    const url = s.figures[index]!;
+    const panel = this.$(".figures");
+    (panel.querySelector(".figure img") as HTMLImageElement).src = url;
+    (panel.querySelector(".figure img") as HTMLImageElement).alt = `Figure ${index + 1}`;
+    panel.querySelector(".figure-name")!.textContent = `Figure ${index + 1}`;
+    panel.querySelector(".figures-count")!.textContent = `${index + 1} / ${n}`;
+    for (const sel of [".figures-prev", ".figures-next"]) (panel.querySelector(sel) as HTMLButtonElement).disabled = n < 2;
+    const link = panel.querySelector(".figure a") as HTMLAnchorElement;
+    link.href = url;
+    link.download = `figure-${index + 1}.png`;
+    const dialog = this.$(".figure-dialog") as HTMLDialogElement;
+    if (!dialog.open) return;
+    const img = dialog.querySelector("img") as HTMLImageElement;
+    img.src = url;
+    img.alt = `Figure ${index + 1}`;
+    dialog.querySelector(".figure-dialog-name")!.textContent = `Figure ${index + 1} of ${n}`;
+    for (const sel of [".figure-dialog-prev", ".figure-dialog-next"]) (dialog.querySelector(sel) as HTMLButtonElement).disabled = n < 2;
+    const a = dialog.querySelector("a") as HTMLAnchorElement;
+    a.href = url;
+    a.download = `figure-${index + 1}.png`;
+  }
+
+  /** The panel's Figure in a modal, at the size the viewport allows. */
+  private showFigure() {
+    const s = this.session;
+    if (!s?.figures.length) return;
+    const dialog = this.$(".figure-dialog") as HTMLDialogElement;
+    if (!dialog.open) dialog.showModal();
+    this.selectFigure(s.figureIndex);
   }
 
   private clearFigures() {
@@ -1923,13 +1961,16 @@ class Ide {
     if (s) {
       for (const u of s.figures) URL.revokeObjectURL(u);
       s.figures = [];
+      s.figureIndex = 0;
     }
-    this.$(".figures-list").replaceChildren();
+    ((this.$(".figure-dialog") as HTMLDialogElement)).close();
     this.$(".figures").hidden = true;
+    this.$(".figures-resizer").hidden = true;
     this.el.classList.remove("has-figures");
     this.$(".figures-btn").hidden = true;
     this.terminal?.layout();
   }
+
 
   /* ---------------- deep link ---------------- */
 
@@ -1971,14 +2012,33 @@ class Ide {
       $(".stdin-btn").setAttribute("aria-pressed", String(!row.hidden));
       if (!row.hidden) $(".stdin").focus();
     });
+    $(".hints-btn").addEventListener("click", () => this.setTypeHints($(".hints-btn").getAttribute("aria-pressed") !== "true"));
     $(".figures-btn").addEventListener("click", () => {
       const fig = $(".figures");
       fig.hidden = !fig.hidden;
+      $(".figures-resizer").hidden = fig.hidden;
       this.el.classList.toggle("has-figures", !fig.hidden);
       $(".figures-btn").setAttribute("aria-pressed", String(!fig.hidden));
       this.terminal?.layout();
     });
     $(".figures-clear").addEventListener("click", () => this.clearFigures());
+    const step = (by: number) => this.selectFigure((this.session?.figureIndex ?? 0) + by);
+    $(".figures-prev").addEventListener("click", () => step(-1));
+    $(".figures-next").addEventListener("click", () => step(1));
+    $(".figures .figure img").addEventListener("click", () => this.showFigure());
+    const figureDialog = $(".figure-dialog") as HTMLDialogElement;
+    $(".figure-dialog-prev").addEventListener("click", () => step(-1));
+    $(".figure-dialog-next").addEventListener("click", () => step(1));
+    $(".figure-dialog-close").addEventListener("click", () => figureDialog.close());
+    // A click on the backdrop lands on the dialog itself, never on its children.
+    figureDialog.addEventListener("click", (e) => {
+      if (e.target === figureDialog) figureDialog.close();
+    });
+    figureDialog.addEventListener("keydown", (e) => {
+      if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+      e.preventDefault();
+      step(e.key === "ArrowRight" ? 1 : -1);
+    });
     $(".panel-btn").addEventListener("click", () => this.togglePanel());
     const syncSidebar = (collapsed: boolean) => $(".sidebar-btn").setAttribute("aria-pressed", String(!collapsed));
     $(".sidebar-btn").addEventListener("click", () => this.ctx.sidebar.setCollapsed(!this.ctx.sidebar.collapsed));
@@ -2012,7 +2072,6 @@ class Ide {
     ($(".project-select") as HTMLSelectElement).addEventListener("change", (e) => void this.openProject((e.target as HTMLSelectElement).value));
     $(".project-menu-btn").addEventListener("click", (e) => {
       const btn = e.currentTarget as HTMLElement;
-    $(".hints-btn").addEventListener("click", () => this.setTypeHints($(".hints-btn").getAttribute("aria-pressed") !== "true"));
       const r = btn.getBoundingClientRect();
       this.showProjectMenu(r.left, r.bottom + 4);
     });
@@ -2058,6 +2117,13 @@ class Ide {
   }
 
   /** Shows or hides the panel (Terminal, Figures, Problems). A Preference. */
+  /** Type Hints on or off: Monaco stops asking the Checker for inlay hints when off. A Preference. */
+  private setTypeHints(on: boolean) {
+    this.editor?.updateOptions({ inlayHints: { enabled: on ? "on" : "off" } });
+    this.$(".hints-btn").setAttribute("aria-pressed", String(on));
+    write(TYPE_HINTS_KEY, on ? "on" : "off");
+  }
+
   private togglePanel(open = this.$(".panel").hidden, tab?: PanelTab) {
     this.$(".panel").hidden = !open;
     this.$(".panel-resizer").hidden = !open;
@@ -2116,13 +2182,6 @@ class Ide {
   /* ---------------- problems ---------------- */
 
   private problemsTimer = 0;
-
-  /** Type Hints on or off: Monaco stops asking the Checker for inlay hints when off. A Preference. */
-  private setTypeHints(on: boolean) {
-    this.editor?.updateOptions({ inlayHints: { enabled: on ? "on" : "off" } });
-    this.$(".hints-btn").setAttribute("aria-pressed", String(on));
-    write(TYPE_HINTS_KEY, on ? "on" : "off");
-  }
 
   private scheduleProblems() {
     clearTimeout(this.problemsTimer);
@@ -2190,21 +2249,19 @@ class Ide {
 
   private bindResizers() {
     const ide = this.$(".ide");
-    const explorerWidth = Number(read(EXPLORER_WIDTH_KEY)) || 240;
-    const panelHeight = Number(read(PANEL_HEIGHT_KEY)) || 240;
-    ide.style.setProperty("--explorer-width", explorerWidth + "px");
-    ide.style.setProperty("--panel-height", panelHeight + "px");
-    const drag = (handle: HTMLElement, axis: "x" | "y") => {
+    // A handle, the CSS variable and Preference it drives, its bounds, and the direction that grows it.
+    const resizer = (handle: HTMLElement, key: string, cssVar: string, fallback: number, min: number, max: number, axis: "x" | "y", grows: 1 | -1, measure: () => number) => {
+      ide.style.setProperty(cssVar, (Number(read(key)) || fallback) + "px");
       handle.addEventListener("pointerdown", (e) => {
         e.preventDefault();
         handle.setPointerCapture(e.pointerId);
         const start = axis === "x" ? e.clientX : e.clientY;
-        const initial = axis === "x" ? this.$(".explorer").getBoundingClientRect().width : this.$(".panel").getBoundingClientRect().height;
+        const initial = measure();
         const move = (ev: PointerEvent) => {
-          const delta = axis === "x" ? ev.clientX - start : start - ev.clientY;
-          const value = Math.max(axis === "x" ? 160 : 80, Math.min(axis === "x" ? 520 : 800, initial + delta));
-          ide.style.setProperty(axis === "x" ? "--explorer-width" : "--panel-height", value + "px");
-          write(axis === "x" ? EXPLORER_WIDTH_KEY : PANEL_HEIGHT_KEY, String(value));
+          const delta = ((axis === "x" ? ev.clientX : ev.clientY) - start) * grows;
+          const value = Math.max(min, Math.min(max, initial + delta));
+          ide.style.setProperty(cssVar, value + "px");
+          write(key, String(value));
         };
         const up = () => {
           handle.removeEventListener("pointermove", move);
@@ -2215,8 +2272,9 @@ class Ide {
         handle.addEventListener("pointerup", up);
       });
     };
-    drag(this.$(".explorer-resizer"), "x");
-    drag(this.$(".panel-resizer"), "y");
+    resizer(this.$(".explorer-resizer"), EXPLORER_WIDTH_KEY, "--explorer-width", 240, 160, 520, "x", 1, () => this.$(".explorer").getBoundingClientRect().width);
+    resizer(this.$(".panel-resizer"), PANEL_HEIGHT_KEY, "--panel-height", 240, 80, 800, "y", -1, () => this.$(".panel").getBoundingClientRect().height);
+    resizer(this.$(".figures-resizer"), FIGURES_WIDTH_KEY, "--figures-width", 360, 200, 1200, "x", -1, () => this.$(".figures").getBoundingClientRect().width);
   }
 
   private bindDrop() {
