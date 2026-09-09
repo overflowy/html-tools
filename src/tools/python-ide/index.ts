@@ -256,7 +256,7 @@ class Ide {
       const model = s.models.get(path);
       if (model && !model.isDisposed()) entries.push({ projectId: s.project.id, path, text: model.getValue() });
     }
-    this.flushSaves();
+    void this.flushSaves();
     if (entries.length) write(PENDING_KEY, JSON.stringify(entries));
   }
 
@@ -591,7 +591,7 @@ class Ide {
     const s = this.session;
     if (!s) return;
     s.generation++;
-    this.flushSaves();
+    void this.flushSaves();
     s.interpreter?.terminate();
     s.checker?.dispose();
     this.editor?.setModel(null);
@@ -634,7 +634,7 @@ class Ide {
     if (!s) return;
     const name = await this.ask("Name for the copy", s.project.name + " copy");
     if (!name) return;
-    this.flushSaves();
+    await this.flushSaves();
     const files: ProjectFile[] = [...s.project.files.values()].map((f) => Object.assign({}, f, { bytes: f.bytes?.slice(0) }));
     const p = await Project.create(name.trim(), files);
     await p.saveRecord({ lock: s.project.record.lock, lockPyodide: s.project.record.lockPyodide, packages: s.project.record.packages.slice(), folders: [...s.extraFolders].toSorted() });
@@ -659,7 +659,7 @@ class Ide {
   private async exportProject() {
     const s = this.session;
     if (!s) return;
-    this.flushSaves();
+    await this.flushSaves();
     const encoder = new TextEncoder();
     const prefix = s.project.name.replaceAll(/[^\w.-]+/g, "_") + "/";
     const entries = [...s.project.files.values()].map((f) => ({ path: prefix + f.path, data: f.text !== undefined ? encoder.encode(f.text) : new Uint8Array(f.bytes ?? new ArrayBuffer(0)) }));
@@ -749,12 +749,13 @@ class Ide {
   }
 
   /** Writes every pending edit now, before something reads the files. */
-  private flushSaves() {
-    for (const [path, t] of this.saveTimers) {
-      clearTimeout(t);
-      void this.saveModel(path);
-    }
+  private async flushSaves() {
+    const pending = [...this.saveTimers];
     this.saveTimers.clear();
+    await Promise.all(pending.map(([path, timer]) => {
+      clearTimeout(timer);
+      return this.saveModel(path);
+    }));
   }
 
   /**
@@ -1127,7 +1128,7 @@ class Ide {
         movedFolders.push(to);
       }
     }
-    this.flushSaves();
+    await this.flushSaves();
     const pairs = await s.project.move(from, to);
     for (const [a, b] of pairs) {
       const model = s.models.get(a);
@@ -1555,7 +1556,7 @@ class Ide {
       if (stale()) return;
       s.python = info.python;
       s.jspi = info.jspi;
-      this.flushSaves();
+      await this.flushSaves();
       // From here every change goes to the filesystem as it happens; this write, made in the same breath, carries everything before.
       s.booted = true;
       s.dirty.clear();
@@ -1656,7 +1657,7 @@ class Ide {
     const path = s.active!;
     const gen = s.generation;
     if (s.project.settings.ide.formatOnRun) await this.editor.getAction("editor.action.formatDocument")?.run();
-    this.flushSaves();
+    await this.flushSaves();
     await this.syncDirty();
     if (this.session !== s || s.generation !== gen || s.state !== "ready") return;
     this.togglePanel(true);

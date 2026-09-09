@@ -1147,6 +1147,8 @@ await page.evaluate(() => {
 await page.locator(ide + '.tree-row.file[data-path="My File.py"]').waitFor();
 await ideNew(".new-file-btn", "recreate.py");
 await ideSetText("recreate.py", "OLD = True\n");
+await ideNew(".new-file-btn", "flip.txt");
+await ideSetText("flip.txt", "x".repeat(256 * 1024));
 await ideSetText("app.py", "import lib.util\nprint('via', lib.util.V)\n");
 await ideRun("app.py", "via folder");
 await ideMenu("lib", "Rename");
@@ -1154,7 +1156,7 @@ await page.locator(ide + ".prompt-input").fill("lib_old");
 await page.locator(ide + ".prompt-ok").click();
 await ideNew(".new-file-btn", "lib.py");
 await ideSetText("lib.py", "V = 'module'\n");
-await ideSetText("app.py", "import lib, os, time\nos.makedirs('made/deep')\ntime.sleep(1.5)\nprint('via', lib.V)\n");
+await ideSetText("app.py", "import lib, os, time\nos.makedirs('made/deep')\nopen('flip.txt', 'wb').write(bytes([0, 1, 2, 255]))\ntime.sleep(1.5)\nprint('via', lib.V)\n");
 await page.locator(ide + '.tree-row.file[data-path="app.py"]').click();
 await page.locator(ide + ".run-btn").click();
 await page.waitForFunction(() => document.querySelector(".tool-python-ide .st-interp")?.textContent === "running", null, { timeout: 30000 });
@@ -1175,6 +1177,9 @@ check("ide: a renamed package does not shadow a new module of its name", true);
 check("ide: an edit typed during a Run stays", (await ideText("lib.py")) === "V = 'module'\nTYPED_DURING_RUN = True\n", JSON.stringify(await ideText("lib.py")));
 check("ide: a file deleted and recreated during a Run stays",
   (await ideText("recreate.py")) === "NEW = True\n", JSON.stringify(await ideText("recreate.py")));
+check("ide: a Run can rewrite a just-edited text file as binary",
+  (await ideText("flip.txt")) === null && (await page.locator(ide + '.tree-row.file[data-path="flip.txt"]').count()) === 1,
+  JSON.stringify(await ideText("flip.txt")));
 await page.locator(ide + '.tree-row.folder[data-path="made"]').click();
 check("ide: a program's folders reach the Tree", (await ideTree()).includes("made/deep"), (await ideTree()).join(", "));
 await ideMenu("lib_old/util.py", "Delete");
@@ -1182,10 +1187,11 @@ await page.waitForFunction(() => !document.querySelector('.tool-python-ide .tree
 check("ide: deleting the last file leaves its folder", (await ideTree()).includes("lib_old"), (await ideTree()).join(", "));
 await ideMenu("lib_old", "Delete");
 await page.waitForFunction(() => !document.querySelector('.tool-python-ide .tree-row[data-path="lib_old"]'));
-await ideSetText("app.py", "import os\nprint('recreated', open('recreate.py').read().strip())\nprint('dirs', sorted(d for d, _, _ in os.walk('.')))\n");
+await ideSetText("app.py", "import os\nprint('recreated', open('recreate.py').read().strip())\nprint('binary', list(open('flip.txt', 'rb').read()))\nprint('dirs', sorted(d for d, _, _ in os.walk('.')))\n");
 await ideRun("app.py", "dirs [");
-check("ide: the recreated file reaches the Interpreter", (await ideTerm()).includes("recreated NEW = True"), (await ideTerm()).split("\n").slice(-4).join(" | "));
-check("ide: the Interpreter's folders match the Tree", (await ideTerm()).includes("dirs ['.', './made', './made/deep']"), (await ideTerm()).split("\n").slice(-4).join(" | "));
+check("ide: the recreated file reaches the Interpreter", (await ideTerm()).includes("recreated NEW = True"), (await ideTerm()).split("\n").slice(-5).join(" | "));
+check("ide: the binary rewrite reaches the Interpreter", (await ideTerm()).includes("binary [0, 1, 2, 255]"), (await ideTerm()).split("\n").slice(-5).join(" | "));
+check("ide: the Interpreter's folders match the Tree", (await ideTerm()).includes("dirs ['.', './made', './made/deep']"), (await ideTerm()).split("\n").slice(-5).join(" | "));
 // An edit made right before a reload is journaled and comes back.
 await ideSetText("app.py", "print('edited just before the reload')\n");
 await page.reload();
