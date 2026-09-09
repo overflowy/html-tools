@@ -154,7 +154,7 @@ const tool: Tool = {
               <button type="button" class="icon hints-btn" title="Infer types" aria-pressed="false">${I.ICON_TYPE_HINTS}</button>
               <button type="button" class="icon stdin-btn" title="Stdin: text for input() to read first" aria-pressed="false">${I.ICON_STDIN}</button>
               <span class="spacer"></span>
-              <button type="button" class="icon sidebar-btn" title="Show or hide the tool list" aria-label="Tool list" aria-pressed="true">${I.ICON_SIDEBAR}</button>
+              <button type="button" class="icon sidebar-btn" title="Hide sidebar" aria-label="Hide sidebar" aria-pressed="true">${I.ICON_SIDEBAR}</button>
               <button type="button" class="icon panel-btn" title="Terminal and Problems (${MOD}J)" aria-pressed="true">${I.ICON_PANEL}</button>
               <button type="button" class="icon quickopen-btn" title="Open a file by name (${MOD}P)">${I.ICON_SEARCH}</button>
               <button type="button" class="icon settings-btn" title="Project settings">${I.ICON_SETTINGS}</button>
@@ -2053,7 +2053,14 @@ class Ide {
       step(e.key === "ArrowRight" ? 1 : -1);
     });
     $(".panel-btn").addEventListener("click", () => this.togglePanel());
-    const syncSidebar = (collapsed: boolean) => $(".sidebar-btn").setAttribute("aria-pressed", String(!collapsed));
+    // Same wording as the Shell's own buttons: the label names what a press does.
+    const syncSidebar = (collapsed: boolean) => {
+      const btn = $(".sidebar-btn");
+      const label = collapsed ? "Show sidebar" : "Hide sidebar";
+      btn.setAttribute("aria-pressed", String(!collapsed));
+      btn.setAttribute("title", label);
+      btn.setAttribute("aria-label", label);
+    };
     $(".sidebar-btn").addEventListener("click", () => this.ctx.sidebar.setCollapsed(!this.ctx.sidebar.collapsed));
     this.ctx.sidebar.onChange(syncSidebar);
     syncSidebar(this.ctx.sidebar.collapsed);
