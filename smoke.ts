@@ -1391,8 +1391,10 @@ await page.locator(".tool-list button", { hasText: "JSONC" }).click();
 await page.locator(".sidebar").waitFor({ state: "hidden" });
 check("wide collapsed: selecting a tool closes drawer, stays collapsed",
   (await page.evaluate(() => location.hash === "#jsonc-sorter" && document.body.classList.contains("sidebar-collapsed"))));
+check("wide collapsed: the query string says so, the hash is untouched",
+  (await page.evaluate(() => location.search === "?sidebar=collapsed" && location.hash === "#jsonc-sorter")));
 
-// The collapse is a preference: it survives a reload, with no slide-out.
+// The collapse lives in the URL: it survives a reload, with no slide-out.
 await page.reload();
 await page.waitForSelector(".tool-list button", { state: "attached" });
 check("wide collapsed: remembered across reloads",
@@ -1404,11 +1406,23 @@ await page.waitForFunction(() => document.querySelector(".content")!.getBounding
 check("wide: reveal button expands sidebar again, focus moves to the corner button",
   !(await page.locator(".menu-btn").isVisible()) &&
   (await page.locator(".collapse-btn").evaluate((el) => el === document.activeElement)) &&
-  (await page.evaluate(() => localStorage.getItem("html-tools:sidebar"))) === "expanded");
+  (await page.evaluate(() => location.search === "" && location.hash === "#jsonc-sorter")));
 
-// Narrowing while expanded still starts the drawer closed; the collapse
-// preference is a wide-layout thing and does not leak into it.
-await page.evaluate(() => localStorage.setItem("html-tools:sidebar", "collapsed"));
+// A link that carries the param opens collapsed, and the tool's own deep link still lands.
+await page.goto(url + "?sidebar=collapsed#dns-lookup");
+await page.waitForSelector(".tool-list button", { state: "attached" });
+check("wide: a link with ?sidebar=collapsed opens collapsed",
+  !(await page.locator(".sidebar").isVisible()) && (await paneLeft()) === 0 &&
+  (await page.evaluate(() => location.hash === "#dns-lookup" && localStorage.getItem("html-tools:sidebar") === null)));
+await page.keyboard.press("Meta+k");
+await page.locator(".sidebar").waitFor({ state: "visible" });
+await page.locator(".tool-list button", { hasText: "JSONC" }).click();
+await page.locator(".sidebar").waitFor({ state: "hidden" });
+check("wide collapsed: switching tools keeps the param",
+  await page.evaluate(() => location.search === "?sidebar=collapsed" && location.hash === "#jsonc-sorter"));
+
+// Narrowing while collapsed still starts the drawer closed; the collapse is
+// a wide-layout thing and does not leak into it.
 await page.setViewportSize({ width: 375, height: 667 });
 await page.reload();
 await page.waitForSelector(".menu-btn");
@@ -1420,8 +1434,7 @@ await page.locator(".sidebar").waitFor({ state: "hidden" });
 await page.setViewportSize({ width: 1200, height: 800 });
 await page.waitForFunction(() => document.querySelector(".content")!.getBoundingClientRect().x === 0);
 await page.waitForFunction(() => document.querySelector(".menu-btn")!.getAttribute("aria-expanded") === "false");
-check("wide: collapse preference applies again after widening", !(await page.locator(".sidebar").isVisible()));
-await page.evaluate(() => localStorage.removeItem("html-tools:sidebar"));
+check("wide: collapse applies again after widening", !(await page.locator(".sidebar").isVisible()));
 
 check("no page errors", errors.length === 0, errors.join(" | "));
 await browser.close();

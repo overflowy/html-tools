@@ -6,7 +6,11 @@ import menuIcon from "lucide-static/icons/menu.svg";
 import panelLeftIcon from "lucide-static/icons/panel-left.svg";
 
 const LAST_KEY = "html-tools:last";
-const SIDEBAR_KEY = "html-tools:sidebar";
+// The query string carries the Sidebar's Collapsed state: `?sidebar=collapsed`
+// while Collapsed, absent otherwise. It is written with replaceState, never by
+// assigning location.search, which would reload the page from `file://`.
+const SIDEBAR_PARAM = "sidebar";
+const SIDEBAR_COLLAPSED = "collapsed";
 
 // One icon for both ends of the collapse: hide from the sidebar's corner,
 // show from the main pane's, so the control reads as moving between them.
@@ -67,11 +71,19 @@ const $backdrop = document.querySelector(".drawer-backdrop") as HTMLElement;
 const narrow = window.matchMedia("(max-width: 767px)");
 let drawerOpen = false;
 
-// Collapsed: the user's choice to hide the Sidebar in the Wide Layout. A
-// preference, so it persists; the Drawer is ephemeral and does not. The class
-// goes on before the first paint so the Sidebar never slides out on load.
-let collapsed = localStorage.getItem(SIDEBAR_KEY) === "collapsed";
+// Collapsed: the user's choice to hide the Sidebar in the Wide Layout. Part
+// of the URL, so it survives a reload and travels with a copied link; the
+// Drawer is ephemeral and does not. The class goes on before the first paint
+// so the Sidebar never slides out on load.
+let collapsed = new URLSearchParams(location.search).get(SIDEBAR_PARAM) === SIDEBAR_COLLAPSED;
 document.body.classList.toggle("sidebar-collapsed", collapsed);
+
+function writeSidebarParam(next: boolean) {
+  const url = new URL(location.href);
+  if (next) url.searchParams.set(SIDEBAR_PARAM, SIDEBAR_COLLAPSED);
+  else url.searchParams.delete(SIDEBAR_PARAM);
+  history.replaceState(null, "", url);
+}
 
 /** Whether the Sidebar is currently the Drawer rather than inline. */
 function drawerForm(): boolean {
@@ -120,7 +132,7 @@ function setCollapsed(next: boolean) {
   setDrawer(false);
   collapsed = next;
   document.body.classList.toggle("sidebar-collapsed", next);
-  localStorage.setItem(SIDEBAR_KEY, next ? "collapsed" : "expanded");
+  writeSidebarParam(next);
   syncMenuBtn();
   // Whichever button was pressed is about to disappear; hand focus to its
   // counterpart so a keyboard user can toggle straight back.
