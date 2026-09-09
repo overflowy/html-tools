@@ -153,7 +153,6 @@ const tool: Tool = {
               <button type="button" class="icon hints-btn" title="Type Hints: inferred types and parameter names in the editor" aria-pressed="true">${I.ICON_TYPE_HINTS}</button>
               <button type="button" class="icon stdin-btn" title="Stdin: text for input() to read first" aria-pressed="false">${I.ICON_STDIN}</button>
               <span class="spacer"></span>
-              <button type="button" class="icon figures-btn" title="Figures" aria-pressed="false" hidden>${I.ICON_FIGURE}<span class="badge"></span></button>
               <button type="button" class="icon sidebar-btn" title="Show or hide the tool list" aria-label="Tool list" aria-pressed="true">${I.ICON_SIDEBAR}</button>
               <button type="button" class="icon panel-btn" title="Terminal and Problems (${MOD}J)" aria-pressed="true">${I.ICON_PANEL}</button>
               <button type="button" class="icon quickopen-btn" title="Open a file by name (${MOD}P)">${I.ICON_SEARCH}</button>
@@ -171,6 +170,7 @@ const tool: Tool = {
                 <button type="button" class="panel-tab" role="tab" data-panel="terminal" aria-selected="true">Terminal</button>
                 <button type="button" class="panel-tab" role="tab" data-panel="problems" aria-selected="false">Problems<span class="badge problems-count" hidden></span></button>
                 <span class="spacer"></span>
+                <button type="button" class="icon figures-btn" title="Show or hide the Figures" aria-pressed="false" hidden>${I.ICON_FIGURE}<span class="badge"></span></button>
                 <button type="button" class="icon terminal-copy" title="Copy the terminal's output">${I.ICON_COPY}</button>
                 <button type="button" class="icon terminal-clear" title="Clear the terminal">${I.ICON_CLEAR}</button>
                 <button type="button" class="icon terminal-close" title="Close the panel (${MOD}J)">${I.ICON_CLOSE}</button>
@@ -2016,6 +2016,8 @@ class Ide {
     $(".figures-btn").addEventListener("click", () => {
       const fig = $(".figures");
       fig.hidden = !fig.hidden;
+      // The Figures share the Terminal's tab; showing them shows it.
+      if (!fig.hidden && this.panelTab !== "terminal") this.showPanelTab("terminal");
       $(".figures-resizer").hidden = fig.hidden;
       this.el.classList.toggle("has-figures", !fig.hidden);
       $(".figures-btn").setAttribute("aria-pressed", String(!fig.hidden));
