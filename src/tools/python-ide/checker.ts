@@ -45,6 +45,9 @@ const DROPPED = new Set([
 
 const PYTHON_FILE = /\.pyi?$/i;
 
+/** JSON-RPC's code for a failure inside the server, as opposed to a request it refuses. */
+const LSP_INTERNAL_ERROR = -32603;
+
 /** Requests whose answers point at files: those files need Monaco models before the client sees them. */
 const LOCATING = new Set(["textDocument/definition", "textDocument/typeDefinition", "textDocument/declaration", "textDocument/implementation", "textDocument/references"]);
 
@@ -97,7 +100,11 @@ export class Checker {
   /** Resolves on the foreground worker's first message: its script has been evaluated. */
   private started: Promise<void>;
   private resolveStarted: (() => void) | null = null;
-  /** Lowercased URI to the real one: Monaco's client lowercases, Pyright's filesystem does not. */
+  /**
+   * The URI Monaco's client uses for a file (`Uri.toString(true)`: spaces
+   * and non-ASCII raw, lowercased) to the one Pyright wants (fully encoded,
+   * the case as it is). Answers travel the other way through `clientUri`.
+   */
   private realUris = new Map<string, string>();
 
   /** `script` is the worker script as a data: URL (see loadPyrightScript). */
@@ -110,10 +117,7 @@ export class Checker {
     foreground.addEventListener("message", (ev: MessageEvent) => this.receive(foreground, ev.data));
     foreground.postMessage({ type: "browser/boot", mode: "foreground" });
 
-    for (const path of Object.keys(this.options.files)) {
-      const uri = "file://" + path;
-      this.realUris.set(uri.toLowerCase(), uri);
-    }
+    for (const path of Object.keys(this.options.files)) this.remember(path);
 
     const transport = {
       state: { value: { state: "open" as const }, onChange: () => ({ dispose() {} }) },
@@ -149,6 +153,47 @@ export class Checker {
     return worker;
   }
 
+  /** Records a file's URI in both forms; returns the one Pyright wants. */
+  private remember(path: string): string {
+    const uri = this.monaco.Uri.file(path);
+    const real = uri.toString();
+    this.realUris.set(uri.toString(true).toLowerCase(), real);
+    return real;
+  }
+
+  /** A URI as Pyright sent it, in the form Monaco's client knows the model by. */
+  private clientUri(uri: string): string {
+    try {
+      return this.monaco.Uri.parse(uri).toString(true);
+    } catch {
+      return uri;
+    }
+  }
+
+  /**
+   * Rewrites every URI in a message from Pyright into the client's form:
+   * `uri` and `targetUri` values, and the keys of a workspace edit's `changes`.
+   */
+  private toClient(value: unknown) {
+    if (!value || typeof value !== "object") return;
+    if (Array.isArray(value)) {
+      for (const v of value) this.toClient(v);
+      return;
+    }
+    const obj = value as Json;
+    for (const key of Object.keys(obj)) {
+      const v = obj[key];
+      if ((key === "uri" || key === "targetUri") && typeof v === "string") obj[key] = this.clientUri(v);
+      else if (key === "changes" && v && typeof v === "object" && !Array.isArray(v)) {
+        const changes = v as Json;
+        obj[key] = Object.fromEntries(Object.entries(changes).map(([uri, edits]) => {
+          this.toClient(edits);
+          return [this.clientUri(uri), edits];
+        }));
+      } else this.toClient(v);
+    }
+  }
+
   private receive(foreground: Worker, data: unknown) {
     this.resolveStarted?.();
     if (this.closed || !data || typeof data !== "object") return;
@@ -169,19 +214,31 @@ export class Checker {
         return;
       }
       if (msg.id === undefined && DROPPED.has(msg.method)) return;
-    } else if (msg.id !== undefined && msg.id !== null && this.locating.has(msg.id)) {
-      this.locating.delete(msg.id);
-      this.ensureModels(msg.result);
-    } else if (msg.id !== undefined && msg.id === this.initId) {
-      this.isReady = true;
-      this.resolveReady?.();
+      this.toClient(msg.params);
+    } else {
+      if (msg.id !== undefined && msg.id !== null && this.locating.has(msg.id)) {
+        this.locating.delete(msg.id);
+        this.ensureModels(msg.result);
+      } else if (msg.id !== undefined && msg.id === this.initId) {
+        this.isReady = true;
+        this.resolveReady?.();
+      }
+      this.toClient(msg.result);
     }
     if (msg.id !== undefined && msg.id !== null && this.about.has(msg.id)) {
-      // Monaco's client cannot place an answer about a model that was disposed
-      // meanwhile (a file moved or deleted with a request in flight) and throws; it gets nothing instead.
       const uri = this.about.get(msg.id)!;
       this.about.delete(msg.id);
-      if (msg.result !== undefined && !this.monaco.editor.getModel(this.monaco.Uri.parse(uri))) msg.result = null;
+      const error = msg.error as { code?: number; message?: string } | undefined;
+      // Monaco's client cannot place an answer about a model that was disposed
+      // meanwhile (a file moved or deleted with a request in flight) and throws;
+      // it gets nothing instead. The same for Pyright failing inside itself on
+      // a request made while the Project changed under it: a code action or a
+      // hover that is not there is what the client can take, an exception is not.
+      if (!this.monaco.editor.getModel(this.monaco.Uri.parse(uri)) || error?.code === LSP_INTERNAL_ERROR) {
+        if (error) console.warn(`Pyright: ${error.message ?? "internal error"} (${uri})`);
+        delete msg.error;
+        msg.result = null;
+      }
     }
     this.listener?.(msg);
   }
@@ -263,13 +320,12 @@ export class Checker {
 
   /** A file the Project gained after start: tell Pyright it exists, so `import` of it resolves. */
   fileCreated(path: string) {
-    const uri = "file://" + path;
-    this.realUris.set(uri.toLowerCase(), uri);
+    const uri = this.remember(path);
     this.workers[0]?.postMessage({ jsonrpc: "2.0", method: "pyright/createFile", params: { uri } });
   }
 
   fileDeleted(path: string) {
-    const uri = "file://" + path;
+    const uri = this.monaco.Uri.file(path).toString();
     this.workers[0]?.postMessage({ jsonrpc: "2.0", method: "pyright/deleteFile", params: { uri } });
   }
 
