@@ -299,7 +299,7 @@
 /* Play and stop are filled, as playback controls are. */
 .tool-python-ide .run-btn svg, .tool-python-ide .stop-btn svg { width: 14px; height: 14px; fill: currentColor; }
 .tool-python-ide .stop-btn { background: var(--danger-bg); border-color: var(--danger-bg); color: var(--danger-text); }
-.tool-python-ide .figures-btn { gap: 4px; }
+.tool-python-ide .figures-btn { gap: 4px; margin-right: 12px; }
 .tool-python-ide .figures-btn .badge {
   font-size: 10px;
   letter-spacing: 0;
