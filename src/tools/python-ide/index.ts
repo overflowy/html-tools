@@ -151,7 +151,7 @@ const tool: Tool = {
               <button type="button" class="stop-btn" title="Stop the program" hidden>${I.ICON_STOP}<span>Stop</span></button>
               <button type="button" class="icon restart-btn" title="Restart the interpreter">${I.ICON_RESTART}</button>
               <button type="button" class="icon format-btn" title="Format with Ruff (Shift+Alt+F)">${I.ICON_FORMAT}</button>
-              <button type="button" class="icon hints-btn" title="Type Hints: inferred types and parameter names in the editor" aria-pressed="true">${I.ICON_TYPE_HINTS}</button>
+              <button type="button" class="icon hints-btn" title="Infer types" aria-pressed="false">${I.ICON_TYPE_HINTS}</button>
               <button type="button" class="icon stdin-btn" title="Stdin: text for input() to read first" aria-pressed="false">${I.ICON_STDIN}</button>
               <span class="spacer"></span>
               <button type="button" class="icon sidebar-btn" title="Show or hide the tool list" aria-label="Tool list" aria-pressed="true">${I.ICON_SIDEBAR}</button>
@@ -326,7 +326,7 @@ class Ide {
     registerToml(monaco);
     configureJson(monaco);
     this.editor = createEditor(monaco, this.$(".editor-host"), 4);
-    this.setTypeHints(read(TYPE_HINTS_KEY) !== "off");
+    this.setTypeHints(read(TYPE_HINTS_KEY) === "on");
     this.editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => void this.run());
     this.editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyP, () => this.openQuickOpen());
     this.editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyJ, () => this.togglePanel());
@@ -2130,7 +2130,7 @@ class Ide {
   }
 
   /** Shows or hides the panel (Terminal, Figures, Problems). A Preference. */
-  /** Type Hints on or off: Monaco stops asking the Checker for inlay hints when off. A Preference. */
+  /** Type Hints on or off: Monaco stops asking the Checker for inlay hints when off. A Preference, off by default. */
   private setTypeHints(on: boolean) {
     this.editor?.updateOptions({ inlayHints: { enabled: on ? "on" : "off" } });
     this.$(".hints-btn").setAttribute("aria-pressed", String(on));
