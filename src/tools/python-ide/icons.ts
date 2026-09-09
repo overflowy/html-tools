@@ -24,6 +24,7 @@ import textCursorInput from "lucide-static/icons/text-cursor-input.svg";
 import trash from "lucide-static/icons/trash.svg";
 import upload from "lucide-static/icons/upload.svg";
 import x from "lucide-static/icons/x.svg";
+import variable from "lucide-static/icons/variable.svg";
 
 /** Filled by the run bar's CSS, as playback controls are. */
 export const ICON_RUN = play;
@@ -33,6 +34,7 @@ export const ICON_FORMAT = sparkles;
 export const ICON_SETTINGS = settings;
 export const ICON_STDIN = textCursorInput;
 export const ICON_NEW_FILE = filePlus;
+export const ICON_TYPE_HINTS = variable;
 export const ICON_NEW_FOLDER = folderPlus;
 export const ICON_UPLOAD = upload;
 export const ICON_CLOSE = x;

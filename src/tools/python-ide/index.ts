@@ -23,6 +23,7 @@ const EXPLORER_WIDTH_KEY = "html-tools:python-ide:explorer-width";
 const PANEL_HEIGHT_KEY = "html-tools:python-ide:panel-height";
 const PANEL_OPEN_KEY = "html-tools:python-ide:panel-open";
 const PENDING_KEY = "html-tools:python-ide:pending";
+const TYPE_HINTS_KEY = "html-tools:python-ide:type-hints";
 
 /** An edit the page went away with before its save; see `journalPending`. */
 interface PendingEdit {
@@ -149,6 +150,7 @@ const tool: Tool = {
               <button type="button" class="icon stdin-btn" title="Stdin: text for input() to read first" aria-pressed="false">${I.ICON_STDIN}</button>
               <span class="spacer"></span>
               <button type="button" class="icon figures-btn" title="Figures" aria-pressed="false" hidden>${I.ICON_FIGURE}<span class="badge"></span></button>
+              <button type="button" class="icon hints-btn" title="Type Hints: inferred types and parameter names in the editor" aria-pressed="true">${I.ICON_TYPE_HINTS}</button>
               <button type="button" class="icon sidebar-btn" title="Show or hide the tool list" aria-label="Tool list" aria-pressed="true">${I.ICON_SIDEBAR}</button>
               <button type="button" class="icon panel-btn" title="Terminal and Problems (${MOD}J)" aria-pressed="true">${I.ICON_PANEL}</button>
               <button type="button" class="icon quickopen-btn" title="Open a file by name (${MOD}P)">${I.ICON_SEARCH}</button>
@@ -323,6 +325,7 @@ class Ide {
     this.editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyJ, () => this.togglePanel());
     this.editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyM, () => this.showPanelTab("problems"));
     monaco.editor.onDidChangeMarkers(() => this.scheduleProblems());
+    this.setTypeHints(read(TYPE_HINTS_KEY) !== "off");
     this.editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => this.message("Saved as you type."));
     this.editor.onDidChangeCursorPosition((e) => {
       this.$(".st-cursor").textContent = `Ln ${e.position.lineNumber}, Col ${e.position.column}`;
@@ -2009,6 +2012,7 @@ class Ide {
     ($(".project-select") as HTMLSelectElement).addEventListener("change", (e) => void this.openProject((e.target as HTMLSelectElement).value));
     $(".project-menu-btn").addEventListener("click", (e) => {
       const btn = e.currentTarget as HTMLElement;
+    $(".hints-btn").addEventListener("click", () => this.setTypeHints($(".hints-btn").getAttribute("aria-pressed") !== "true"));
       const r = btn.getBoundingClientRect();
       this.showProjectMenu(r.left, r.bottom + 4);
     });
@@ -2112,6 +2116,13 @@ class Ide {
   /* ---------------- problems ---------------- */
 
   private problemsTimer = 0;
+
+  /** Type Hints on or off: Monaco stops asking the Checker for inlay hints when off. A Preference. */
+  private setTypeHints(on: boolean) {
+    this.editor?.updateOptions({ inlayHints: { enabled: on ? "on" : "off" } });
+    this.$(".hints-btn").setAttribute("aria-pressed", String(on));
+    write(TYPE_HINTS_KEY, on ? "on" : "off");
+  }
 
   private scheduleProblems() {
     clearTimeout(this.problemsTimer);
