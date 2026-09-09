@@ -1072,13 +1072,86 @@ for (const btn of [".new-file-btn", ".new-folder-btn"]) {
 check("ide: a folder cannot take a file's name",
   (await page.locator(ide + ".st-message").textContent()) === 'Cannot create pkg/: "pkg" is a file.' &&
   (await page.locator(ide + ".tree-row.folder").count()) === 0);
+// Tree operations, and what must follow them: the Deep Link, the Checker, the Interpreter, the folders.
+const ideText = (path: string) => page.evaluate((p) => {
+  const monaco = (globalThis as unknown as { monaco: { editor: { getModels(): { uri: { path: string }; getValue(): string }[] } } }).monaco;
+  return monaco.editor.getModels().find((m) => m.uri.path === "/project/" + p)?.getValue() ?? null;
+}, path);
+const ideSetText = (path: string, text: string) => page.evaluate(([p, t]) => {
+  const monaco = (globalThis as unknown as { monaco: { editor: { getModels(): { uri: { path: string }; setValue(v: string): void }[] } } }).monaco;
+  monaco.editor.getModels().find((m) => m.uri.path === "/project/" + p)!.setValue(t);
+}, [path, text] as const);
+const ideNew = async (btn: string, name: string) => {
+  await page.locator(ide + btn).click();
+  await page.locator(ide + ".prompt-input").fill(name);
+  await page.locator(ide + ".prompt-ok").click();
+  await page.locator(ide + ".prompt-dialog").waitFor({ state: "hidden" });
+  await page.locator(ide + `.tree-row[data-path="${name}"]`).waitFor();
+};
+const ideMenu = async (path: string, label: string) => {
+  await page.locator(ide + `.tree-row[data-path="${path}"]`).click({ button: "right" });
+  await page.locator(ide + ".context-menu button").filter({ hasText: new RegExp("^" + label + "$") }).click();
+};
+const ideTree = () => page.evaluate(() => [...document.querySelectorAll(".tool-python-ide .tree-row")].map((r) => (r as HTMLElement).dataset.path!).toSorted());
+const ideRun = async (file: string, until: string) => {
+  await page.locator(ide + `.tree-row.file[data-path="${file}"]`).click();
+  await page.locator(ide + ".run-btn").click();
+  await page.waitForFunction((s) => document.querySelector(".tool-python-ide .xterm-rows")?.textContent?.includes(s), until, { timeout: 30000 });
+  await page.waitForFunction(() => document.querySelector(".tool-python-ide .st-interp")?.textContent === "ready", null, { timeout: 60000 });
+};
+page.on("dialog", (d) => void d.accept());
+await page.locator(ide + '.tree-row.file[data-path="main.py"]').click();
+await ideMenu("main.py", "Rename");
+await page.locator(ide + ".prompt-input").fill("app.py");
+await page.locator(ide + ".prompt-ok").click();
+await page.locator(ide + '.tree-row[data-path="app.py"]').waitFor();
+check("ide: the Deep Link follows a rename of the active file", decodeURIComponent(await page.evaluate(() => location.hash)).endsWith(":app.py") &&
+  (await page.locator(ide + ".tab.active").textContent()) === "app.py");
+await ideNew(".new-file-btn", "My File.py");
+await ideSetText("My File.py", 'x: int = "a"\n');
+await page.waitForFunction(() => {
+  const monaco = (globalThis as unknown as { monaco: { editor: { getModelMarkers(f: object): { owner: string; resource: { path: string } }[] } } }).monaco;
+  return monaco.editor.getModelMarkers({}).some((m) => m.owner === "lsp" && m.resource.path === "/project/My File.py");
+}, null, { timeout: 30000 });
+check("ide: Pyright reports on a file with a space in its name", true);
+await ideNew(".new-file-btn", "lib/util.py");
+await ideSetText("lib/util.py", "V = 'folder'\n");
+await ideSetText("app.py", "import lib.util\nprint('via', lib.util.V)\n");
+await ideRun("app.py", "via folder");
+await ideMenu("lib", "Rename");
+await page.locator(ide + ".prompt-input").fill("lib_old");
+await page.locator(ide + ".prompt-ok").click();
+await ideNew(".new-file-btn", "lib.py");
+await ideSetText("lib.py", "V = 'module'\n");
+await ideSetText("app.py", "import lib, os, time\nos.makedirs('made/deep')\ntime.sleep(1.2)\nprint('via', lib.V)\n");
+await page.locator(ide + '.tree-row.file[data-path="app.py"]').click();
+await page.locator(ide + ".run-btn").click();
+await page.waitForFunction(() => document.querySelector(".tool-python-ide .st-interp")?.textContent === "running", null, { timeout: 30000 });
+// Two edits: the first is saved while the program still runs, the second is still in its debounce when it ends.
+await page.waitForTimeout(150);
+await ideSetText("lib.py", "V = 'module'\nTYPED_DURING_RUN = 1\n");
+await page.waitForTimeout(800);
+await ideSetText("lib.py", "V = 'module'\nTYPED_DURING_RUN = True\n");
+await page.waitForFunction(() => document.querySelector(".tool-python-ide .xterm-rows")?.textContent?.includes("via module"), null, { timeout: 30000 });
+await page.waitForFunction(() => document.querySelector(".tool-python-ide .st-interp")?.textContent === "ready", null, { timeout: 60000 });
+await page.waitForTimeout(400);
+check("ide: a renamed package does not shadow a new module of its name", true);
+check("ide: an edit typed during a Run stays", (await ideText("lib.py")) === "V = 'module'\nTYPED_DURING_RUN = True\n", JSON.stringify(await ideText("lib.py")));
+await page.locator(ide + '.tree-row.folder[data-path="made"]').click();
+check("ide: a program's folders reach the Tree", (await ideTree()).includes("made/deep"), (await ideTree()).join(", "));
+await ideMenu("lib_old/util.py", "Delete");
+await page.waitForFunction(() => !document.querySelector('.tool-python-ide .tree-row[data-path="lib_old/util.py"]'));
+check("ide: deleting the last file leaves its folder", (await ideTree()).includes("lib_old"), (await ideTree()).join(", "));
+await ideMenu("lib_old", "Delete");
+await page.waitForFunction(() => !document.querySelector('.tool-python-ide .tree-row[data-path="lib_old"]'));
+await ideSetText("app.py", "import os\nprint('dirs', sorted(d for d, _, _ in os.walk('.')))\n");
+await ideRun("app.py", "dirs [");
+check("ide: the Interpreter's folders match the Tree", (await ideTerm()).includes("dirs ['.', './made', './made/deep']"), (await ideTerm()).split("\n").slice(-3).join(" | "));
+// An edit made right before a reload is journaled and comes back.
+await ideSetText("app.py", "print('edited just before the reload')\n");
 await page.reload();
 await ideReady();
-check("ide: the project comes back after a reload with its edit",
-  (await page.evaluate(() => {
-    const monaco = (globalThis as unknown as { monaco: { editor: { getModels(): { uri: { path: string }; getValue(): string }[] } } }).monaco;
-    return monaco.editor.getModels().find((m) => m.uri.path.endsWith("main.py"))!.getValue();
-  })) === "import os\nx: int = 'a'\n");
+check("ide: the project comes back after a reload with its last edit", (await ideText("app.py")) === "print('edited just before the reload')\n", JSON.stringify(await ideText("app.py")));
 check("ide: the second boot downloaded nothing", (await page.locator(ide + ".st-engine").textContent()) === "");
 
 await page.goto(url + "#markdown-editor");

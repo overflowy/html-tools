@@ -60,6 +60,8 @@ export interface RunResult {
   changed: { path: string; data: Uint8Array }[];
   removed: string[];
   skipped: string[];
+  /** Every folder under the Project root once the Run has ended. */
+  folders: string[];
 }
 
 export interface EnvironmentResult {
@@ -75,7 +77,7 @@ export type ReplResult =
 
 export type PyRequest =
   | ({ type: "boot"; id: number } & BootOptions)
-  | { type: "files"; id: number; files: FileEntry[]; removed: string[]; folders: string[] }
+  | { type: "files"; id: number; files: FileEntry[]; removed: string[]; folders: string[]; removedFolders: string[] }
   | ({ type: "run"; id: number } & RunOptions)
   | { type: "install"; id: number; specs: string[] }
   | { type: "uninstall"; id: number; names: string[] }
@@ -244,21 +246,22 @@ function FS(py: PyodideAPI = need().py): EmFS {
 }
 
 /**
- * Every path is attempted; the ones that could not be written are reported
- * together, by path and reason, so one bad path (a file where a folder is
- * needed, or the reverse) does not stop the rest from arriving.
+ * Removals first, then folders, then files. A removed file leaves its folder
+ * standing, as on any filesystem; a removed folder goes with everything in
+ * it. Every path is attempted; the ones that could not be written are
+ * reported together, by path and reason, so one bad path (a file where a
+ * folder is needed, or the reverse) does not stop the rest from arriving.
  */
 function writeFiles(msg: Extract<PyRequest, { type: "files" }>) {
   const fs = FS();
   for (const rel of msg.removed) {
-    const full = PROJECT_ROOT + "/" + rel;
     try {
-      fs.unlink(full);
+      fs.unlink(PROJECT_ROOT + "/" + rel);
     } catch {
       // already gone
     }
-    pruneEmptyDirs(fs, full);
   }
+  for (const rel of msg.removedFolders) removeTree(fs, PROJECT_ROOT + "/" + rel);
   const failed: string[] = [];
   for (const dir of msg.folders) {
     try {
@@ -281,16 +284,26 @@ function writeFiles(msg: Extract<PyRequest, { type: "files" }>) {
   if (failed.length) throw new Error(failed.join("\n"));
 }
 
-function pruneEmptyDirs(fs: EmFS, full: string) {
-  let dir = full.slice(0, full.lastIndexOf("/"));
-  while (dir.length > PROJECT_ROOT.length) {
+/** Removes a folder with everything in it; a missing one is nothing to do. */
+function removeTree(fs: EmFS, full: string) {
+  let names: string[];
+  try {
+    names = fs.readdir(full).filter((n) => n !== "." && n !== "..");
+  } catch {
+    return;
+  }
+  for (const name of names) {
+    const child = full + "/" + name;
     try {
-      if (fs.readdir(dir).filter((n) => n !== "." && n !== "..").length) return;
-      fs.rmdir(dir);
+      fs.unlink(child);
     } catch {
-      return;
+      removeTree(fs, child);
     }
-    dir = dir.slice(0, dir.lastIndexOf("/"));
+  }
+  try {
+    fs.rmdir(full);
+  } catch {
+    // a file by that name, or already gone
   }
 }
 

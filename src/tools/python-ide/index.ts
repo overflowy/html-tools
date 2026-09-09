@@ -13,7 +13,7 @@ import {
 } from "./project";
 import type { FileEntry, RunResult } from "./py-worker";
 import { Linter } from "./ruff";
-import { clearWheels, getMirror, listProjects, onStorageError, putMirror, storageAvailable, storageError } from "./store";
+import { clearWheels, getMirror, listProjects, onStorageError, putFiles, putMirror, storageAvailable, storageError } from "./store";
 import { IdeTerminal } from "./terminal";
 import { readZip, writeZip } from "./zip";
 
@@ -22,6 +22,14 @@ const WHEELS_KEY = "html-tools:python-ide:wheels-pyodide";
 const EXPLORER_WIDTH_KEY = "html-tools:python-ide:explorer-width";
 const PANEL_HEIGHT_KEY = "html-tools:python-ide:panel-height";
 const PANEL_OPEN_KEY = "html-tools:python-ide:panel-open";
+const PENDING_KEY = "html-tools:python-ide:pending";
+
+/** An edit the page went away with before its save; see `journalPending`. */
+interface PendingEdit {
+  projectId: string;
+  path: string;
+  text: string;
+}
 
 const isMac = /Mac|iPhone|iPad/.test(navigator.platform || "");
 const MOD = isMac ? "⌘" : "Ctrl+";
@@ -36,6 +44,8 @@ interface Session {
   project: Project;
   interpreter: Interpreter | null;
   state: InterpState;
+  /** Whether the Interpreter's Python is up and its filesystem holds the Project; before that, the boot's own write covers every change. */
+  booted: boolean;
   python: string;
   jspi: boolean;
   checker: Checker | null;
@@ -225,7 +235,50 @@ class Ide {
     }).catch((e) => this.message("Pyright failed: " + e.message));
     void loadPyodideAssets(this.progress("Pyodide")).then((assets) => this.readCatalog(assets.lock)).catch(() => {});
     ctx.onRestore((payload) => this.restore(payload));
+    window.addEventListener("pagehide", () => this.journalPending());
+    // Back from the back/forward cache, the page is alive and saves as usual; a journal left from its pagehide would be stale.
+    window.addEventListener("pageshow", (e) => {
+      if (e.persisted) this.dropPending();
+    });
     void this.start();
+  }
+
+  /**
+   * Edits still in their save debounce when the page goes are written to
+   * localStorage, which writes synchronously; IndexedDB transactions
+   * started at unload may be aborted with the page. `start` replays them.
+   */
+  private journalPending() {
+    const s = this.session;
+    if (!s || this.saveTimers.size === 0) return;
+    const entries: PendingEdit[] = [];
+    for (const path of this.saveTimers.keys()) {
+      const model = s.models.get(path);
+      if (model && !model.isDisposed()) entries.push({ projectId: s.project.id, path, text: model.getValue() });
+    }
+    this.flushSaves();
+    if (entries.length) write(PENDING_KEY, JSON.stringify(entries));
+  }
+
+  private dropPending() {
+    try {
+      localStorage.removeItem(PENDING_KEY);
+    } catch {
+      // storage unavailable: nothing was journaled either
+    }
+  }
+
+  private async replayPending() {
+    const raw = read(PENDING_KEY);
+    if (!raw) return;
+    this.dropPending();
+    try {
+      const entries = JSON.parse(raw) as PendingEdit[];
+      const now = Date.now();
+      await putFiles(entries.map((e) => ({ projectId: e.projectId, path: e.path, text: e.text, mtime: now })));
+    } catch {
+      // a journal that cannot be read is a journal of nothing
+    }
   }
 
   /* ---------------- startup ---------------- */
@@ -242,6 +295,7 @@ class Ide {
       await clearWheels();
       write(WHEELS_KEY, PYODIDE_VERSION);
     }
+    await this.replayPending();
     await this.refreshProjects();
     const wanted = this.pendingRestore;
     this.pendingRestore = null;
@@ -480,6 +534,7 @@ class Ide {
       project,
       interpreter: null,
       state: "off",
+      booted: false,
       python: "",
       jspi: false,
       checker: null,
@@ -511,11 +566,12 @@ class Ide {
     if (this.session !== session) return;
     for (const f of project.files.values()) if (isText(f)) this.ensureModel(f.path, f.text);
     this.applyEditorOptions();
-    for (const t of project.record.openTabs) if (project.files.has(t)) session.tabs.push(t);
-    const first = path && project.files.has(path) ? path : project.record.activeFile && project.files.has(project.record.activeFile) ? project.record.activeFile : session.tabs[0] ?? null;
+    // A tab is a text file's; a file a Run has since made binary has none.
+    const isTextFile = (p: string | null) => !!p && session.models.has(p);
+    for (const t of project.record.openTabs) if (isTextFile(t)) session.tabs.push(t);
+    const first = isTextFile(path ?? null) ? path! : isTextFile(project.record.activeFile) ? project.record.activeFile! : session.tabs[0] ?? null;
     if (first) this.openFile(first);
     else this.showActive();
-    this.updateDeepLink();
     await this.linter.configure(project.settings.ruff).catch((e) => this.message("Ruff settings: " + e.message));
     this.linterBinding?.invalidate(session.models.values());
     if (project.record.lock) {
@@ -581,7 +637,7 @@ class Ide {
     this.flushSaves();
     const files: ProjectFile[] = [...s.project.files.values()].map((f) => Object.assign({}, f, { bytes: f.bytes?.slice(0) }));
     const p = await Project.create(name.trim(), files);
-    await p.saveRecord({ lock: s.project.record.lock, lockPyodide: s.project.record.lockPyodide, packages: s.project.record.packages.slice() });
+    await p.saveRecord({ lock: s.project.record.lock, lockPyodide: s.project.record.lockPyodide, packages: s.project.record.packages.slice(), folders: [...s.extraFolders].toSorted() });
     if (s.mirror) await putMirror({ projectId: p.id, lock: s.mirror.lock, files: s.mirror.files });
     await this.refreshProjects();
     await this.openProject(p.id);
@@ -687,10 +743,7 @@ class Ide {
     const file = s.project.files.get(path);
     if (file && isText(file) && file.text === text) return;
     const settingsChanged = await s.project.write(path, text);
-    if (s.interpreter?.alive && s.state !== "booting") {
-      s.dirty.delete(path);
-      s.interpreter.writeFiles([{ path, data: text }]).catch(() => s.dirty.add(path));
-    }
+    await this.syncFiles([{ path, data: text }]);
     if (settingsChanged) this.applySettings();
     if (path === PROJECT_FILE) this.showSettingsState();
   }
@@ -704,11 +757,37 @@ class Ide {
     this.saveTimers.clear();
   }
 
+  /**
+   * Applies a change to the Interpreter's filesystem and says in the
+   * Terminal what it refused: a file that did not arrive is a Run that reads
+   * stale code. Before Python is up, nothing is sent: the boot's own write
+   * of the whole Project covers it. During a Run, removals and folders go
+   * through, but a file's contents wait in `dirty` until the Run ends:
+   * written meanwhile, a half-typed edit would reach the program and then
+   * come back as the Run's own change, over what was typed since.
+   */
+  private async syncFiles(files: FileEntry[], removed: string[] = [], folders: string[] = [], removedFolders: string[] = []) {
+    const s = this.session;
+    if (!s) return;
+    for (const f of files) s.dirty.add(f.path);
+    if (!s.interpreter?.alive || !s.booted) return;
+    const sent = s.state === "running" ? [] : files;
+    if (sent.length === 0 && removed.length === 0 && folders.length === 0 && removedFolders.length === 0) return;
+    for (const f of sent) s.dirty.delete(f.path);
+    const interpreter = s.interpreter;
+    try {
+      await interpreter.writeFiles(sent, removed, folders, removedFolders);
+    } catch (e) {
+      if (this.session !== s || s.interpreter !== interpreter) return;
+      for (const f of sent) s.dirty.add(f.path);
+      this.terminal?.writeError(`Not written to the interpreter:\n${e instanceof Error ? e.message : String(e)}\n`);
+    }
+  }
+
   /** Sends the interpreter every file it has not seen since its boot, or since its edit. */
   private async syncDirty() {
     const s = this.session;
-    // A boot writes the whole Project once Python is up; until then the paths wait in `dirty`.
-    if (!s?.interpreter?.alive || s.state === "booting" || s.state === "rebooting") return;
+    if (!s?.interpreter?.alive || !s.booted || s.state === "running") return;
     const files: FileEntry[] = [];
     for (const path of s.dirty) {
       const f = s.project.files.get(path);
@@ -716,11 +795,7 @@ class Ide {
       files.push({ path, data: f.text !== undefined ? f.text : f.bytes!.slice(0) });
     }
     s.dirty.clear();
-    if (files.length) {
-      await s.interpreter.writeFiles(files).catch(() => {
-        for (const f of files) s.dirty.add(f.path);
-      });
-    }
+    await this.syncFiles(files);
   }
 
   /** Sets a text file's content from the Tool (settings, a run's output), through its model when it has one. */
@@ -742,8 +817,7 @@ class Ide {
     // The Checker hears of a file before its model opens, so its first request about it lands on a file it knows.
     if (isNew) this.fileAdded(path);
     this.ensureModel(path, text);
-    s.dirty.add(path);
-    void this.syncDirty();
+    void this.syncFiles([{ path, data: text }]);
     if (settingsChanged) this.applySettings();
   }
 
@@ -773,9 +847,9 @@ class Ide {
     s.active = path;
     this.showActive();
     void s.project.saveRecord({ openTabs: s.tabs.slice(), activeFile: path });
-    this.updateDeepLink();
   }
 
+  /** Shows the active file, and everything that names it: tabs, Tree, Deep Link. */
   private showActive() {
     const s = this.session;
     if (!s || !this.editor) return;
@@ -795,6 +869,7 @@ class Ide {
     this.renderTabs();
     this.renderTree();
     this.setState(s.state);
+    this.updateDeepLink();
   }
 
   private closeTab(path: string) {
@@ -976,10 +1051,10 @@ class Ide {
       return;
     }
     if (!s.project.folders().has(path)) s.extraFolders.add(path);
-    s.expanded.add(path);
+    for (let dir = path; dir; dir = dirname(dir)) s.expanded.add(dir);
     this.renderTree();
     await this.saveFolders();
-    if (s.interpreter?.alive) s.interpreter.writeFiles([], [], [path]).catch(() => {});
+    void this.syncFiles([], [], [path]);
   }
 
   /**
@@ -993,6 +1068,22 @@ class Ide {
     const implied = s.project.folders();
     for (const f of Array.from(s.extraFolders)) if (implied.has(f) || this.obstacle(f, true)) s.extraFolders.delete(f);
     return s.project.saveRecord({ folders: [...s.extraFolders].toSorted() });
+  }
+
+  /**
+   * Keeps the folders that `paths` leaving has emptied: on a filesystem,
+   * removing a file leaves its folder standing, and the Tree does the same.
+   * Folders under `gone` (folders removed outright) are not kept.
+   */
+  private keepEmptied(paths: string[], gone: string[] = []) {
+    const s = this.session!;
+    const implied = s.project.folders();
+    for (const p of [...paths, ...gone]) {
+      for (let dir = dirname(p); dir; dir = dirname(dir)) {
+        if (gone.some((g) => dir === g || dir.startsWith(g + "/"))) continue;
+        if (!implied.has(dir) && !this.obstacle(dir, true)) s.extraFolders.add(dir);
+      }
+    }
   }
 
   private async renamePath(path: string, isFolder: boolean) {
@@ -1018,16 +1109,23 @@ class Ide {
       this.message(`Cannot move ${from} to ${to}: ${why}.`);
       return;
     }
+    // The empty folders under a moved folder move with it (by name: `to` may lie under `from`).
+    const movedFolders: string[] = [];
     if (isFolder) {
-      if (s.extraFolders.delete(from)) s.extraFolders.add(to);
-      for (const f of Array.from(s.extraFolders)) {
-        if (f.startsWith(from + "/")) {
-          s.extraFolders.delete(f);
-          s.extraFolders.add(to + f.slice(from.length));
-        }
+      const under = (set: Set<string>) => [...set].filter((f) => f === from || f.startsWith(from + "/")).map((f): [string, string] => [f, to + f.slice(from.length)]);
+      for (const [a, b] of under(s.extraFolders)) {
+        s.extraFolders.delete(a);
+        s.extraFolders.add(b);
+        movedFolders.push(b);
       }
-      if (s.expanded.delete(from)) s.expanded.add(to);
-      void this.saveFolders();
+      for (const [a, b] of under(s.expanded)) {
+        s.expanded.delete(a);
+        s.expanded.add(b);
+      }
+      if (!s.extraFolders.has(to) && !s.project.folders().has(to) && !s.project.movePairs(from, to).length) {
+        s.extraFolders.add(to);
+        movedFolders.push(to);
+      }
     }
     this.flushSaves();
     const pairs = await s.project.move(from, to);
@@ -1050,16 +1148,18 @@ class Ide {
         else s.tabs[i] = b;
       }
       if (s.active === a) s.active = b;
-      s.dirty.add(b);
     }
-    if (s.interpreter?.alive) {
-      const files = pairs.map(([, b]) => {
-        const f = s.project.files.get(b)!;
-        return { path: b, data: f.text !== undefined ? f.text : f.bytes!.slice(0) };
-      });
-      for (const [, b] of pairs) s.dirty.delete(b);
-      s.interpreter.writeFiles(files, pairs.map(([a]) => a)).catch(() => {});
-    }
+    // A binary file moved onto a text file leaves no model, so no tab.
+    s.tabs = s.tabs.filter((t) => s.models.has(t));
+    if (s.active && !s.models.has(s.active)) s.active = s.tabs[0] ?? null;
+    this.keepEmptied(pairs.map(([a]) => a), isFolder ? [from] : []);
+    void this.saveFolders();
+    const files = pairs.map(([, b]) => {
+      const f = s.project.files.get(b)!;
+      return { path: b, data: f.text !== undefined ? f.text : f.bytes!.slice(0) };
+    });
+    void this.syncFiles(files, pairs.map(([a]) => a), movedFolders, isFolder ? [from] : []);
+    if (pairs.some(([a, b]) => a === PROJECT_FILE || b === PROJECT_FILE)) this.applySettings();
     this.showActive();
     void s.project.saveRecord({ openTabs: s.tabs.slice(), activeFile: s.active });
   }
@@ -1070,9 +1170,7 @@ class Ide {
     const paths = isFolder ? [...s.project.files.keys()].filter((p) => p.startsWith(path + "/")) : [path];
     if (!confirm(isFolder ? `Delete the folder "${path}" and its ${paths.length} file(s)?` : `Delete "${path}"?`)) return;
     if (isFolder) {
-      s.extraFolders.delete(path);
-      for (const f of Array.from(s.extraFolders)) if (f.startsWith(path + "/")) s.extraFolders.delete(f);
-      void this.saveFolders();
+      for (const f of Array.from(s.extraFolders)) if (f === path || f.startsWith(path + "/")) s.extraFolders.delete(f);
     }
     for (const p of paths) {
       const t = this.saveTimers.get(p);
@@ -1090,7 +1188,10 @@ class Ide {
     }
     await s.project.remove(paths);
     if (s.active && paths.includes(s.active)) s.active = s.tabs[0] ?? null;
-    if (s.interpreter?.alive) s.interpreter.writeFiles([], paths).catch(() => {});
+    this.keepEmptied(paths, isFolder ? [path] : []);
+    void this.saveFolders();
+    void this.syncFiles([], paths, [], isFolder ? [path] : []);
+    if (paths.includes(PROJECT_FILE)) this.applySettings();
     this.showActive();
     void s.project.saveRecord({ openTabs: s.tabs.slice(), activeFile: s.active });
   }
@@ -1132,12 +1233,12 @@ class Ide {
     for (const f of files) {
       if (/\.pyi?$/i.test(f.path)) s.checker?.fileCreated("/project/" + f.path);
       if (f.text !== undefined) this.ensureModel(f.path, f.text);
-      s.dirty.add(f.path);
       let dir = f.path;
       while ((dir = dir.slice(0, dir.lastIndexOf("/"))) !== "") s.expanded.add(dir);
     }
     if (files.some((f) => f.path === PROJECT_FILE)) this.applySettings();
-    void this.syncDirty();
+    void this.syncFiles(files.map((f) => ({ path: f.path, data: f.text !== undefined ? f.text : f.bytes!.slice(0) })));
+    if (s.extraFolders.size) void this.saveFolders();
     this.showActive();
     this.message(`Added ${files.length} file(s).` + (refused.length ? ` Not added: ${refused.join(", ")}.` : ""));
   }
@@ -1441,9 +1542,9 @@ class Ide {
       },
     });
     s.interpreter = interpreter;
+    s.booted = false;
     // Whether this boot has been overtaken: the Project closed, or Restart replaced the interpreter.
     const stale = () => this.session !== s || s.generation !== gen || s.interpreter !== interpreter;
-    s.dirty.clear();
     this.setState("booting");
     this.terminal?.stopLine();
     this.terminal?.newLine();
@@ -1455,6 +1556,9 @@ class Ide {
       s.python = info.python;
       s.jspi = info.jspi;
       this.flushSaves();
+      // From here every change goes to the filesystem as it happens; this write, made in the same breath, carries everything before.
+      s.booted = true;
+      s.dirty.clear();
       const files = [...s.project.files.values()].map((f) => ({ path: f.path, data: f.text !== undefined ? f.text : f.bytes!.slice(0) }));
       // A path the filesystem refuses (a Project made before the Tree checked
       // names) is reported, and the rest of the Project is there to run.
@@ -1579,6 +1683,8 @@ class Ide {
       await this.applyRunChanges(result);
       if (this.session !== s || s.generation !== gen || s.interpreter !== interpreter) return;
       this.setState("ready");
+      // Edits made while the program ran waited; the REPL should see them.
+      void this.syncDirty();
       this.prompt();
     } catch (e) {
       if (this.session !== s || s.generation !== gen || s.interpreter !== interpreter) return;
@@ -1586,18 +1692,21 @@ class Ide {
       this.terminal?.writeError((e instanceof Error ? e.message : String(e)) + "\n");
       if (interpreter.alive) {
         this.setState("ready");
+        void this.syncDirty();
         this.prompt();
       }
     }
   }
 
-  /** Files a Run wrote or removed become part of the Project. */
+  /** Files and folders a Run wrote or removed become part of the Project. */
   private async applyRunChanges(result: RunResult) {
     const s = this.session;
     if (!s) return;
     const now = Date.now();
     const files: ProjectFile[] = [];
     for (const c of result.changed) {
+      // An edit typed while the program ran is newer than what the program saw or wrote; it stays, and reaches the filesystem next.
+      if (s.dirty.has(c.path) && s.models.has(c.path)) continue;
       const bytes = c.data;
       if (isTextPath(c.path) && looksLikeText(bytes)) files.push({ path: c.path, text: new TextDecoder().decode(bytes), mtime: now });
       else files.push({ path: c.path, bytes: bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer, mtime: now });
@@ -1644,11 +1753,18 @@ class Ide {
       await s.project.remove(result.removed);
     }
     for (const p of result.skipped) this.terminal?.writeDim(`[${p} is over 20 MB and was not kept in the project]\n`);
-    if (files.length || result.removed.length) {
-      if (s.extraFolders.size) void this.saveFolders();
+    // The folders are as the program left them: the ones no file implies are the Project's empty folders now.
+    const implied = s.project.folders();
+    const empty = new Set(result.folders.filter((f) => !implied.has(f) && !this.obstacle(f, true)));
+    const foldersChanged = empty.size !== s.extraFolders.size || [...empty].some((f) => !s.extraFolders.has(f));
+    if (foldersChanged) {
+      s.extraFolders = empty;
+      void this.saveFolders();
+    }
+    if (files.length || result.removed.length || foldersChanged) {
       this.showActive();
       const n = files.length + result.removed.length;
-      this.message(`The run changed ${n} file(s) in the project.`);
+      this.message(n ? `The run changed ${n} file(s) in the project.` : "The run changed the project's folders.");
       if (files.some((f) => f.path === PROJECT_FILE)) this.applySettings();
     }
   }

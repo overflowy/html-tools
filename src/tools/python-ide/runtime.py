@@ -9,6 +9,7 @@ a JavaScript module the worker registers before importing this.
 """
 
 import builtins
+import importlib
 import io
 import json
 import os
@@ -27,6 +28,11 @@ RUNTIME_FILES = {__file__, "/pyide/pyide_mpl.py"}
 # which CPython adds for the REPL but never for a script.
 _base_path = [p for p in sys.path if p != ""]
 _base_environ = dict(os.environ)
+
+# Bytecode caches go beside the runtime, never into the Project: a
+# __pycache__ there would be a folder the Tree does not know, and one that
+# keeps a renamed or deleted package's folder alive as a namespace package.
+sys.pycache_prefix = "/pyide/pycache"
 
 
 class HostStdin(io.TextIOBase):
@@ -142,14 +148,32 @@ def _reset_main(path):
 
 
 def _drop_project_modules():
-    """Forget every module imported from the Project, so the next Run re-reads it."""
+    """Forget every module imported from the Project, so the next Run re-reads it.
+
+    A namespace package (a folder without __init__.py) has no __file__, only
+    a __path__; it is dropped by that, or a folder renamed away would still
+    import as an empty module. That __path__ is recomputed from the parent
+    package's on every read, so children go before parents, and one whose
+    path cannot be read (its folder or its parent gone) is dead and goes too.
+    """
     root = PROJECT_ROOT + "/"
-    for name, module in list(sys.modules.items()):
+    for name, module in sorted(sys.modules.items(), key=lambda item: -item[0].count(".")):
         if name == "__main__":
             continue
         file = getattr(module, "__file__", None)
-        if isinstance(file, str) and file.startswith(root):
+        if isinstance(file, str):
+            if file.startswith(root):
+                del sys.modules[name]
+            continue
+        if getattr(module, "__path__", None) is None:
+            continue
+        try:
+            paths = [str(p) for p in module.__path__]
+        except Exception:
+            paths = []
+        if not paths or any(p == PROJECT_ROOT or p.startswith(root) for p in paths):
             del sys.modules[name]
+    importlib.invalidate_caches()
 
 
 def _clean_traceback(tb):
@@ -169,18 +193,21 @@ def _print_exception(exc):
 
 
 def _snapshot():
-    """(mtime, size) of every file under the Project, to see what a Run changed."""
-    seen = {}
+    """(mtime, size) of every file under the Project, and every folder, to see what a Run changed."""
+    files = {}
+    dirs = []
     for dirpath, dirnames, filenames in os.walk(PROJECT_ROOT):
         dirnames[:] = [d for d in dirnames if d != "__pycache__"]
+        for name in dirnames:
+            dirs.append(os.path.relpath(os.path.join(dirpath, name), PROJECT_ROOT))
         for name in filenames:
             full = os.path.join(dirpath, name)
             try:
                 st = os.stat(full)
             except OSError:
                 continue
-            seen[os.path.relpath(full, PROJECT_ROOT)] = (st.st_mtime_ns, st.st_size)
-    return seen
+            files[os.path.relpath(full, PROJECT_ROOT)] = (st.st_mtime_ns, st.st_size)
+    return files, sorted(dirs)
 
 
 MAX_SYNC_BYTES = 20 * 1024 * 1024
@@ -215,7 +242,7 @@ def run_file():
     os.environ.update(args.get("env") or {})
     _drop_project_modules()
     main = _reset_main(path)
-    before = _snapshot()
+    before, _ = _snapshot()
     exit_code = 0
     try:
         with open(path, "rb") as f:
@@ -239,9 +266,10 @@ def run_file():
         _flush()
         stdin.preset = ""
         sys.path[:] = [""] + _base_path
-    changed, removed, skipped = _changes(before, _snapshot())
+    after, folders = _snapshot()
+    changed, removed, skipped = _changes(before, after)
     return to_js(
-        {"exit": exit_code, "changed": changed, "removed": removed, "skipped": skipped},
+        {"exit": exit_code, "changed": changed, "removed": removed, "skipped": skipped, "folders": folders},
         dict_converter=pyide_host.toObject,
     )
 
