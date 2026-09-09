@@ -237,7 +237,7 @@ class Ide {
     this.bindUi();
     this.editorReady = this.setupEditor();
     this.terminalReady = this.setupTerminal();
-    void this.linter.load(this.progress("Ruff")).then(() => this.message("Ruff " + this.linter.version + " ready")).catch((e) => this.message("Ruff failed: " + e.message));
+    void this.linter.load(this.progress("Ruff")).then(() => this.flash("Ruff " + this.linter.version + " ready")).catch((e) => this.message("Ruff failed: " + e.message));
     void loadPyrightScript(this.progress("Pyright")).then((url) => {
       this.pyrightUrl = url;
       // A Project opened before Pyright arrived is waiting for it; one still opening starts it itself.
@@ -341,7 +341,7 @@ class Ide {
       openCodeEditor: (_source, resource, selection) => this.openResource(resource, selection),
     });
     this.linterBinding = new LinterBinding(monaco, this.linter, (m) => this.message(m));
-    this.message("Editor ready");
+    this.flash("Editor ready");
   }
 
   private async setupTerminal() {
@@ -479,9 +479,18 @@ class Ide {
   }
 
   private message(text: string) {
+    clearTimeout(this.flashTimer);
     const el = this.$(".st-message");
     el.textContent = text;
     el.title = text;
+  }
+
+  private flashTimer = 0;
+
+  /** A message about something just done, gone by itself after a moment unless another replaces it. */
+  private flash(text: string) {
+    this.message(text);
+    this.flashTimer = window.setTimeout(() => this.message(""), 3000);
   }
 
   private setState(state: InterpState) {
@@ -2173,6 +2182,8 @@ class Ide {
     }
   }
 
+  private copyIconTimer = 0;
+
   private async copyTerminal() {
     const text = this.terminal?.text() ?? "";
     const btn = this.$(".terminal-copy");
@@ -2195,8 +2206,9 @@ class Ide {
       ta.remove();
     }
     btn.innerHTML = ok ? I.ICON_CHECK : I.ICON_CLOSE;
-    this.message(ok ? `Copied ${text.split("\n").length} line(s) from the terminal.` : "Could not copy.");
-    setTimeout(() => (btn.innerHTML = I.ICON_COPY), 1200);
+    this.flash(ok ? `Copied ${text.split("\n").length} line(s) from the terminal.` : "Could not copy.");
+    clearTimeout(this.copyIconTimer);
+    this.copyIconTimer = window.setTimeout(() => (btn.innerHTML = I.ICON_COPY), 1200);
   }
 
   /* ---------------- problems ---------------- */
