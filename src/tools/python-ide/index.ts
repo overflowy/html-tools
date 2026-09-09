@@ -312,7 +312,7 @@ class Ide {
     let id = wanted?.id ?? read(LAST_PROJECT_KEY);
     if (!id || !this.projects.some((p) => p.id === id)) id = this.projects[0]?.id ?? null;
     if (!id) {
-      const p = await Project.create("hello");
+      const p = await Project.create("new-project");
       await this.refreshProjects();
       id = p.id;
     }
