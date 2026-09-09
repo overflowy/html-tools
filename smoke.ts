@@ -1034,6 +1034,24 @@ check("a second click starts a new document",
 // Python IDE: every Engine comes from the CDN on this first visit (about
 // 50 MB), the Interpreter boots in its worker, and a Run's output reaches
 // the Terminal. A second boot must come from the caches alone.
+// Workers are counted by name, and the Checker's foreground worker is timed
+// from its creation to its first diagnostics, so a restart that should not
+// happen, or a boot that has become slow, shows.
+await page.addInitScript(() => {
+  const log: { name: string; created: number; firstDiagnostics?: number }[] = [];
+  (globalThis as unknown as { smokeWorkers: typeof log }).smokeWorkers = log;
+  const Native = globalThis.Worker;
+  globalThis.Worker = class extends Native {
+    constructor(script: string | URL, opts?: WorkerOptions) {
+      super(script, opts);
+      const entry = { name: opts?.name ?? "", created: performance.now() } as (typeof log)[number];
+      log.push(entry);
+      this.addEventListener("message", (ev: MessageEvent) => {
+        if (entry.firstDiagnostics === undefined && ev.data?.method === "textDocument/publishDiagnostics") entry.firstDiagnostics = performance.now();
+      });
+    }
+  };
+});
 await page.goto(url + "#python-ide");
 const ide = ".tool-python-ide ";
 const ideReady = () => page.waitForFunction(() =>
@@ -1198,6 +1216,28 @@ await page.reload();
 await ideReady();
 check("ide: the project comes back after a reload with its last edit", (await ideText("app.py")) === "print('edited just before the reload')\n", JSON.stringify(await ideText("app.py")));
 check("ide: the second boot downloaded nothing", (await page.locator(ide + ".st-engine").textContent()) === "");
+// The Checker's boot, from its worker's creation to its first diagnostics: about a second here.
+type WorkerLog = { name: string; created: number; firstDiagnostics?: number }[];
+const checkerWorkers = () => page.evaluate(() => (globalThis as unknown as { smokeWorkers: WorkerLog }).smokeWorkers.filter((w) => w.name === "pyright-foreground"));
+await page.waitForFunction(() => (globalThis as unknown as { smokeWorkers: WorkerLog }).smokeWorkers.some((w) => w.name === "pyright-foreground" && w.firstDiagnostics !== undefined), null, { timeout: 30000 });
+const boot = (await checkerWorkers()).at(-1)!;
+check("ide: the Checker reports within 6 s of its worker's creation", boot.firstDiagnostics! - boot.created < 6000, ((boot.firstDiagnostics! - boot.created) / 1000).toFixed(2) + "s");
+// A settings save that changes nothing about Pyright leaves the Checker running; one that does restarts it.
+const ideSaveSettings = async (change: (dialog: HTMLElement) => void) => {
+  await page.locator(ide + ".settings-btn").click();
+  await page.locator(ide + ".settings-dialog").evaluate(change);
+  await page.locator(ide + ".settings-dialog form button.primary").click();
+  await page.locator(ide + ".settings-dialog").waitFor({ state: "hidden" });
+};
+const checkersBefore = (await checkerWorkers()).length;
+await ideSaveSettings((d) => { (d.querySelector("input[name=lineLength]") as HTMLInputElement).value = "100"; });
+await page.waitForTimeout(1500);
+check("ide: a Ruff-only settings save does not restart the Checker", (await checkerWorkers()).length === checkersBefore &&
+  (await page.locator(ide + ".st-checker").textContent())!.includes("ready"), (await page.locator(ide + ".st-checker").textContent())!);
+await ideSaveSettings((d) => { (d.querySelector("select[name=typeCheckingMode]") as HTMLSelectElement).value = "basic"; });
+await page.waitForFunction((n) => (globalThis as unknown as { smokeWorkers: WorkerLog }).smokeWorkers.filter((w) => w.name === "pyright-foreground").length === n + 1, checkersBefore, { timeout: 10000 });
+await ideReady();
+check("ide: a Pyright settings change restarts the Checker once", (await checkerWorkers()).length === checkersBefore + 1);
 
 await page.goto(url + "#markdown-editor");
 await page.waitForSelector(mv + ".editor");

@@ -67,6 +67,8 @@ interface Session {
   opened: boolean;
   /** A Checker restart waiting for the current one to finish booting. */
   checkerRestartPending: boolean;
+  /** The configuration and Mirror the running Checker was started with; a restart with the same is skipped. */
+  checkerKey: string;
 }
 
 function read(key: string): string | null {
@@ -551,6 +553,7 @@ class Ide {
       generation: 0,
       opened: false,
       checkerRestartPending: false,
+      checkerKey: "",
     };
     this.session = session;
     write(LAST_PROJECT_KEY, id);
@@ -1459,7 +1462,11 @@ class Ide {
    * settings. A Checker still booting is left to finish first: Firefox
    * crashes its content process when a worker is terminated while it is
    * still evaluating the 18 MB script. Requests that pile up meanwhile are
-   * folded into the one restart.
+   * folded into the one restart, and a restart that would start the Checker
+   * with the configuration and Mirror it already runs with is skipped: the
+   * Project's files reach it as they change, so nothing else is stale. A
+   * Project File save that touched only Ruff, or an install's write of its
+   * Dependencies before the Mirror is read, costs no boot that way.
    */
   private restartTimer = 0;
 
@@ -1484,8 +1491,6 @@ class Ide {
       });
       return;
     }
-    s.checker?.dispose();
-    const files: Record<string, string> = { ...s.mirror?.files, "/site-packages/js.pyi": JS_STUB, ...s.project.checkerFiles() };
     const config = {
       typeshedPath: "/typeshed",
       pythonVersion: "3.14",
@@ -1493,8 +1498,13 @@ class Ide {
       extraPaths: ["/site-packages"],
       ...s.project.settings.pyright,
     };
+    const key = JSON.stringify(config) + "\n" + (s.mirror?.lock ?? "");
+    if (s.checker?.isReady && key === s.checkerKey) return;
+    s.checker?.dispose();
+    const files: Record<string, string> = { ...s.mirror?.files, "/site-packages/js.pyi": JS_STUB, ...s.project.checkerFiles() };
     const checker = new Checker(this.monaco, this.pyrightUrl, { files, config });
     s.checker = checker;
+    s.checkerKey = key;
     this.setCheckerStatus("Pyright: starting");
     checker.start();
     const gen = s.generation;
