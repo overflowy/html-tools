@@ -243,6 +243,11 @@ function FS(py: PyodideAPI = need().py): EmFS {
   return py.FS as unknown as EmFS;
 }
 
+/**
+ * Every path is attempted; the ones that could not be written are reported
+ * together, by path and reason, so one bad path (a file where a folder is
+ * needed, or the reverse) does not stop the rest from arriving.
+ */
 function writeFiles(msg: Extract<PyRequest, { type: "files" }>) {
   const fs = FS();
   for (const rel of msg.removed) {
@@ -254,14 +259,26 @@ function writeFiles(msg: Extract<PyRequest, { type: "files" }>) {
     }
     pruneEmptyDirs(fs, full);
   }
-  for (const dir of msg.folders) fs.mkdirTree(PROJECT_ROOT + "/" + dir);
+  const failed: string[] = [];
+  for (const dir of msg.folders) {
+    try {
+      fs.mkdirTree(PROJECT_ROOT + "/" + dir);
+    } catch (e) {
+      failed.push(`${dir}/: ${describe(e)}`);
+    }
+  }
   for (const f of msg.files) {
     const full = PROJECT_ROOT + "/" + f.path;
     const dir = full.slice(0, full.lastIndexOf("/"));
-    if (dir) fs.mkdirTree(dir);
-    if (typeof f.data === "string") fs.writeFile(full, f.data);
-    else fs.writeFile(full, new Uint8Array(f.data), { canOwn: true });
+    try {
+      if (dir) fs.mkdirTree(dir);
+      if (typeof f.data === "string") fs.writeFile(full, f.data);
+      else fs.writeFile(full, new Uint8Array(f.data), { canOwn: true });
+    } catch (e) {
+      failed.push(`${f.path}: ${describe(e)}`);
+    }
   }
+  if (failed.length) throw new Error(failed.join("\n"));
 }
 
 function pruneEmptyDirs(fs: EmFS, full: string) {
@@ -356,7 +373,30 @@ self.onmessage = async (ev: MessageEvent<PyRequest>) => {
   }
 };
 
+/** Emscripten's errno values, for the ones a Project write can run into. */
+const ERRNO: Record<number, string> = {
+  2: "permission denied",
+  20: "already exists",
+  28: "invalid path",
+  31: "a folder with this name is in the way",
+  44: "does not exist",
+  54: "a file is in the way of one of its folders",
+  55: "the folder is not empty",
+  63: "not permitted",
+};
+
+/**
+ * The message of anything thrown. Emscripten's `FS.ErrnoError` is not an
+ * Error and carries only an errno, so it is named here; other objects are
+ * read for a message or a name before falling back to String.
+ */
 function describe(e: unknown): string {
   if (e instanceof Error) return e.message;
+  if (typeof e === "object" && e !== null) {
+    const { errno, message, name } = e as { errno?: unknown; message?: unknown; name?: unknown };
+    if (typeof errno === "number") return ERRNO[errno] ?? `filesystem error ${errno}`;
+    if (typeof message === "string" && message) return message;
+    if (typeof name === "string" && name) return name;
+  }
   return String(e);
 }

@@ -87,6 +87,8 @@ export class Checker {
   private client: Monaco.lsp.MonacoLspClient | null = null;
   /** Ids of in-flight requests in LOCATING. */
   private locating = new Set<number | string>();
+  /** The file each in-flight textDocument request is about, so an answer about a file since closed can be dropped. */
+  private about = new Map<number | string, string>();
   private initId: number | string | null = null;
   private resolveReady: (() => void) | null = null;
   /** Resolves when the server answered `initialize`. */
@@ -174,6 +176,13 @@ export class Checker {
       this.isReady = true;
       this.resolveReady?.();
     }
+    if (msg.id !== undefined && msg.id !== null && this.about.has(msg.id)) {
+      // Monaco's client cannot place an answer about a model that was disposed
+      // meanwhile (a file moved or deleted with a request in flight) and throws; it gets nothing instead.
+      const uri = this.about.get(msg.id)!;
+      this.about.delete(msg.id);
+      if (msg.result !== undefined && !this.monaco.editor.getModel(this.monaco.Uri.parse(uri))) msg.result = null;
+    }
     this.listener?.(msg);
   }
 
@@ -206,6 +215,7 @@ export class Checker {
           return;
         }
         this.rewriteUris(message.params);
+        if (message.id !== undefined && message.id !== null) this.about.set(message.id, real);
       }
       if (message.id !== undefined && message.id !== null && LOCATING.has(message.method)) this.locating.add(message.id);
     }

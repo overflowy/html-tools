@@ -1062,6 +1062,16 @@ await page.keyboard.type("6 * 7");
 await page.keyboard.press("Enter");
 await page.waitForFunction(() => document.querySelector(".tool-python-ide .xterm-rows")?.textContent?.includes("42"), null, { timeout: 30000 });
 check("ide: the REPL evaluates a line", true);
+// A file and a folder cannot share a name: the interpreter's filesystem would refuse the Project at boot.
+for (const btn of [".new-file-btn", ".new-folder-btn"]) {
+  await page.locator(ide + btn).click();
+  await page.locator(ide + ".prompt-input").fill("pkg");
+  await page.locator(ide + ".prompt-ok").click();
+  await page.waitForTimeout(300);
+}
+check("ide: a folder cannot take a file's name",
+  (await page.locator(ide + ".st-message").textContent()) === 'Cannot create pkg/: "pkg" is a file.' &&
+  (await page.locator(ide + ".tree-row.folder").count()) === 0);
 await page.reload();
 await ideReady();
 check("ide: the project comes back after a reload with its edit",

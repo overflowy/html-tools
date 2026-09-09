@@ -283,13 +283,19 @@ export class Project {
     if (paths.includes(PROJECT_FILE)) this.readSettings();
   }
 
-  /** Moves a file or a folder (every path under it). Returns the [from, to] pairs moved. */
-  async move(from: string, to: string): Promise<[string, string][]> {
+  /** The [from, to] pairs a move of a file or a folder (every path under it) would make. */
+  movePairs(from: string, to: string): [string, string][] {
     const pairs: [string, string][] = [];
     for (const path of this.files.keys()) {
       if (path === from) pairs.push([path, to]);
       else if (path.startsWith(from + "/")) pairs.push([path, to + path.slice(from.length)]);
     }
+    return pairs;
+  }
+
+  /** Moves a file or a folder (every path under it). Returns the [from, to] pairs moved. */
+  async move(from: string, to: string): Promise<[string, string][]> {
+    const pairs = this.movePairs(from, to);
     const moved: ProjectFile[] = [];
     for (const [a, b] of pairs) {
       const f = this.files.get(a)!;

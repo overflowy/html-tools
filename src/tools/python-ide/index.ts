@@ -11,7 +11,7 @@ import {
   basename, defaultPyproject, dirname, isText, isTextPath, languageFor, looksLikeText, normalizePath,
   Project, PROJECT_FILE, updatePyproject, type ProjectFile,
 } from "./project";
-import type { RunResult } from "./py-worker";
+import type { FileEntry, RunResult } from "./py-worker";
 import { Linter } from "./ruff";
 import { clearWheels, getMirror, listProjects, onStorageError, putMirror, storageAvailable, storageError } from "./store";
 import { IdeTerminal } from "./terminal";
@@ -540,11 +540,10 @@ class Ide {
     s.checker?.dispose();
     this.editor?.setModel(null);
     for (const m of s.models.values()) {
-      this.linterBinding?.forget(m);
-      m.dispose();
+      this.disposeModel(m);
     }
     // Models the Checker made for Mirror files.
-    if (this.monaco) for (const m of this.monaco.editor.getModels()) if (!m.uri.path.startsWith("/project/")) m.dispose();
+    if (this.monaco) for (const m of this.monaco.editor.getModels()) if (!m.uri.path.startsWith("/project/")) this.disposeModel(m);
     this.terminal?.stopLine();
     this.session = null;
     this.scheduleProblems();
@@ -646,6 +645,13 @@ class Ide {
     return this.monaco.Uri.file("/project/" + path);
   }
 
+  /** Disposes a model with everything hung on it: the Linter's state and every marker, which Monaco would otherwise keep by URI. */
+  private disposeModel(model: Monaco.editor.ITextModel) {
+    this.linterBinding?.forget(model);
+    for (const owner of new Set(this.monaco.editor.getModelMarkers({ resource: model.uri }).map((m) => m.owner))) this.monaco.editor.setModelMarkers(model, owner, []);
+    model.dispose();
+  }
+
   private ensureModel(path: string, text: string): Monaco.editor.ITextModel {
     const s = this.session!;
     let model = s.models.get(path);
@@ -701,15 +707,20 @@ class Ide {
   /** Sends the interpreter every file it has not seen since its boot, or since its edit. */
   private async syncDirty() {
     const s = this.session;
-    if (!s?.interpreter?.alive) return;
-    const files = [];
+    // A boot writes the whole Project once Python is up; until then the paths wait in `dirty`.
+    if (!s?.interpreter?.alive || s.state === "booting" || s.state === "rebooting") return;
+    const files: FileEntry[] = [];
     for (const path of s.dirty) {
       const f = s.project.files.get(path);
       if (!f) continue;
       files.push({ path, data: f.text !== undefined ? f.text : f.bytes!.slice(0) });
     }
     s.dirty.clear();
-    if (files.length) await s.interpreter.writeFiles(files);
+    if (files.length) {
+      await s.interpreter.writeFiles(files).catch(() => {
+        for (const f of files) s.dirty.add(f.path);
+      });
+    }
   }
 
   /** Sets a text file's content from the Tool (settings, a run's output), through its model when it has one. */
@@ -728,8 +739,9 @@ class Ide {
     }
     const isNew = !s.project.files.has(path);
     const settingsChanged = await s.project.write(path, text);
-    this.ensureModel(path, text);
+    // The Checker hears of a file before its model opens, so its first request about it lands on a file it knows.
     if (isNew) this.fileAdded(path);
+    this.ensureModel(path, text);
     s.dirty.add(path);
     void this.syncDirty();
     if (settingsChanged) this.applySettings();
@@ -906,8 +918,31 @@ class Ide {
     });
   }
 
+  /** The session once its Project is fully open; the Tree is not edited before the editor is there to show the result. */
+  private openSession(): Session | null {
+    return this.session?.opened ? this.session : null;
+  }
+
+  /**
+   * Why a file (or a folder) cannot be placed at `path`, or null when it can:
+   * a file and a folder cannot share a name, and no file can stand where one
+   * of the path's folders must be. The Interpreter's filesystem refuses both,
+   * so the Tree refuses them first, when the user can still pick another name.
+   * `ignore` holds paths about to move away, which are no obstacle.
+   */
+  private obstacle(path: string, isFolder: boolean, ignore?: (p: string) => boolean): string | null {
+    const s = this.session!;
+    for (const f of s.project.files.keys()) {
+      if (ignore?.(f)) continue;
+      if (path.startsWith(f + "/")) return `"${f}" is a file, not a folder`;
+      if (isFolder && f === path) return `"${f}" is a file`;
+    }
+    if (!isFolder && !ignore?.(path) && (s.extraFolders.has(path) || s.project.folders().has(path))) return `"${path}" is a folder`;
+    return null;
+  }
+
   private async newFile(folder = "") {
-    const s = this.session;
+    const s = this.openSession();
     if (!s) return;
     const name = await this.ask(folder ? `New file in ${folder}` : "New file", "");
     if (!name) return;
@@ -917,6 +952,11 @@ class Ide {
       this.openFile(path);
       return;
     }
+    const why = this.obstacle(path, false);
+    if (why) {
+      this.message(`Cannot create ${path}: ${why}.`);
+      return;
+    }
     let dir = path;
     while ((dir = dir.slice(0, dir.lastIndexOf("/"))) !== "") s.expanded.add(dir);
     await this.writeText(path, "");
@@ -924,30 +964,39 @@ class Ide {
   }
 
   private async newFolder(folder = "") {
-    const s = this.session;
+    const s = this.openSession();
     if (!s) return;
     const name = await this.ask(folder ? `New folder in ${folder}` : "New folder", "");
     if (!name) return;
     const path = normalizePath((folder ? folder + "/" : "") + name);
     if (!path) return;
-    s.extraFolders.add(path);
+    const why = this.obstacle(path, true);
+    if (why) {
+      this.message(`Cannot create ${path}/: ${why}.`);
+      return;
+    }
+    if (!s.project.folders().has(path)) s.extraFolders.add(path);
     s.expanded.add(path);
     this.renderTree();
     await this.saveFolders();
     if (s.interpreter?.alive) s.interpreter.writeFiles([], [], [path]).catch(() => {});
   }
 
-  /** The empty folders go in the Project record, trimmed of any a file has since filled. */
+  /**
+   * The empty folders go in the Project record, trimmed of any a file has
+   * since filled, and of any a file now stands in the way of (a program can
+   * replace a folder with a file of the same name).
+   */
   private saveFolders() {
     const s = this.session;
     if (!s) return Promise.resolve();
     const implied = s.project.folders();
-    for (const f of Array.from(s.extraFolders)) if (implied.has(f)) s.extraFolders.delete(f);
+    for (const f of Array.from(s.extraFolders)) if (implied.has(f) || this.obstacle(f, true)) s.extraFolders.delete(f);
     return s.project.saveRecord({ folders: [...s.extraFolders].toSorted() });
   }
 
   private async renamePath(path: string, isFolder: boolean) {
-    const s = this.session;
+    const s = this.openSession();
     if (!s) return;
     // The name alone is edited; the folder it sits in stays (moving is a drag).
     const dir = dirname(path);
@@ -959,9 +1008,16 @@ class Ide {
   }
 
   private async movePath(from: string, to: string) {
-    const s = this.session;
+    const s = this.openSession();
     if (!s) return;
     const isFolder = !s.project.files.has(from);
+    const leaving = (p: string) => p === from || p.startsWith(from + "/");
+    let why = this.obstacle(to, isFolder, leaving);
+    if (isFolder) for (const [, b] of s.project.movePairs(from, to)) why ??= this.obstacle(b, false, leaving);
+    if (why) {
+      this.message(`Cannot move ${from} to ${to}: ${why}.`);
+      return;
+    }
     if (isFolder) {
       if (s.extraFolders.delete(from)) s.extraFolders.add(to);
       for (const f of Array.from(s.extraFolders)) {
@@ -978,17 +1034,22 @@ class Ide {
     for (const [a, b] of pairs) {
       const model = s.models.get(a);
       const text = model?.getValue();
-      if (model) {
-        this.linterBinding?.forget(model);
-        model.dispose();
-        s.models.delete(a);
+      // The model of a file overwritten at `b` goes too, so the new one is not mistaken for it.
+      for (const m of [model, s.models.get(b)]) {
+        if (!m) continue;
+        this.disposeModel(m);
       }
-      if (text !== undefined) this.ensureModel(b, text);
-      const i = s.tabs.indexOf(a);
-      if (i !== -1) s.tabs[i] = b;
-      if (s.active === a) s.active = b;
+      s.models.delete(a);
+      s.models.delete(b);
       if (/\.pyi?$/i.test(a)) s.checker?.fileDeleted("/project/" + a);
       if (/\.pyi?$/i.test(b)) s.checker?.fileCreated("/project/" + b);
+      if (text !== undefined) this.ensureModel(b, text);
+      const i = s.tabs.indexOf(a);
+      if (i !== -1) {
+        if (s.tabs.includes(b)) s.tabs.splice(i, 1);
+        else s.tabs[i] = b;
+      }
+      if (s.active === a) s.active = b;
       s.dirty.add(b);
     }
     if (s.interpreter?.alive) {
@@ -1004,7 +1065,7 @@ class Ide {
   }
 
   private async deletePath(path: string, isFolder: boolean) {
-    const s = this.session;
+    const s = this.openSession();
     if (!s) return;
     const paths = isFolder ? [...s.project.files.keys()].filter((p) => p.startsWith(path + "/")) : [path];
     if (!confirm(isFolder ? `Delete the folder "${path}" and its ${paths.length} file(s)?` : `Delete "${path}"?`)) return;
@@ -1019,8 +1080,7 @@ class Ide {
       this.saveTimers.delete(p);
       const model = s.models.get(p);
       if (model) {
-        this.linterBinding?.forget(model);
-        model.dispose();
+        this.disposeModel(model);
         s.models.delete(p);
       }
       const i = s.tabs.indexOf(p);
@@ -1044,13 +1104,19 @@ class Ide {
 
   /** Adds files from the user's machine under `folder`. */
   private async addFiles(items: { path: string; file: File }[], folder = "") {
-    const s = this.session;
+    const s = this.openSession();
     if (!s || items.length === 0) return;
     const now = Date.now();
     const files: ProjectFile[] = [];
+    const refused: string[] = [];
     for (const { path, file } of items) {
       const full = normalizePath((folder ? folder + "/" : "") + path);
       if (!full) continue;
+      const why = this.obstacle(full, false);
+      if (why) {
+        refused.push(`${full} (${why})`);
+        continue;
+      }
       const bytes = new Uint8Array(await file.arrayBuffer());
       if (isTextPath(full) && looksLikeText(bytes)) files.push({ path: full, text: new TextDecoder().decode(bytes), mtime: now });
       else files.push({ path: full, bytes: bytes.buffer as ArrayBuffer, mtime: now });
@@ -1058,23 +1124,22 @@ class Ide {
     for (const f of files) {
       const old = s.models.get(f.path);
       if (old) {
-        this.linterBinding?.forget(old);
-        old.dispose();
+        this.disposeModel(old);
         s.models.delete(f.path);
       }
     }
     await s.project.writeMany(files);
     for (const f of files) {
+      if (/\.pyi?$/i.test(f.path)) s.checker?.fileCreated("/project/" + f.path);
       if (f.text !== undefined) this.ensureModel(f.path, f.text);
       s.dirty.add(f.path);
-      if (/\.pyi?$/i.test(f.path)) s.checker?.fileCreated("/project/" + f.path);
       let dir = f.path;
       while ((dir = dir.slice(0, dir.lastIndexOf("/"))) !== "") s.expanded.add(dir);
     }
     if (files.some((f) => f.path === PROJECT_FILE)) this.applySettings();
     void this.syncDirty();
     this.showActive();
-    this.message(`Added ${files.length} file(s).`);
+    this.message(`Added ${files.length} file(s).` + (refused.length ? ` Not added: ${refused.join(", ")}.` : ""));
   }
 
   private showMenu(path: string, isFolder: boolean, x: number, y: number) {
@@ -1376,6 +1441,8 @@ class Ide {
       },
     });
     s.interpreter = interpreter;
+    // Whether this boot has been overtaken: the Project closed, or Restart replaced the interpreter.
+    const stale = () => this.session !== s || s.generation !== gen || s.interpreter !== interpreter;
     s.dirty.clear();
     this.setState("booting");
     this.terminal?.stopLine();
@@ -1384,28 +1451,31 @@ class Ide {
       const current = s.project.lockCurrent;
       const record = s.project.record;
       const info = await interpreter.boot(current ? record.lock : null, current ? record.packages.map((p) => p.name) : ["micropip"], this.progress("Pyodide"));
-      if (this.session !== s || s.generation !== gen || s.interpreter !== interpreter) return;
+      if (stale()) return;
       s.python = info.python;
       s.jspi = info.jspi;
       this.flushSaves();
       const files = [...s.project.files.values()].map((f) => ({ path: f.path, data: f.text !== undefined ? f.text : f.bytes!.slice(0) }));
-      await interpreter.writeFiles(files, [], [...s.extraFolders]);
-      if (this.session !== s || s.generation !== gen) return;
+      // A path the filesystem refuses (a Project made before the Tree checked
+      // names) is reported, and the rest of the Project is there to run.
+      const unwritten = await interpreter.writeFiles(files, [], [...s.extraFolders]).then(() => null, (e: Error) => e.message);
+      if (stale()) return;
       this.terminal?.writeDim(`Python ${info.python} (Pyodide ${PYODIDE_VERSION})${info.jspi ? "" : ", input() reads Stdin only in this browser"}\n`);
+      if (unwritten) this.terminal?.writeError(`Not written to the interpreter:\n${unwritten}\n`);
       if (!current && s.project.settings.dependencies.length) {
         this.terminal?.writeDim(record.lock ? `Packages were locked for another Pyodide; resolving them again.\n` : `Installing the project's dependencies.\n`);
         await this.installSpecs(s.project.settings.dependencies, false);
-        if (this.session !== s || s.generation !== gen) return;
+        if (stale()) return;
       } else if (!current && record.lock) {
         await s.project.saveRecord({ lock: null, lockPyodide: null, packages: [] });
       }
       await this.refreshMirror();
-      if (this.session !== s || s.generation !== gen) return;
+      if (stale()) return;
       this.message("");
       this.setState("ready");
       this.prompt();
     } catch (e) {
-      if (this.session !== s || s.generation !== gen) return;
+      if (stale()) return;
       const message = e instanceof Error ? e.message : String(e);
       this.terminal?.writeError(`The interpreter could not start: ${message}\n`);
       this.message("Interpreter failed: " + message);
@@ -1540,12 +1610,11 @@ class Ide {
           if (model) {
             if (model.getValue() !== f.text) model.setValue(f.text);
           } else {
-            this.ensureModel(f.path, f.text);
             if (/\.pyi?$/i.test(f.path)) s.checker?.fileCreated("/project/" + f.path);
+            this.ensureModel(f.path, f.text);
           }
         } else if (model) {
-          this.linterBinding?.forget(model);
-          model.dispose();
+          this.disposeModel(model);
           s.models.delete(f.path);
           const i = s.tabs.indexOf(f.path);
           if (i !== -1) s.tabs.splice(i, 1);
@@ -1564,8 +1633,7 @@ class Ide {
       for (const p of result.removed) {
         const model = s.models.get(p);
         if (model) {
-          this.linterBinding?.forget(model);
-          model.dispose();
+          this.disposeModel(model);
           s.models.delete(p);
         }
         const i = s.tabs.indexOf(p);
@@ -1577,6 +1645,7 @@ class Ide {
     }
     for (const p of result.skipped) this.terminal?.writeDim(`[${p} is over 20 MB and was not kept in the project]\n`);
     if (files.length || result.removed.length) {
+      if (s.extraFolders.size) void this.saveFolders();
       this.showActive();
       const n = files.length + result.removed.length;
       this.message(`The run changed ${n} file(s) in the project.`);
@@ -1931,7 +2000,8 @@ class Ide {
       return;
     }
     const { MarkerSeverity } = this.monaco;
-    const markers = this.monaco.editor.getModelMarkers({}).filter((m) => m.resource.path.startsWith("/project/"));
+    // Only files the Project still has: markers outlive a model that was moved or deleted.
+    const markers = this.monaco.editor.getModelMarkers({}).filter((m) => m.resource.path.startsWith("/project/") && s.models.has(m.resource.path.slice("/project/".length)));
     markers.sort((a, b) => a.resource.path.localeCompare(b.resource.path) || b.severity - a.severity || a.startLineNumber - b.startLineNumber || a.startColumn - b.startColumn);
     const errors = markers.filter((m) => m.severity === MarkerSeverity.Error).length;
     count.textContent = String(markers.length);
