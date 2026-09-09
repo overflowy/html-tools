@@ -31,7 +31,7 @@ function check(label: string, ok: boolean, detail = "") {
 
 await page.goto(url);
 const names = await page.locator(".tool-list button").allTextContents();
-check("sidebar lists all tools", names.length === 11, names.join(", "));
+check("sidebar lists all tools", names.length === 12, names.join(", "));
 
 // base64 tool: paste a tiny valid png via direct input.
 await page.goto(url + "#base64-to-image");
@@ -894,6 +894,32 @@ await page.locator(".tool-whoami .btn-refresh").click();
 await page.waitForFunction(() => !document.querySelector(".tool-whoami .value.pending"));
 check("whoami shows both countries when the traces disagree",
   (await whoamiValue("country"))!.startsWith("IT · Italy via IPv4, DE · Germany via IPv6"), (await whoamiValue("country")) ?? "");
+
+// UUID Generator: one version 4 UUID on selection, another on Generate, and
+// both Copy and the value itself put it on the clipboard. No State, so the
+// Deep Link stays bare.
+const uuidValue = () => page.locator(".tool-uuid-generator .value").textContent();
+const V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+await page.goto(url + "#uuid-generator");
+await page.waitForSelector(".tool-uuid-generator .value");
+const firstUuid = (await uuidValue()) ?? "";
+check("uuid shows a version 4 UUID on selection", V4.test(firstUuid), firstUuid);
+await page.locator(".tool-uuid-generator .btn-generate").click();
+const secondUuid = (await uuidValue()) ?? "";
+check("uuid generate makes a different one", V4.test(secondUuid) && secondUuid !== firstUuid, secondUuid);
+check("uuid deep link carries no state", await page.evaluate(() => location.hash === "#uuid-generator"));
+const copiedVia = (selector: string) => page.evaluate((sel: string) => {
+  let out = "";
+  navigator.clipboard.writeText = async (t: string) => { out = t; };
+  (document.querySelector(sel) as HTMLElement).click();
+  return new Promise<string>((resolve) => setTimeout(() => resolve(out), 50));
+}, selector);
+check("uuid copy button copies it", (await copiedVia(".tool-uuid-generator .btn-copy")) === secondUuid);
+check("uuid copy button says so", (await page.locator(".tool-uuid-generator .btn-copy").textContent()) === "Copied");
+check("uuid clicking the value copies it", (await copiedVia(".tool-uuid-generator .value")) === secondUuid);
+check("uuid value says so", (await uuidValue()) === "Copied");
+await page.waitForFunction((u: string) => document.querySelector(".tool-uuid-generator .value")!.textContent === u, secondUuid);
+check("uuid value comes back after the flash", true);
 
 // Markdown Editor: the welcome Draft on a first visit, Preview with Contents
 // open, then edits that reach the preview, the stats, the draft, and the Deep

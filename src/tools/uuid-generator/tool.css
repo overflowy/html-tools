@@ -1,0 +1,66 @@
+.tool-uuid-generator {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 0.25rem var(--gutter) 2rem;
+}
+
+.tool-uuid-generator .pane {
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 0.5px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.tool-uuid-generator .pane-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--text-muted);
+  font-family: var(--mono);
+}
+
+/* Same size as the buttons in the other tools' toolbars. */
+.tool-uuid-generator .toolbar button {
+  font-family: var(--sans);
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: var(--radius-sm);
+}
+
+.tool-uuid-generator .value {
+  padding: 20px 12px;
+  font-family: var(--mono);
+  font-size: 22px;
+  line-height: 1.4;
+  letter-spacing: 0.02em;
+  text-align: center;
+  cursor: pointer;
+  user-select: text;
+  /* Long enough to need a break in the Narrow Layout; only ever at a hyphen. */
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+.tool-uuid-generator .value:hover { background: var(--surface-2); }
+
+.tool-uuid-generator .value:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.tool-uuid-generator .toolbar {
+  display: flex;
+  gap: 8px;
+}
+
+@media (max-width: 767px) {
+  .tool-uuid-generator .value { font-size: 17px; }
+}

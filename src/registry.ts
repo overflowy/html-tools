@@ -10,6 +10,7 @@ import markdownEditor from "./tools/markdown-editor";
 import pythonIde from "./tools/python-ide";
 import qrGenerator from "./tools/qr-generator";
 import saveDecoder from "./tools/save-decoder";
+import uuidGenerator from "./tools/uuid-generator";
 import whoami from "./tools/whoami";
 
-export const tools: Tool[] = [base64ToImage, dependencyAudit, dnsLookup, docToMarkdown, imageMetadata, jsoncSorter, markdownEditor, pythonIde, qrGenerator, saveDecoder, whoami];
+export const tools: Tool[] = [base64ToImage, dependencyAudit, dnsLookup, docToMarkdown, imageMetadata, jsoncSorter, markdownEditor, pythonIde, qrGenerator, saveDecoder, uuidGenerator, whoami];
