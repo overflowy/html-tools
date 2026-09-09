@@ -245,6 +245,10 @@ export class Checker {
 
   private send(foreground: Worker, message: Message) {
     if (this.closed) return;
+    // The client keeps its request's textDocument and uses that URI to place
+    // returned ranges. Pyright needs another URI form, so only the copy sent
+    // to its worker may be rewritten.
+    message = structuredClone(message);
     if (message.method === "initialize") {
       const params = (message.params ?? {}) as Json;
       params.rootUri = PROJECT_URI;

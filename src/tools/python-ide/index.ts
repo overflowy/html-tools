@@ -1705,8 +1705,8 @@ class Ide {
     const now = Date.now();
     const files: ProjectFile[] = [];
     for (const c of result.changed) {
-      // An edit typed while the program ran is newer than what the program saw or wrote; it stays, and reaches the filesystem next.
-      if (s.dirty.has(c.path) && s.models.has(c.path)) continue;
+      // A file added or changed while the program ran is newer than what the program saw or wrote; it stays, and reaches the filesystem next.
+      if (s.dirty.has(c.path) && s.project.files.has(c.path)) continue;
       const bytes = c.data;
       if (isTextPath(c.path) && looksLikeText(bytes)) files.push({ path: c.path, text: new TextDecoder().decode(bytes), mtime: now });
       else files.push({ path: c.path, bytes: bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer, mtime: now });
@@ -1738,8 +1738,10 @@ class Ide {
         s.dirty.delete(f.path);
       }
     }
-    if (result.removed.length) {
-      for (const p of result.removed) {
+    // A path the Run saw disappear may since have been recreated in the Tree; its pending copy wins too.
+    const removed = result.removed.filter((p) => !s.dirty.has(p) || !s.project.files.has(p));
+    if (removed.length) {
+      for (const p of removed) {
         const model = s.models.get(p);
         if (model) {
           this.disposeModel(model);
@@ -1750,7 +1752,7 @@ class Ide {
         if (s.active === p) s.active = s.tabs[0] ?? null;
         if (/\.pyi?$/i.test(p)) s.checker?.fileDeleted("/project/" + p);
       }
-      await s.project.remove(result.removed);
+      await s.project.remove(removed);
     }
     for (const p of result.skipped) this.terminal?.writeDim(`[${p} is over 20 MB and was not kept in the project]\n`);
     // The folders are as the program left them: the ones no file implies are the Project's empty folders now.
@@ -1761,9 +1763,9 @@ class Ide {
       s.extraFolders = empty;
       void this.saveFolders();
     }
-    if (files.length || result.removed.length || foldersChanged) {
+    if (files.length || removed.length || foldersChanged) {
       this.showActive();
-      const n = files.length + result.removed.length;
+      const n = files.length + removed.length;
       this.message(n ? `The run changed ${n} file(s) in the project.` : "The run changed the project's folders.");
       if (files.some((f) => f.path === PROJECT_FILE)) this.applySettings();
     }

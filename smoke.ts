@@ -1116,6 +1116,37 @@ await page.waitForFunction(() => {
 check("ide: Pyright reports on a file with a space in its name", true);
 await ideNew(".new-file-btn", "lib/util.py");
 await ideSetText("lib/util.py", "V = 'folder'\n");
+// The Checker's worker needs encoded URIs, but Monaco retains the raw URI in a request
+// and uses it again when a result such as document highlights comes back.
+await ideSetText("My File.py", "value = 1\nprint(value)\n");
+await page.locator(ide + '.tree-row.file[data-path="My File.py"]').click();
+const ideErrorsBeforeSpaceMove = errors.length;
+await page.evaluate(() => {
+  const target = document.querySelector('.tool-python-ide .tree-row.folder[data-path="lib"]')!;
+  const dt = new DataTransfer();
+  dt.setData("text/x-pyide-path", "My File.py");
+  target.dispatchEvent(new DragEvent("drop", { dataTransfer: dt, bubbles: true, cancelable: true }));
+});
+await page.locator(ide + '.tree-row.file[data-path="lib/My File.py"]').waitFor();
+await page.evaluate(() => {
+  const monaco = (globalThis as unknown as { monaco: { editor: { getEditors(): { setPosition(p: { lineNumber: number; column: number }): void }[] } } }).monaco;
+  monaco.editor.getEditors()[0]?.setPosition({ lineNumber: 1, column: 2 });
+});
+await page.waitForTimeout(1000);
+check("ide: moving an open file with a space keeps Checker answers on its model",
+  errors.length === ideErrorsBeforeSpaceMove &&
+  (await ideText("lib/My File.py")) === "value = 1\nprint(value)\n" &&
+  (await page.locator(ide + ".tab.active").getAttribute("title")) === "lib/My File.py",
+  errors.slice(ideErrorsBeforeSpaceMove).join(" | "));
+await page.evaluate(() => {
+  const dt = new DataTransfer();
+  dt.setData("text/x-pyide-path", "lib/My File.py");
+  document.querySelector(".tool-python-ide .tree")!
+    .dispatchEvent(new DragEvent("drop", { dataTransfer: dt, bubbles: true, cancelable: true }));
+});
+await page.locator(ide + '.tree-row.file[data-path="My File.py"]').waitFor();
+await ideNew(".new-file-btn", "recreate.py");
+await ideSetText("recreate.py", "OLD = True\n");
 await ideSetText("app.py", "import lib.util\nprint('via', lib.util.V)\n");
 await ideRun("app.py", "via folder");
 await ideMenu("lib", "Rename");
@@ -1123,13 +1154,18 @@ await page.locator(ide + ".prompt-input").fill("lib_old");
 await page.locator(ide + ".prompt-ok").click();
 await ideNew(".new-file-btn", "lib.py");
 await ideSetText("lib.py", "V = 'module'\n");
-await ideSetText("app.py", "import lib, os, time\nos.makedirs('made/deep')\ntime.sleep(1.2)\nprint('via', lib.V)\n");
+await ideSetText("app.py", "import lib, os, time\nos.makedirs('made/deep')\ntime.sleep(1.5)\nprint('via', lib.V)\n");
 await page.locator(ide + '.tree-row.file[data-path="app.py"]').click();
 await page.locator(ide + ".run-btn").click();
 await page.waitForFunction(() => document.querySelector(".tool-python-ide .st-interp")?.textContent === "running", null, { timeout: 30000 });
 // Two edits: the first is saved while the program still runs, the second is still in its debounce when it ends.
+// A file removed from the Interpreter during the Run and recreated in the Tree must not be removed again by the Run's snapshot.
 await page.waitForTimeout(150);
 await ideSetText("lib.py", "V = 'module'\nTYPED_DURING_RUN = 1\n");
+await ideMenu("recreate.py", "Delete");
+await page.locator(ide + '.tree-row[data-path="recreate.py"]').waitFor({ state: "hidden" });
+await ideNew(".new-file-btn", "recreate.py");
+await ideSetText("recreate.py", "NEW = True\n");
 await page.waitForTimeout(800);
 await ideSetText("lib.py", "V = 'module'\nTYPED_DURING_RUN = True\n");
 await page.waitForFunction(() => document.querySelector(".tool-python-ide .xterm-rows")?.textContent?.includes("via module"), null, { timeout: 30000 });
@@ -1137,6 +1173,8 @@ await page.waitForFunction(() => document.querySelector(".tool-python-ide .st-in
 await page.waitForTimeout(400);
 check("ide: a renamed package does not shadow a new module of its name", true);
 check("ide: an edit typed during a Run stays", (await ideText("lib.py")) === "V = 'module'\nTYPED_DURING_RUN = True\n", JSON.stringify(await ideText("lib.py")));
+check("ide: a file deleted and recreated during a Run stays",
+  (await ideText("recreate.py")) === "NEW = True\n", JSON.stringify(await ideText("recreate.py")));
 await page.locator(ide + '.tree-row.folder[data-path="made"]').click();
 check("ide: a program's folders reach the Tree", (await ideTree()).includes("made/deep"), (await ideTree()).join(", "));
 await ideMenu("lib_old/util.py", "Delete");
@@ -1144,9 +1182,10 @@ await page.waitForFunction(() => !document.querySelector('.tool-python-ide .tree
 check("ide: deleting the last file leaves its folder", (await ideTree()).includes("lib_old"), (await ideTree()).join(", "));
 await ideMenu("lib_old", "Delete");
 await page.waitForFunction(() => !document.querySelector('.tool-python-ide .tree-row[data-path="lib_old"]'));
-await ideSetText("app.py", "import os\nprint('dirs', sorted(d for d, _, _ in os.walk('.')))\n");
+await ideSetText("app.py", "import os\nprint('recreated', open('recreate.py').read().strip())\nprint('dirs', sorted(d for d, _, _ in os.walk('.')))\n");
 await ideRun("app.py", "dirs [");
-check("ide: the Interpreter's folders match the Tree", (await ideTerm()).includes("dirs ['.', './made', './made/deep']"), (await ideTerm()).split("\n").slice(-3).join(" | "));
+check("ide: the recreated file reaches the Interpreter", (await ideTerm()).includes("recreated NEW = True"), (await ideTerm()).split("\n").slice(-4).join(" | "));
+check("ide: the Interpreter's folders match the Tree", (await ideTerm()).includes("dirs ['.', './made', './made/deep']"), (await ideTerm()).split("\n").slice(-4).join(" | "));
 // An edit made right before a reload is journaled and comes back.
 await ideSetText("app.py", "print('edited just before the reload')\n");
 await page.reload();
