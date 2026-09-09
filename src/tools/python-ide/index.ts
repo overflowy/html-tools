@@ -51,7 +51,8 @@ interface Session {
   python: string;
   jspi: boolean;
   checker: Checker | null;
-  mirror: { lock: string; files: Record<string, string> } | null;
+  /** The Mirror of the Environment, keyed by what is installed (Project.environmentKey). */
+  mirror: { key: string; files: Record<string, string> } | null;
   models: Map<string, Monaco.editor.ITextModel>;
   viewStates: Map<string, Monaco.editor.ICodeEditorViewState | null>;
   tabs: string[];
@@ -588,7 +589,7 @@ class Ide {
     this.linterBinding?.invalidate(session.models.values());
     if (project.record.lock) {
       const stored = await getMirror(project.id);
-      if (stored && stored.lock === project.record.lock) session.mirror = { lock: stored.lock, files: stored.files };
+      if (stored && stored.key === project.environmentKey) session.mirror = { key: stored.key, files: stored.files };
     }
     if (this.session !== session) return;
     this.restartChecker();
@@ -650,7 +651,7 @@ class Ide {
     const files: ProjectFile[] = [...s.project.files.values()].map((f) => Object.assign({}, f, { bytes: f.bytes?.slice(0) }));
     const p = await Project.create(name.trim(), files);
     await p.saveRecord({ lock: s.project.record.lock, lockPyodide: s.project.record.lockPyodide, packages: s.project.record.packages.slice(), folders: [...s.extraFolders].toSorted() });
-    if (s.mirror) await putMirror({ projectId: p.id, lock: s.mirror.lock, files: s.mirror.files });
+    if (s.mirror) await putMirror({ projectId: p.id, key: s.mirror.key, files: s.mirror.files });
     await this.refreshProjects();
     await this.openProject(p.id);
   }
@@ -1507,7 +1508,7 @@ class Ide {
       extraPaths: ["/site-packages"],
       ...s.project.settings.pyright,
     };
-    const key = JSON.stringify(config) + "\n" + (s.mirror?.lock ?? "");
+    const key = JSON.stringify(config) + "\n" + (s.mirror?.key ?? "");
     if (s.checker?.isReady && key === s.checkerKey) return;
     s.checker?.dispose();
     const files: Record<string, string> = { ...s.mirror?.files, "/site-packages/js.pyi": JS_STUB, ...s.project.checkerFiles() };
@@ -1522,21 +1523,27 @@ class Ide {
     });
   }
 
+  /**
+   * Reads the Mirror again when the installed packages are not the ones it
+   * was taken from. Not when the Lock changed: micropip's freeze lists every
+   * Catalog package whether installed or not, so the Lock reads the same
+   * after a Catalog package is added or removed.
+   */
   private async refreshMirror() {
     const s = this.session;
     if (!s?.interpreter?.alive) return;
-    const lock = s.project.record.lock;
-    if (!lock) {
+    if (!s.project.record.lock) {
       s.mirror = null;
       return;
     }
-    if (s.mirror?.lock === lock) return;
+    const key = s.project.environmentKey;
+    if (s.mirror?.key === key) return;
     const gen = s.generation;
     this.setCheckerStatus("Pyright: reading packages");
     const files = await s.interpreter.mirror();
     if (this.session !== s || s.generation !== gen) return;
-    s.mirror = { lock, files };
-    await putMirror({ projectId: s.project.id, lock, files });
+    s.mirror = { key, files };
+    await putMirror({ projectId: s.project.id, key, files });
     this.restartChecker();
   }
 

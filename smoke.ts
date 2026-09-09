@@ -1238,6 +1238,33 @@ await ideSaveSettings((d) => { (d.querySelector("select[name=typeCheckingMode]")
 await page.waitForFunction((n) => (globalThis as unknown as { smokeWorkers: WorkerLog }).smokeWorkers.filter((w) => w.name === "pyright-foreground").length === n + 1, checkersBefore, { timeout: 10000 });
 await ideReady();
 check("ide: a Pyright settings change restarts the Checker once", (await checkerWorkers()).length === checkersBefore + 1);
+// The Mirror follows what is installed, not the Lock: micropip's freeze lists every Catalog
+// package either way, so a Catalog package removed must still leave the Checker's view.
+const ideLspMessages = (path: string) => page.evaluate((p) => {
+  const monaco = (globalThis as unknown as { monaco: { editor: { getModelMarkers(f: object): { owner: string; message: string; resource: { path: string } }[] } } }).monaco;
+  return monaco.editor.getModelMarkers({}).filter((m) => m.owner === "lsp" && m.resource.path === "/project/" + p).map((m) => m.message);
+}, path);
+await ideSetText("app.py", "import six\nprint(six.__version__)\n");
+await page.locator(ide + ".install-input").fill("six");
+await page.locator(ide + ".install-btn").click();
+await page.waitForFunction(() => document.querySelector(".tool-python-ide .st-interp")?.textContent === "installing", null, { timeout: 30000 });
+await ideReady();
+await page.waitForFunction(() => document.querySelector(".tool-python-ide .st-checker")?.textContent === "Pyright: ready", null, { timeout: 60000 });
+await page.waitForFunction(() => {
+  const monaco = (globalThis as unknown as { monaco: { editor: { getModelMarkers(f: object): { owner: string; message: string; resource: { path: string } }[] } } }).monaco;
+  return !monaco.editor.getModelMarkers({}).some((m) => m.owner === "lsp" && m.resource.path === "/project/app.py" && m.message.includes("six"));
+}, null, { timeout: 30000 });
+check("ide: an installed package resolves for the Checker", true);
+await page.evaluate(() => {
+  for (const row of document.querySelectorAll(".tool-python-ide .pkg-row")) if (row.textContent?.includes("six")) (row.querySelector(".pkg-remove") as HTMLElement).click();
+});
+await page.waitForFunction(() => document.querySelector(".tool-python-ide .st-interp")?.textContent !== "ready", null, { timeout: 30000 });
+await ideReady();
+await page.waitForFunction(() => {
+  const monaco = (globalThis as unknown as { monaco: { editor: { getModelMarkers(f: object): { owner: string; message: string; resource: { path: string } }[] } } }).monaco;
+  return monaco.editor.getModelMarkers({}).some((m) => m.owner === "lsp" && m.resource.path === "/project/app.py" && m.message.includes("six"));
+}, null, { timeout: 60000 });
+check("ide: a removed package is missing for the Checker again", true, (await ideLspMessages("app.py")).join(" | "));
 
 await page.goto(url + "#markdown-editor");
 await page.waitForSelector(mv + ".editor");

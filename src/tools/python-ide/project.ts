@@ -240,6 +240,15 @@ export class Project {
     return this.record.lock !== null && this.record.lockPyodide === PYODIDE_VERSION;
   }
 
+  /**
+   * What is installed, as one string: every package with its version, under
+   * the Pyodide release. The Mirror is keyed by it. The Lock would not do:
+   * micropip's freeze lists every Catalog package, installed or not.
+   */
+  get environmentKey(): string {
+    return PYODIDE_VERSION + "\n" + this.record.packages.map((p) => `${p.name}==${p.version}`).toSorted().join("\n");
+  }
+
   private readSettings() {
     const file = this.files.get(PROJECT_FILE);
     if (!file || !isText(file)) {

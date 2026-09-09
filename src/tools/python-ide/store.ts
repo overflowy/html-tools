@@ -46,8 +46,8 @@ export interface WheelRecord {
 
 export interface MirrorRecord {
   projectId: string;
-  /** The Lock the Mirror was taken from; a different Lock means a stale Mirror. */
-  lock: string;
+  /** The Environment the Mirror was taken from (Project.environmentKey); another means a stale Mirror. */
+  key: string;
   files: Record<string, string>;
 }
 
