@@ -95,6 +95,8 @@ export class Checker {
   private locating = new Set<number | string>();
   /** The file each in-flight textDocument request is about, so an answer about a file since closed can be dropped. */
   private about = new Map<number | string, string>();
+  /** Where each in-flight completion request was made, for the ranges its items lack. */
+  private completing = new Map<number | string, { uri: string; line: number; character: number }>();
   private initId: number | string | null = null;
   private resolveReady: (() => void) | null = null;
   /** Resolves when the server answered `initialize`. */
@@ -224,6 +226,9 @@ export class Checker {
       if (msg.id !== undefined && msg.id !== null && this.locating.has(msg.id)) {
         this.locating.delete(msg.id);
         this.ensureModels(msg.result);
+      } else if (msg.id !== undefined && msg.id !== null && this.completing.has(msg.id)) {
+        this.giveCompletionsRanges(msg.result, this.completing.get(msg.id)!);
+        this.completing.delete(msg.id);
       } else if (msg.id !== undefined && msg.id === this.initId) {
         this.isReady = true;
         this.resolveReady?.();
@@ -281,7 +286,11 @@ export class Checker {
           return;
         }
         this.rewriteUris(message.params);
-        if (message.id !== undefined && message.id !== null) this.about.set(message.id, real);
+        if (message.id !== undefined && message.id !== null) {
+          this.about.set(message.id, real);
+          const position = (params as { position?: { line: number; character: number } }).position;
+          if (message.method === "textDocument/completion" && position) this.completing.set(message.id, { uri: real, ...position });
+        }
       }
       if (message.id !== undefined && message.id !== null && LOCATING.has(message.method)) this.locating.add(message.id);
     }
@@ -299,6 +308,31 @@ export class Checker {
       const v = obj[key];
       if (key === "uri" && typeof v === "string") obj[key] = this.realUris.get(v) ?? v;
       else this.rewriteUris(v);
+    }
+  }
+
+  /**
+   * A completion item without a text edit is meant to replace the word being
+   * typed (VS Code does that); Monaco's client inserts it at the cursor
+   * instead, and "import collec" completed to "import colleccollections".
+   * Pyright sends most items that way, so each one gets an edit over the
+   * word before the cursor, or the list's default range when it has one.
+   */
+  private giveCompletionsRanges(result: unknown, at: { uri: string; line: number; character: number }) {
+    if (!result || typeof result !== "object") return;
+    const list = result as { items?: Json[]; itemDefaults?: { editRange?: unknown } };
+    const items = Array.isArray(result) ? (result as Json[]) : list.items;
+    if (!items) return;
+    let range = list.itemDefaults?.editRange;
+    if (!range) {
+      const model = this.monaco.editor.getModel(this.monaco.Uri.parse(at.uri));
+      if (!model) return;
+      const word = model.getWordUntilPosition({ lineNumber: at.line + 1, column: at.character + 1 });
+      range = { start: { line: at.line, character: word.startColumn - 1 }, end: { line: at.line, character: at.character } };
+    }
+    for (const item of items) {
+      if (item.textEdit) continue;
+      item.textEdit = { range, newText: typeof item.insertText === "string" ? item.insertText : (item.textEditText ?? item.label) };
     }
   }
 

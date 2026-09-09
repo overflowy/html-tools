@@ -1117,6 +1117,22 @@ const ideRun = async (file: string, until: string) => {
   await page.waitForFunction((s) => document.querySelector(".tool-python-ide .xterm-rows")?.textContent?.includes(s), until, { timeout: 30000 });
   await page.waitForFunction(() => document.querySelector(".tool-python-ide .st-interp")?.textContent === "ready", null, { timeout: 60000 });
 };
+// A completion accepted replaces the word typed so far: Pyright's items carry no edit of their own.
+await page.evaluate(() => {
+  const monaco = (globalThis as unknown as { monaco: { editor: { getModels(): { uri: { path: string }; setValue(v: string): void }[]; getEditors(): { setModel(m: unknown): void; setPosition(p: unknown): void; focus(): void }[] } } }).monaco;
+  const model = monaco.editor.getModels().find((m) => m.uri.path.endsWith("main.py"))!;
+  model.setValue("");
+  const editor = monaco.editor.getEditors()[0]!;
+  editor.setModel(model);
+  editor.setPosition({ lineNumber: 1, column: 1 });
+  editor.focus();
+});
+await page.keyboard.type("import collec", { delay: 40 });
+await page.waitForSelector(ide + ".suggest-widget.visible", { timeout: 30000 });
+await page.waitForFunction(() => document.querySelector(".tool-python-ide .suggest-widget .monaco-list-row.focused .label-name")?.textContent === "collections", null, { timeout: 30000 });
+await page.keyboard.press("Tab");
+await page.waitForTimeout(300);
+check("ide: an accepted completion replaces the word typed", (await ideText("main.py")) === "import collections", JSON.stringify(await ideText("main.py")));
 page.on("dialog", (d) => void d.accept());
 await page.locator(ide + '.tree-row.file[data-path="main.py"]').click();
 await ideMenu("main.py", "Rename");
