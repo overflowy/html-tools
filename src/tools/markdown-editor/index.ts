@@ -1,9 +1,16 @@
-import "./tool.css";
 import LZString from "lz-string";
 import type { Tool } from "../../shell/types";
 import { loadDiagrams, loadFormatter, loadMath } from "./engines";
 import { escapeHtml, headings, renderMarkdown, type Heading } from "./render";
+import "./tool.css";
 import { welcome } from "./welcome";
+// The toolbar's icons: a half-filled disc (the light toggle, mirrored while
+// on), a page with an arrow leaving it, sparkles for Format, and heading
+// lines of uneven length, the way Contents reads.
+import ICON_CONTRAST from "lucide-static/icons/contrast.svg";
+import ICON_EXPORT from "lucide-static/icons/file-down.svg";
+import ICON_SPARKLE from "lucide-static/icons/sparkles.svg";
+import ICON_CONTENTS from "lucide-static/icons/text-align-start.svg";
 
 const DRAFT_KEY = "html-tools:markdown-editor:draft";
 const VIEW_KEY = "html-tools:markdown-editor:view";
@@ -42,17 +49,6 @@ interface HandleItem extends DataTransferItem {
   getAsFileSystemHandle?(): Promise<{ kind: string } & FileHandle>;
 }
 
-// Icons on the Shell's 16px grid, 1.5px strokes, round caps, like the Sidebar's.
-const SVG = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">';
-/** An outline: heading lines of uneven length, the way Contents reads. */
-const ICON_CONTENTS = SVG + '<path d="M2.5 4h11M2.5 8h7M2.5 12h9"/></svg>';
-/** A page with a folded corner and an arrow leaving it. */
-const ICON_EXPORT = SVG + '<path d="M9 1.5H4a.5.5 0 0 0-.5.5v12a.5.5 0 0 0 .5.5h8a.5.5 0 0 0 .5-.5V5z"/><path d="M9 1.5V5h3.5M8 7v5M6 10l2 2 2-2"/></svg>';
-/** A half-filled disc: the light toggle, mirrored while on. */
-const ICON_CONTRAST = SVG + '<circle cx="8" cy="8" r="6"/><path d="M8 2a6 6 0 0 1 0 12z" fill="currentColor" stroke="none"/></svg>';
-/** A large four-point star with a small one beside it: Format. */
-const ICON_SPARKLE = SVG + '<path d="M6.5 2.5l1.2 3.3 3.3 1.2-3.3 1.2-1.2 3.3-1.2-3.3L2 7l3.3-1.2z"/><path d="M12 9.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z"/></svg>';
-
 function read(key: string): string | null {
   try {
     return localStorage.getItem(key);
@@ -83,8 +79,22 @@ function saveBlob(blob: Blob, name: string) {
 const tool: Tool = {
   id: "markdown-editor",
   name: "Markdown Editor",
-  subtitle: "Read, edit, and save Markdown with a live preview, table of contents, math, and diagrams.",
-  keywords: ["markdown", "md", "preview", "editor", "viewer", "render", "mermaid", "katex", "latex", "math", "toc", "pdf"],
+  subtitle:
+    "Read, edit, and save Markdown with a live preview, table of contents, math, and diagrams.",
+  keywords: [
+    "markdown",
+    "md",
+    "preview",
+    "editor",
+    "viewer",
+    "render",
+    "mermaid",
+    "katex",
+    "latex",
+    "math",
+    "toc",
+    "pdf",
+  ],
   mount(el, ctx) {
     el.innerHTML = `
       <div class="toolbar">
@@ -101,7 +111,7 @@ const tool: Tool = {
         </div>
         <button type="button" class="toc-btn icon" title="Contents" aria-label="Contents" aria-pressed="false">${ICON_CONTENTS}</button>
         <button type="button" class="light-btn icon" title="Light document" aria-label="Light document" aria-pressed="false">${ICON_CONTRAST}</button>
-        <button type="button" class="format-btn icon" title="Format the Markdown" aria-label="Format the Markdown">${ICON_SPARKLE}</button>
+        <button type="button" class="format-btn icon" title="Format Markdown" aria-label="Format Markdown">${ICON_SPARKLE}</button>
         <button type="button" class="pdf-btn" title="Print the rendered document, or save it as a PDF">${ICON_EXPORT}<span class="wide-only">Export PDF</span></button>
         <button type="button" class="save-btn primary" title="Save (${MOD}S)">Save</button>
       </div>
@@ -165,7 +175,10 @@ const tool: Tool = {
     let linkFits = true;
     let booted = false;
     let pendingDiagrams: Promise<void> = Promise.resolve();
-    const engines: Record<EngineKind, "idle" | "loading" | "ready" | "failed"> = { math: "idle", diagrams: "idle" };
+    const engines: Record<EngineKind, "idle" | "loading" | "ready" | "failed"> = {
+      math: "idle",
+      diagrams: "idle",
+    };
 
     /* ---- status and stats ---- */
 
@@ -174,7 +187,6 @@ const tool: Tool = {
       clearTimeout(statusTimer);
       if (!sticky) statusTimer = window.setTimeout(() => (statusEl.textContent = ""), 4000);
     }
-
 
     function updateStats() {
       const text = editor.value;
@@ -199,7 +211,9 @@ const tool: Tool = {
         },
         (e: unknown) => {
           engines[kind] = "failed";
-          setStatus("Could not load the " + label + ": " + (e instanceof Error ? e.message : String(e)));
+          setStatus(
+            "Could not load the " + label + ": " + (e instanceof Error ? e.message : String(e)),
+          );
         },
       );
     }
@@ -256,7 +270,8 @@ const tool: Tool = {
       }
       const packed = LZString.compressToEncodedURIComponent(text);
       const fits = packed.length <= STATE_CAP;
-      if (!fits && linkFits) setStatus("Too large to keep in the URL; the draft stays in this browser.");
+      if (!fits && linkFits)
+        setStatus("Too large to keep in the URL; the draft stays in this browser.");
       linkFits = fits;
       ctx.setState(fits ? encodeURIComponent(filenameEl.value) + "." + packed : "");
     }
@@ -299,7 +314,15 @@ const tool: Tool = {
       if (w.showOpenFilePicker) {
         try {
           const [handle] = await w.showOpenFilePicker({
-            types: [{ description: "Markdown", accept: { "text/markdown": [".md", ".markdown", ".mdown", ".mkd"], "text/plain": [".txt"] } }],
+            types: [
+              {
+                description: "Markdown",
+                accept: {
+                  "text/markdown": [".md", ".markdown", ".mdown", ".mkd"],
+                  "text/plain": [".txt"],
+                },
+              },
+            ],
             excludeAcceptAllOption: false,
           });
           if (handle) await openFromFile(await handle.getFile(), handle);
@@ -326,8 +349,12 @@ const tool: Tool = {
     async function save() {
       if (fileHandle) {
         try {
-          if (fileHandle.queryPermission && (await fileHandle.queryPermission({ mode: "readwrite" })) !== "granted") {
-            if ((await fileHandle.requestPermission?.({ mode: "readwrite" })) !== "granted") throw new Error("denied");
+          if (
+            fileHandle.queryPermission &&
+            (await fileHandle.queryPermission({ mode: "readwrite" })) !== "granted"
+          ) {
+            if ((await fileHandle.requestPermission?.({ mode: "readwrite" })) !== "granted")
+              throw new Error("denied");
           }
           await writeToHandle(fileHandle);
           setStatus("Saved to " + filenameEl.value);
@@ -421,11 +448,15 @@ const tool: Tool = {
       }
       document.body.classList.add("md-print");
       setStatus('Choose "Save as PDF" as the destination in the print dialog', true);
-      window.addEventListener("afterprint", () => {
-        document.body.classList.remove("md-print");
-        if (wasDark) applyLight(false);
-        setStatus("");
-      }, { once: true });
+      window.addEventListener(
+        "afterprint",
+        () => {
+          document.body.classList.remove("md-print");
+          if (wasDark) applyLight(false);
+          setStatus("");
+        },
+        { once: true },
+      );
       window.print();
     }
 
@@ -508,25 +539,33 @@ const tool: Tool = {
 
     function shiftLines(outdent: boolean) {
       const { start, end, text } = selectedLines();
-      const from = editor.selectionStart, to = editor.selectionEnd;
-      let firstDelta = 0, totalDelta = 0;
-      const out = text.split("\n").map((line, i) => {
-        let delta: number;
-        if (outdent) {
-          const lead = (/^(\t| {1,2})/.exec(line) ?? [""])[0];
-          delta = -lead.length;
-          line = line.slice(lead.length);
-        } else {
-          delta = line.length ? INDENT.length : 0; // blank lines stay blank
-          if (delta) line = INDENT + line;
-        }
-        if (i === 0) firstDelta = delta;
-        totalDelta += delta;
-        return line;
-      }).join("\n");
+      const from = editor.selectionStart,
+        to = editor.selectionEnd;
+      let firstDelta = 0,
+        totalDelta = 0;
+      const out = text
+        .split("\n")
+        .map((line, i) => {
+          let delta: number;
+          if (outdent) {
+            const lead = (/^(\t| {1,2})/.exec(line) ?? [""])[0];
+            delta = -lead.length;
+            line = line.slice(lead.length);
+          } else {
+            delta = line.length ? INDENT.length : 0; // blank lines stay blank
+            if (delta) line = INDENT + line;
+          }
+          if (i === 0) firstDelta = delta;
+          totalDelta += delta;
+          return line;
+        })
+        .join("\n");
       if (out === text) return;
       replaceRange(start, end, out);
-      editor.setSelectionRange(Math.max(start, from + firstDelta), Math.max(start, to + totalDelta));
+      editor.setSelectionRange(
+        Math.max(start, from + firstDelta),
+        Math.max(start, to + totalDelta),
+      );
     }
 
     editor.addEventListener("keydown", (e) => {
@@ -536,7 +575,9 @@ const tool: Tool = {
       }
       if (e.key !== "Tab" || e.altKey || e.ctrlKey || e.metaKey) return;
       e.preventDefault();
-      const spansLines = editor.value.slice(editor.selectionStart, editor.selectionEnd).includes("\n");
+      const spansLines = editor.value
+        .slice(editor.selectionStart, editor.selectionEnd)
+        .includes("\n");
       if (e.shiftKey) shiftLines(true);
       else if (spansLines) shiftLines(false);
       else replaceRange(editor.selectionStart, editor.selectionEnd, INDENT);
@@ -580,7 +621,16 @@ const tool: Tool = {
     function buildToc() {
       let html = '<div class="toc-title">Contents</div>';
       for (const h of tocHeadings) {
-        html += '<button type="button" class="toc-link d' + h.level + '" data-id="' + h.id + '" title="' + escapeHtml(h.text) + '">' + escapeHtml(h.text) + "</button>";
+        html +=
+          '<button type="button" class="toc-link d' +
+          h.level +
+          '" data-id="' +
+          h.id +
+          '" title="' +
+          escapeHtml(h.text) +
+          '">' +
+          escapeHtml(h.text) +
+          "</button>";
       }
       if (!tocHeadings.length) html += '<div class="toc-empty">No headings yet</div>';
       tocEl.innerHTML = html;
@@ -602,7 +652,12 @@ const tool: Tool = {
     function scrollDocTo(target: HTMLElement, offset: number) {
       // In a stacked Split the preview pane may itself be scrolled out of sight.
       if (isDrawer() && view === "split") target.scrollIntoView({ block: "start" });
-      else previewPane.scrollTop = target.getBoundingClientRect().top - previewPane.getBoundingClientRect().top + previewPane.scrollTop - offset;
+      else
+        previewPane.scrollTop =
+          target.getBoundingClientRect().top -
+          previewPane.getBoundingClientRect().top +
+          previewPane.scrollTop -
+          offset;
     }
 
     tocEl.addEventListener("click", (e) => {
@@ -623,7 +678,9 @@ const tool: Tool = {
       const a = (e.target as HTMLElement).closest<HTMLAnchorElement>('a[href^="#"]');
       if (!a) return;
       e.preventDefault();
-      const target = doc.querySelector<HTMLElement>("#" + CSS.escape(a.getAttribute("href")!.slice(1)));
+      const target = doc.querySelector<HTMLElement>(
+        "#" + CSS.escape(a.getAttribute("href")!.slice(1)),
+      );
       if (target) scrollDocTo(target, 40);
     });
 
@@ -666,7 +723,8 @@ const tool: Tool = {
           if (node && node.getBoundingClientRect().top <= top) current = h;
           else break;
         }
-        const atEnd = previewPane.scrollTop + previewPane.clientHeight >= previewPane.scrollHeight - 2;
+        const atEnd =
+          previewPane.scrollTop + previewPane.clientHeight >= previewPane.scrollHeight - 2;
         if (atEnd) current = tocHeadings[tocHeadings.length - 1]!;
         tocEl.querySelectorAll<HTMLElement>(".toc-link").forEach((b) => {
           const active = b.dataset.id === current.id;
@@ -736,7 +794,8 @@ const tool: Tool = {
       const q = findInput.value;
       matches = [];
       if (q) {
-        const hay = editor.value.toLowerCase(), needle = q.toLowerCase();
+        const hay = editor.value.toLowerCase(),
+          needle = q.toLowerCase();
         let i = hay.indexOf(needle);
         while (i !== -1) {
           matches.push(i);
@@ -753,7 +812,8 @@ const tool: Tool = {
     function paintMarks() {
       marks.replaceChildren();
       if (!matches.length || !el.classList.contains("find-open")) return;
-      const text = editor.value, len = findInput.value.length;
+      const text = editor.value,
+        len = findInput.value.length;
       const frag = document.createDocumentFragment();
       let last = 0;
       matches.forEach((m, i) => {
@@ -770,16 +830,23 @@ const tool: Tool = {
       marks.scrollTop = editor.scrollTop;
     }
     function paintCount() {
-      findCount.textContent = findInput.value ? (matches.length ? matchIdx + 1 + "/" + matches.length : "0/0") : "";
+      findCount.textContent = findInput.value
+        ? matches.length
+          ? matchIdx + 1 + "/" + matches.length
+          : "0/0"
+        : "";
       findCount.classList.toggle("none", !!findInput.value && !matches.length);
-      marks.querySelectorAll("mark").forEach((m, i) => m.classList.toggle("current", i === matchIdx));
+      marks
+        .querySelectorAll("mark")
+        .forEach((m, i) => m.classList.toggle("current", i === matchIdx));
     }
     // Selects the current match and scrolls it into view. Focus stays in the
     // find bar while the user is typing or stepping; the editor takes it, with
     // the match selected, when the bar closes.
     function revealMatch() {
       if (matchIdx < 0 || !matches.length) return;
-      const start = matches[matchIdx]!, end = start + findInput.value.length;
+      const start = matches[matchIdx]!,
+        end = start + findInput.value.length;
       editor.setSelectionRange(start, end);
       // approximate, but enough to bring a match on screen in a wrapped textarea
       const line = editor.value.slice(0, start).split("\n").length - 1;
@@ -815,8 +882,11 @@ const tool: Tool = {
     }
     function replaceAll() {
       if (!matches.length) return;
-      const q = findInput.value, r = replaceInput.value, n = matches.length;
-      let out = "", last = 0;
+      const q = findInput.value,
+        r = replaceInput.value,
+        n = matches.length;
+      let out = "",
+        last = 0;
       for (const m of matches) {
         out += editor.value.slice(last, m) + r;
         last = m + q.length;
@@ -957,7 +1027,13 @@ const tool: Tool = {
     /* ---- boot ---- */
 
     const storedView = read(VIEW_KEY);
-    setView(narrowViewport.matches ? "preview" : storedView === "edit" || storedView === "split" ? storedView : "preview");
+    setView(
+      narrowViewport.matches
+        ? "preview"
+        : storedView === "edit" || storedView === "split"
+          ? storedView
+          : "preview",
+    );
     // A drawer opened on load would cover the page; start closed there.
     setToc(read(TOC_KEY) !== "0" && !isDrawer());
     previewPane.classList.toggle("light", light);

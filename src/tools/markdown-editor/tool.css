@@ -99,6 +99,8 @@
   border-color: var(--accent);
   color: var(--accent);
 }
+/* The contrast disc is half filled, and mirrored while the Light Document is on. */
+.tool-markdown-editor .light-btn svg path { fill: currentColor; }
 .tool-markdown-editor .light-btn.toggled svg { transform: scaleX(-1); }
 .tool-markdown-editor .format-btn[aria-busy] { opacity: 0.6; cursor: progress; }
 

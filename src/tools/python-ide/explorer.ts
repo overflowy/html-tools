@@ -2,7 +2,8 @@
 // the Packages section. Pure rendering: the Tool hands them data and
 // callbacks and re-renders on change.
 
-import { ICON_CHEVRON, ICON_FILE, ICON_FOLDER, ICON_FOLDER_OPEN, ICON_PYTHON, ICON_TRASH } from "./icons";
+import { fileIcon, ICON_FOLDER, ICON_FOLDER_OPEN } from "./file-icons";
+import { ICON_CHEVRON, ICON_TRASH } from "./icons";
 import { basename, dirname } from "./project";
 
 export interface TreeCallbacks {
@@ -78,8 +79,7 @@ export function renderTree(
       row.className = "tree-row file" + (path === active ? " active" : "");
       row.style.setProperty("--depth", String(depth));
       row.dataset.path = path;
-      const py = /\.pyi?$/i.test(path);
-      row.innerHTML = `<span class="chev"></span><span class="icon${py ? " py" : ""}">${py ? ICON_PYTHON : ICON_FILE}</span><span class="name"></span>`;
+      row.innerHTML = `<span class="chev"></span><span class="icon">${fileIcon(path)}</span><span class="name"></span>`;
       row.querySelector(".name")!.textContent = basename(path);
       row.addEventListener("click", () => cb.onOpen(path));
       row.addEventListener("contextmenu", (e) => {

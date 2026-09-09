@@ -9,6 +9,11 @@ import DOMPurify from "dompurify";
 import hljs from "highlight.js/lib/common";
 import { extractMath, injectMath, type MathItem } from "./math";
 import { katex, mermaid } from "./engines";
+import infoIcon from "lucide-static/icons/info.svg";
+import lightbulbIcon from "lucide-static/icons/lightbulb.svg";
+import messageSquareWarningIcon from "lucide-static/icons/message-square-warning.svg";
+import octagonAlertIcon from "lucide-static/icons/octagon-alert.svg";
+import triangleAlertIcon from "lucide-static/icons/triangle-alert.svg";
 
 export interface RenderOptions {
   /** Light Document: diagrams bake their palette into the SVG, so they need to know. */
@@ -88,14 +93,14 @@ md.use({
 
 /* ---- callouts: > [!NOTE] and its kin ---- */
 
-// Callout icons on a 16px grid: a bookmark, a sparkle, a framed mark, a diamond mark, a barred disc.
-const CO = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">';
+// Callout icons, the ones GitHub gives each kind: an info disc, a bulb, a
+// speech bubble with a mark, a triangle with a mark, an octagon with a mark.
 const CALLOUTS: Record<string, [string, string]> = {
-  note: ["Note", CO + '<path d="M4 2h8v12l-4-3-4 3z"/></svg>'],
-  tip: ["Tip", CO + '<path d="M8 2l1.5 4.5L14 8l-4.5 1.5L8 14l-1.5-4.5L2 8l4.5-1.5z"/></svg>'],
-  important: ["Important", CO + '<rect x="2" y="2" width="12" height="12" rx="3"/><path d="M8 5v4M8 11.5v.01"/></svg>'],
-  warning: ["Warning", CO + '<path d="M8 1.5l6.5 6.5-6.5 6.5L1.5 8z"/><path d="M8 5v3.5M8 11v.01"/></svg>'],
-  caution: ["Caution", CO + '<circle cx="8" cy="8" r="6"/><path d="M3.8 3.8l8.4 8.4"/></svg>'],
+  note: ["Note", infoIcon],
+  tip: ["Tip", lightbulbIcon],
+  important: ["Important", messageSquareWarningIcon],
+  warning: ["Warning", triangleAlertIcon],
+  caution: ["Caution", octagonAlertIcon],
 };
 
 function transformCallouts(root: HTMLElement) {

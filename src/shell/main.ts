@@ -2,13 +2,18 @@ import "./theme.css";
 import "./shell.css";
 import { tools } from "../registry";
 import type { Tool } from "./types";
+import menuIcon from "lucide-static/icons/menu.svg";
+import panelLeftIcon from "lucide-static/icons/panel-left.svg";
 
 const LAST_KEY = "html-tools:last";
 const SIDEBAR_KEY = "html-tools:sidebar";
 
 // One icon for both ends of the collapse: hide from the sidebar's corner,
 // show from the main pane's, so the control reads as moving between them.
-const PANEL_ICON = `<svg class="icon-panel" viewBox="0 0 16 16" aria-hidden="true"><rect x="1.75" y="2.75" width="12.5" height="10.5" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M6 2.75v10.5" stroke="currentColor" stroke-width="1.5"/></svg>`;
+// The Narrow Layout's button shows the hamburger instead; the classes let
+// the CSS pick.
+const PANEL_ICON = panelLeftIcon.replace("<svg", '<svg class="icon-panel"');
+const MENU_ICON = menuIcon.replace("<svg", '<svg class="icon-menu"');
 
 document.body.innerHTML = `
   <aside class="sidebar" id="sidebar">
@@ -33,7 +38,7 @@ document.body.innerHTML = `
   <div class="content">
     <header class="tool-header">
       <button class="menu-btn" type="button" aria-label="Show sidebar" title="Show sidebar" aria-controls="sidebar" aria-expanded="false">
-        <svg class="icon-menu" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+        ${MENU_ICON}
         ${PANEL_ICON}
       </button>
       <div class="tool-title">
