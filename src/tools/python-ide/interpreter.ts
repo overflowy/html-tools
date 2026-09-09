@@ -40,6 +40,10 @@ export class Interpreter {
     this.worker = new Worker(scriptDataUrl(PYIDE_PY_WORKER_SRC), { type: "module", name: "python-interpreter" });
     this.worker.onmessage = (ev: MessageEvent<PyResponse>) => this.receive(ev.data);
     this.worker.onerror = (ev) => {
+      // Firefox can report an empty worker exception while terminate() tears
+      // Pyodide down. It is expected, and must not reach the page console.
+      ev.preventDefault();
+      if (this.dead) return;
       const message = "The interpreter crashed: " + (ev.message || "unknown error");
       this.failAll(new Error(message));
       this.events.onCrash(message);
