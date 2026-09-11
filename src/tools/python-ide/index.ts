@@ -23,7 +23,7 @@ const EXPLORER_WIDTH_KEY = "html-tools:python-ide:explorer-width";
 const PANEL_HEIGHT_KEY = "html-tools:python-ide:panel-height";
 const FIGURES_WIDTH_KEY = "html-tools:python-ide:figures-width";
 const PANEL_OPEN_KEY = "html-tools:python-ide:panel-open";
-const TYPE_HINTS_KEY = "html-tools:python-ide:type-hints";
+const INLAY_HINTS_KEY = "html-tools:python-ide:inlay-hints";
 const PENDING_KEY = "html-tools:python-ide:pending";
 
 /** An edit the page went away with before its save; see `journalPending`. */
@@ -151,7 +151,7 @@ const tool: Tool = {
               <button type="button" class="stop-btn" title="Stop the program" hidden>${I.ICON_STOP}<span>Stop</span></button>
               <button type="button" class="icon restart-btn" title="Restart the interpreter">${I.ICON_RESTART}</button>
               <button type="button" class="icon format-btn" title="Format with Ruff (Shift+Alt+F)">${I.ICON_FORMAT}</button>
-              <button type="button" class="icon hints-btn" title="Infer types" aria-pressed="false">${I.ICON_TYPE_HINTS}</button>
+              <button type="button" class="icon inlay-hints-btn" title="Inlay hints" aria-pressed="false">${I.ICON_INLAY_HINTS}</button>
               <button type="button" class="icon stdin-btn" title="Stdin: text for input() to read first" aria-pressed="false">${I.ICON_STDIN}</button>
               <span class="spacer"></span>
               <button type="button" class="icon sidebar-btn" title="Hide sidebar" aria-label="Hide sidebar" aria-pressed="true">${I.ICON_SIDEBAR}</button>
@@ -326,7 +326,7 @@ class Ide {
     registerToml(monaco);
     configureJson(monaco);
     this.editor = createEditor(monaco, this.$(".editor-host"), 4);
-    this.setTypeHints(read(TYPE_HINTS_KEY) === "on");
+    this.setInlayHints(read(INLAY_HINTS_KEY) === "on");
     this.editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => void this.run());
     this.editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyP, () => this.openQuickOpen());
     this.editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyJ, () => this.togglePanel());
@@ -2032,7 +2032,7 @@ class Ide {
       $(".stdin-btn").setAttribute("aria-pressed", String(!row.hidden));
       if (!row.hidden) $(".stdin").focus();
     });
-    $(".hints-btn").addEventListener("click", () => this.setTypeHints($(".hints-btn").getAttribute("aria-pressed") !== "true"));
+    $(".inlay-hints-btn").addEventListener("click", () => this.setInlayHints($(".inlay-hints-btn").getAttribute("aria-pressed") !== "true"));
     $(".figures-btn").addEventListener("click", () => {
       const fig = $(".figures");
       fig.hidden = !fig.hidden;
@@ -2146,11 +2146,11 @@ class Ide {
   }
 
   /** Shows or hides the panel (Terminal, Figures, Problems). A Preference. */
-  /** Type Hints on or off: Monaco stops asking the Checker for inlay hints when off. A Preference, off by default. */
-  private setTypeHints(on: boolean) {
+  /** Inlay Hints on or off: Monaco stops asking the Checker for them when off. A Preference, off by default. */
+  private setInlayHints(on: boolean) {
     this.editor?.updateOptions({ inlayHints: { enabled: on ? "on" : "off" } });
-    this.$(".hints-btn").setAttribute("aria-pressed", String(on));
-    write(TYPE_HINTS_KEY, on ? "on" : "off");
+    this.$(".inlay-hints-btn").setAttribute("aria-pressed", String(on));
+    write(INLAY_HINTS_KEY, on ? "on" : "off");
   }
 
   private togglePanel(open = this.$(".panel").hidden, tab?: PanelTab) {

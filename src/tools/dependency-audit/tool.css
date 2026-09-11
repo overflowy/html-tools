@@ -82,9 +82,13 @@
   resize: vertical;
   width: 100%;
 }
-/* The pane clips its rounded corners, so the focus ring lives on the pane border rather than inside the textarea. */
-.tool-dependency-audit .src:focus { box-shadow: none; border: none; }
-.tool-dependency-audit .input-pane:focus-within { outline: var(--ring-line); outline-offset: -1px; border-color: transparent; box-shadow: var(--ring-halo); }
+/* The pane clips its rounded corners, so focusing the textarea draws its ring
+   on the pane border rather than inside it. The theme's own ring on the
+   textarea is dropped whole, its outline included, or the two would show at
+   once. Keyed to the textarea and not to :focus-within, so a button in the
+   pane head keeps just its own ring instead of ringing the pane too. */
+.tool-dependency-audit .src:focus { outline: none; box-shadow: none; border: none; }
+.tool-dependency-audit .input-pane:has(.src:focus) { outline: var(--ring-line); outline-offset: -1px; border-color: transparent; box-shadow: var(--ring-halo); }
 
 .tool-dependency-audit .files {
   display: flex;
