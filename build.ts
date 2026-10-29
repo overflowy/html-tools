@@ -115,6 +115,16 @@ for (const output of result.outputs) {
   else js += text;
 }
 
+// Fonts: CSS imported from the script bundle keeps each url() as the font's
+// path on disk, and each one goes in as a data: URL.
+const fonts = new Map<string, string>();
+for (const [, path] of css.matchAll(/url\(([^)]+\.woff2)\)/g)) {
+  const file = Bun.file(path!);
+  if (!(await file.exists())) throw new Error("font not found: " + path);
+  fonts.set(path!, "data:font/woff2;base64," + Buffer.from(await file.arrayBuffer()).toString("base64"));
+}
+css = css.replace(/url\(([^)]+\.woff2)\)/g, (_, path: string) => "url(" + fonts.get(path) + ")");
+
 // Replacement callbacks: a string replacement would expand `$&` and friends,
 // and a minified bundle is bound to contain one somewhere.
 const template = await Bun.file("src/index.html").text();

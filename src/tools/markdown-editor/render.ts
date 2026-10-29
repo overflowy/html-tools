@@ -176,11 +176,14 @@ let mermaidSeq = 0;
 async function drawDiagrams(jobs: { div: HTMLElement; src: string }[], light: boolean) {
   const api = mermaid();
   if (!api) return;
+  const sans = getComputedStyle(document.documentElement).getPropertyValue("--sans").trim();
+  // Mermaid sizes every box to its label as measured now, so the face has to be in.
+  await document.fonts.load("16px " + sans);
   api.initialize({
     startOnLoad: false,
     securityLevel: "strict",
     theme: light ? "default" : "dark",
-    fontFamily: "-apple-system, BlinkMacSystemFont, Segoe UI, system-ui, sans-serif",
+    fontFamily: sans,
   });
   for (const { div, src } of jobs) {
     const id = "mmd-" + ++mermaidSeq;

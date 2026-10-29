@@ -108,6 +108,13 @@ function formatBytes(n: number): string {
   return (n / 1024 / 1024).toFixed(1) + " MB";
 }
 
+/** The Editor and the Terminal measure their character cell once, when
+ *  created, so the monospace faces they draw in have to be in by then. */
+function monoFontsLoaded(): Promise<unknown> {
+  const mono = getComputedStyle(document.documentElement).getPropertyValue("--mono").trim();
+  return Promise.all(["13px", "italic 13px", "600 13px"].map((s) => document.fonts.load(s + " " + mono)));
+}
+
 const tool: Tool = {
   id: "python-ide",
   name: "Python IDE",
@@ -320,7 +327,7 @@ class Ide {
   }
 
   private async setupEditor() {
-    const monaco = await loadMonaco(this.progress("Monaco"));
+    const [monaco] = await Promise.all([loadMonaco(this.progress("Monaco")), monoFontsLoaded()]);
     this.monaco = monaco;
     defineTheme(monaco);
     registerToml(monaco);
@@ -345,7 +352,7 @@ class Ide {
   }
 
   private async setupTerminal() {
-    const api = await loadTerminal(this.progress("xterm"));
+    const [api] = await Promise.all([loadTerminal(this.progress("xterm")), monoFontsLoaded()]);
     this.terminal = new IdeTerminal(api, this.$(".terminal-host"), {
       onLine: (line, mode) => this.onTerminalLine(line, mode),
       onInterrupt: () => void this.stop(),
