@@ -4,7 +4,7 @@
 
 import type { EngineAsset } from "../../shared/engines";
 
-export { cacheAvailable, clearCached, getEngine, listCached, type CachedEngine, type EngineAsset, type OnProgress, type Progress } from "../../shared/engines";
+export { cacheAvailable, cachedFamilies, clearCached, getEngine, listCached, type CachedEngine, type EngineAsset, type OnProgress, type Progress } from "../../shared/engines";
 
 export const ANYDOC_VERSION = "0.2.4";
 export const PDF_INSPECTOR_VERSION = "1.17.0";

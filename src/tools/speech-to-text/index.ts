@@ -4,7 +4,7 @@ import ICON_MIC from "lucide-static/icons/mic.svg";
 import ICON_STOP from "lucide-static/icons/square.svg";
 import type { Tool } from "../../shell/types";
 import { Microphone, decodeFile, encodeWav } from "./audio";
-import { ENGINES, cacheAvailable, clearCached, getEngine, listCached, type Progress } from "./engines";
+import { ENGINES, cacheAvailable, cachedFamilies, clearCached, getEngine, listCached, type Progress } from "./engines";
 import { ENGINE_RATE } from "./resample";
 import { LANGUAGES, clock, keywordLines, languageName, toCues, toJson, toSrt, toText, toVtt, type Cue, type Word } from "./transcript";
 import { CANCELLED, SpeechWorker } from "./worker-client";
@@ -95,8 +95,7 @@ const tool: Tool = {
       <input type="file" class="file-input" accept="audio/*,video/*" hidden>
       <div class="empty-hint">
         <strong>Drop an audio or video file anywhere here</strong>, choose a file, or record from the microphone.
-        <span>Nothing you drop or say leaves the browser. The engine and its model (18 MB) are downloaded on first use and kept locally.</span>
-        <span>The language is detected unless you pick one.</span>
+        <span>Nothing you drop or say leaves the browser. The engine and its model (18 MB) download on first use and stay cached.</span>
       </div>
       <div class="progress">
         <span class="phase"></span>
@@ -107,7 +106,7 @@ const tool: Tool = {
       <div class="note" role="status">${ICON_INFO}<span class="note-text"></span></div>
       <div class="result">
         <div class="pane-head">
-          transcript
+          Transcript
           <span class="meta"></span>
           <span class="spacer"></span>
           <button type="button" class="copy-btn" title="Copy the transcript as text">Copy</button>
@@ -226,13 +225,13 @@ const tool: Tool = {
       }
       const rows = await listCached();
       if (rows.length === 0) {
-        enginesText.textContent = "No engines cached yet. They download on first use and stay here for next time.";
+        enginesText.textContent = "No engines cached";
         enginesClear.hidden = true;
         return;
       }
       enginesText.textContent = "Engines cached: " + formatBytes(rows.reduce((n, r) => n + r.bytes, 0));
       // The breakdown is a hover away, not in the way.
-      enginesText.title = rows.map((r) => r.label + " " + formatBytes(r.bytes)).join("\n");
+      enginesText.title = cachedFamilies(rows).map((f) => f.label + " " + formatBytes(f.bytes)).join("\n");
       enginesClear.hidden = false;
     }
     enginesClear.addEventListener("click", async () => {

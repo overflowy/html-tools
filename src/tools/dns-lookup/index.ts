@@ -44,7 +44,7 @@ function tableHtml(records: DnsRecord[]): string {
     '<td class="c-type"><span class="type-badge">' + esc(typeName(rec.type)) + "</span></td>" +
     '<td class="c-ttl" title="' + rec.TTL + ' seconds">' + esc(formatTtl(rec.TTL)) + "</td>" +
     '<td class="c-data">' + esc(rec.data) + "</td></tr>");
-  return '<table class="records"><thead><tr><th>name</th><th>type</th><th>ttl</th><th>data</th></tr></thead><tbody>' +
+  return '<table class="records"><thead><tr><th>Name</th><th>Type</th><th>TTL</th><th>Data</th></tr></thead><tbody>' +
     rows.join("") + "</tbody></table>";
 }
 
@@ -172,7 +172,7 @@ function responseHtml(name: string, type: string, r: DnsResponse, withAuthority:
 const tool: Tool = {
   id: "dns-lookup",
   name: "DNS Lookup",
-  subtitle: "Query DNS records through Cloudflare or Google DNS-over-HTTPS, list subdomains, check email authentication, read whois data over RDAP.",
+  subtitle: "Look up DNS records over HTTPS, find subdomains, check a domain's email setup, and read its whois.",
   keywords: ["dns", "lookup", "dig", "nslookup", "domain", "records", "mx", "txt", "cname", "nameserver", "ns", "subdomains", "reverse", "ptr", "doh", "dnssec", "resolver", "ip", "email", "spf", "dmarc", "dkim", "bimi", "mail", "whois", "rdap", "registrar", "expiry"],
   mount(el, ctx) {
     const typeOptions = TYPE_GROUPS.map((g) =>
@@ -195,18 +195,18 @@ const tool: Tool = {
         </div>
       </div>
       <div class="options">
-        <label class="opt">resolver <select class="resolver">${resolverOptions}</select></label>
-        <label class="opt"><input type="checkbox" class="opt-cd"> checking disabled (CD)</label>
+        <label class="opt">Resolver <select class="resolver">${resolverOptions}</select></label>
+        <label class="opt"><input type="checkbox" class="opt-cd"> Checking disabled (CD)</label>
         <label class="opt"><input type="checkbox" class="opt-do"> DNSSEC OK (DO)</label>
       </div>
       <div class="panes">
         <section class="pane">
-          <div class="pane-head"><span class="results-title">records</span><span class="spacer"></span><span class="flags"></span></div>
-          <div class="results"><p class="note">Enter a name and press Lookup.</p></div>
-          <div class="statusbar"><span class="dot">&#9679;</span><span class="status-text">Waiting for a query</span></div>
+          <div class="pane-head"><span class="results-title">Records</span><span class="spacer"></span><span class="flags"></span></div>
+          <div class="results"></div>
+          <div class="statusbar"><span class="status-text"></span></div>
         </section>
         <section class="pane">
-          <div class="pane-head"><span>raw response</span><span class="spacer"></span><button class="btn-copy primary" type="button">Copy</button></div>
+          <div class="pane-head"><span>Raw response</span><span class="spacer"></span><button class="btn-copy primary" type="button">Copy</button></div>
           <pre class="raw"></pre>
         </section>
       </div>`;
@@ -310,7 +310,7 @@ const tool: Tool = {
       const arpa = reverseName(q.name);
       const qname = arpa ?? q.name;
       const qtype = arpa ? "PTR" : q.type;
-      $resultsTitle.textContent = arpa ? "reverse lookup" : "records";
+      $resultsTitle.textContent = arpa ? "Reverse lookup" : "Records";
       setStatus("", "Querying " + qname + " " + qtype + " via " + q.resolver.label + "…");
       try {
         const { response, ms } = await lookup(q.resolver, qname, qtype, q.opts, ctrl.signal);
@@ -338,7 +338,7 @@ const tool: Tool = {
         return;
       }
       const ctrl = begin();
-      $resultsTitle.textContent = "all types";
+      $resultsTitle.textContent = "All types";
       $flags.innerHTML = "";
       $results.innerHTML = '<div class="groups">' + COMMON_TYPES.map((t) =>
         '<details class="group" data-type="' + t + '"><summary><span class="type-badge">' + t +
@@ -401,7 +401,7 @@ const tool: Tool = {
         html += '<p class="note">' + (errors.length ? "No subdomains from the sources that answered." : "No subdomains found.") + "</p>";
         return html;
       }
-      html += '<table class="records subs"><thead><tr><th>name</th><th>ip</th></tr></thead><tbody>' +
+      html += '<table class="records subs"><thead><tr><th>Name</th><th>IP</th></tr></thead><tbody>' +
         hits.map((h) =>
           '<tr><td class="c-name"><button type="button" class="link" data-name="' + esc(h.name) + '" title="Look up ' + esc(h.name) + '">' + esc(h.name) + "</button></td>" +
           '<td class="c-ip">' + esc(h.ip) + "</td></tr>").join("") +
@@ -418,7 +418,7 @@ const tool: Tool = {
       }
       const ctrl = begin();
       const name = subdomainSearchName(q.name);
-      $resultsTitle.textContent = "subdomains of " + name;
+      $resultsTitle.textContent = "Subdomains of " + name;
       $flags.innerHTML = "";
       $results.innerHTML = "";
       showRaw(undefined);
@@ -484,7 +484,7 @@ const tool: Tool = {
         return;
       }
       const ctrl = begin();
-      $resultsTitle.textContent = "email authentication for " + q.name;
+      $resultsTitle.textContent = "Email authentication for " + q.name;
       $flags.innerHTML = "";
       $results.innerHTML = '<p class="note">Checking MX, SPF, DMARC, DKIM, and BIMI…</p>';
       showRaw(undefined);
@@ -567,7 +567,7 @@ const tool: Tool = {
       if (!q) return;
       const ctrl = begin();
       const isIp = reverseName(q.name) !== null;
-      $resultsTitle.textContent = "whois for " + q.name;
+      $resultsTitle.textContent = "Whois for " + q.name;
       $flags.innerHTML = "";
       $results.innerHTML = '<p class="note">Asking the registry…</p>';
       showRaw(undefined);

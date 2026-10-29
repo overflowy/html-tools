@@ -22,7 +22,7 @@ function formatBytes(n: number) {
 const tool: Tool = {
   id: "base64-to-image",
   name: "Base64 ⇄ Image",
-  subtitle: "Paste a base64 string, or paste/drop an image to get its base64.",
+  subtitle: "Turn base64 into an image, or an image into base64.",
   keywords: ["base64", "image", "decode", "encode", "convert", "data uri", "png", "preview"],
   mount(el) {
     el.innerHTML = `
@@ -32,7 +32,7 @@ const tool: Tool = {
           <button type="button" class="clear-btn">Clear</button>
           <span class="status"></span>
         </div>
-        <textarea class="b64-input" placeholder="Paste your base64 string or data URI here, or paste/drop an image to get its base64."></textarea>
+        <textarea class="b64-input" placeholder="Paste base64 or a data: URI, or paste or drop an image."></textarea>
         <div class="output">
           <div class="output-header">
             <div class="meta"></div>
@@ -97,7 +97,7 @@ const tool: Tool = {
       try {
         byteCount = atob(b64).length;
       } catch {
-        showError("Failed to decode base64. The string may be malformed or truncated.");
+        showError("Could not decode this base64. It may be cut short.");
         return;
       }
 
@@ -115,13 +115,13 @@ const tool: Tool = {
 
       preview.onload = () => {
         meta.textContent =
-          detected.mime + " • " + formatBytes(byteCount) + " • " +
+          detected.mime + " · " + formatBytes(byteCount) + " · " +
           preview.naturalWidth + " × " + preview.naturalHeight + " px";
         outputArea.style.display = "block";
-        status.textContent = "Decoded successfully";
+        status.textContent = "";
       };
       preview.onerror = () => {
-        showError("Decoded successfully, but the result is not a valid image. Check that the base64 actually represents image data.");
+        showError("The base64 decodes, but not to an image.");
       };
       preview.src = dataUri;
     }
@@ -158,7 +158,7 @@ const tool: Tool = {
         input.value = text;
         convert(text);
       } catch {
-        showError("Clipboard access denied. Paste manually into the text area instead.");
+        showError("The browser blocked clipboard access. Paste with the keyboard instead.");
       }
     });
 

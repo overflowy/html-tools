@@ -89,7 +89,7 @@ const textField = (cls: string, label: string, placeholder = "") =>
 const tool: Tool = {
   id: "qr-generator",
   name: "QR Code Generator",
-  subtitle: "Generate QR codes for links, WiFi, contacts, and more.",
+  subtitle: "Make a QR code and download it as PNG or SVG.",
   keywords: ["qr", "qr code", "generator", "wifi", "vcard", "contact", "barcode", "url", "link", "email", "sms", "phone", "geo", "share"],
   mount(el, ctx) {
     el.innerHTML = `
@@ -103,7 +103,7 @@ const tool: Tool = {
         <button type="button" role="tab" aria-selected="false" data-type="geo">Geo</button>
       </div>
       <div class="options">
-        <label class="opt">error correction
+        <label class="opt">Error correction
           <select class="opt-ecl">
             <option value="L">L · lowest</option>
             <option value="M" selected>M · medium</option>
@@ -111,20 +111,20 @@ const tool: Tool = {
             <option value="H">H · highest</option>
           </select>
         </label>
-        <label class="opt">size
+        <label class="opt">Size
           <input type="number" class="opt-size" value="512" min="64" max="4096" step="16"> px
         </label>
-        <label class="opt">code
+        <label class="opt">Code
           <span class="swatch"><input type="color" class="opt-fg" value="#000000"></span>
         </label>
-        <label class="opt">background
+        <label class="opt">Background
           <span class="swatch"><input type="color" class="opt-bg" value="#ffffff"></span>
         </label>
       </div>
       <div class="panes">
         <section class="pane">
           <div class="pane-head">
-            <span>input</span>
+            <span>Input</span>
             <span class="spacer"></span>
             <button class="btn-clear" type="button">Clear</button>
           </div>
@@ -134,52 +134,52 @@ const tool: Tool = {
                 placeholder="Type or paste any text or URL."></textarea>
             </div>
             <div class="form" data-form="wifi" hidden>
-              ${textField("f-wifi-ssid", "network name (SSID)")}
-              ${textField("f-wifi-pass", "password")}
-              <label class="field">security
+              ${textField("f-wifi-ssid", "Network name (SSID)")}
+              ${textField("f-wifi-pass", "Password")}
+              <label class="field">Security
                 <select class="f-wifi-auth">
                   <option value="WPA" selected>WPA / WPA2 / WPA3</option>
                   <option value="WEP">WEP</option>
-                  <option value="nopass">none (open network)</option>
+                  <option value="nopass">None (open network)</option>
                 </select>
               </label>
-              <label class="field check"><input type="checkbox" class="f-wifi-hidden">hidden network</label>
+              <label class="field check"><input type="checkbox" class="f-wifi-hidden">Hidden network</label>
             </div>
             <div class="form" data-form="contact" hidden>
               <div class="field-pair">
-                ${textField("f-ct-first", "first name")}
-                ${textField("f-ct-last", "last name")}
+                ${textField("f-ct-first", "First name")}
+                ${textField("f-ct-last", "Last name")}
               </div>
-              ${textField("f-ct-phone", "phone", "+1 555 0100")}
-              ${textField("f-ct-email", "email")}
-              ${textField("f-ct-org", "organization")}
-              ${textField("f-ct-title", "job title")}
-              ${textField("f-ct-url", "website", "https://")}
+              ${textField("f-ct-phone", "Phone", "+1 555 0100")}
+              ${textField("f-ct-email", "Email")}
+              ${textField("f-ct-org", "Organization")}
+              ${textField("f-ct-title", "Job title")}
+              ${textField("f-ct-url", "Website", "https://")}
             </div>
             <div class="form" data-form="email" hidden>
-              ${textField("f-em-to", "to", "someone@example.com")}
-              ${textField("f-em-subject", "subject")}
-              <label class="field">body<textarea class="f-em-body" spellcheck="false"></textarea></label>
+              ${textField("f-em-to", "To", "someone@example.com")}
+              ${textField("f-em-subject", "Subject")}
+              <label class="field">Body<textarea class="f-em-body" spellcheck="false"></textarea></label>
             </div>
             <div class="form" data-form="sms" hidden>
-              ${textField("f-sms-num", "phone number", "+1 555 0100")}
-              <label class="field">message<textarea class="f-sms-msg" spellcheck="false"></textarea></label>
+              ${textField("f-sms-num", "Phone number", "+1 555 0100")}
+              <label class="field">Message<textarea class="f-sms-msg" spellcheck="false"></textarea></label>
             </div>
             <div class="form" data-form="phone" hidden>
-              ${textField("f-ph-num", "phone number", "+1 555 0100")}
+              ${textField("f-ph-num", "Phone number", "+1 555 0100")}
             </div>
             <div class="form" data-form="geo" hidden>
               <div class="field-pair">
-                ${textField("f-geo-lat", "latitude", "52.520008")}
-                ${textField("f-geo-lng", "longitude", "13.404954")}
+                ${textField("f-geo-lat", "Latitude", "52.520008")}
+                ${textField("f-geo-lng", "Longitude", "13.404954")}
               </div>
             </div>
           </div>
-          <div class="statusbar"><span class="dot">&#9679;</span><span class="status-text">Waiting for input</span></div>
+          <div class="statusbar"><span class="status-text"></span></div>
         </section>
         <section class="pane">
           <div class="pane-head">
-            <span>preview</span>
+            <span>Preview</span>
             <span class="spacer"></span>
             <button class="btn-png" type="button"><span class="wide-only">Download </span>PNG</button>
             <button class="btn-svg" type="button"><span class="wide-only">Download </span>SVG</button>
@@ -187,7 +187,6 @@ const tool: Tool = {
           </div>
           <div class="preview-frame">
             <canvas class="qr-canvas" hidden></canvas>
-            <div class="preview-empty">Your QR code will appear here</div>
           </div>
         </section>
       </div>`;
@@ -196,7 +195,6 @@ const tool: Tool = {
     const $status = $(".statusbar");
     const $statusText = $(".status-text");
     const $canvas = $(".qr-canvas") as HTMLCanvasElement;
-    const $empty = $(".preview-empty");
     const $ecl = $(".opt-ecl") as HTMLSelectElement;
     const $size = $(".opt-size") as HTMLInputElement;
     const $fg = $(".opt-fg") as HTMLInputElement;
@@ -284,10 +282,9 @@ const tool: Tool = {
       return fits;
     }
 
-    function showEmpty(msg: string, kind = "") {
+    function clearPreview(msg: string, kind = "") {
       lastQr = null;
       $canvas.hidden = true;
-      $empty.style.display = "";
       setStatus(kind, msg);
     }
 
@@ -295,11 +292,11 @@ const tool: Tool = {
       const composed = composePayload();
       const linked = publishState();
       if ("waiting" in composed) {
-        showEmpty("Waiting for input");
+        clearPreview("");
         return;
       }
       if ("error" in composed) {
-        showEmpty(composed.error, "error");
+        clearPreview(composed.error, "error");
         return;
       }
       try {
@@ -307,13 +304,12 @@ const tool: Tool = {
         lastQr = qr;
         const px = drawCanvas($canvas, qr, clampedSize(), $fg.value, $bg.value);
         $canvas.hidden = false;
-        $empty.style.display = "none";
         const warning = contrastWarning($fg.value, $bg.value);
         setStatus(warning ? "warn" : "ok",
           "v" + qr.version + " · " + qr.size + "×" + qr.size + " modules · " + qr.mode + " mode · " + px + "×" + px + " px" +
           (warning ? " · " + warning : "") + (linked ? "" : " · too large to keep in the URL"));
       } catch (e) {
-        showEmpty((e as Error).message, "error");
+        clearPreview((e as Error).message, "error");
       }
     }
 

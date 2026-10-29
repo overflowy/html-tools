@@ -235,11 +235,9 @@
   border-bottom: 1px solid var(--border);
   font-size: 12px;
   color: var(--text-muted);
-  font-family: var(--mono);
   flex-wrap: wrap;
 }
 .tool-doc-to-markdown .pane-head .spacer { flex: 1; }
-.tool-doc-to-markdown .pane-head button { font-family: var(--sans); }
 .tool-doc-to-markdown .pane-head .meta {
   overflow: hidden;
   text-overflow: ellipsis;

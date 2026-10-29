@@ -13,6 +13,9 @@ const STATE_CAP = 30000;
 
 const BANDS: Band[] = ["critical", "high", "moderate", "low", "unknown"];
 
+// Shown while there are no results: what leaves the browser when you audit.
+const PRIVACY_NOTE = "An audit sends package names and versions to OSV.dev, and nothing else.";
+
 function esc(s: string): string {
   return s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
 }
@@ -38,7 +41,7 @@ function advisoryHtml(ap: AuditedPackage, index: number): string {
     (advisory.summary ? '<p class="adv-summary">' + esc(advisory.summary) + "</p>" : "") +
     (fixText ? '<p class="adv-fix ' + (fix.fixed ? "has-fix" : "") + '">' + esc(fixText) + "</p>" : "") +
     failed +
-    '<details class="raw"><summary>raw record' + (others.length ? "s (" + others.map(esc).join(", ") + ")" : "") + "</summary>" +
+    '<details class="raw"><summary>Raw record' + (others.length ? "s (" + others.map(esc).join(", ") + ")" : "") + "</summary>" +
     '<div class="raw-body"><button type="button" class="btn-copy-raw inline" data-id="' + esc(advisory.id) + '">Copy JSON</button>' +
     '<pre class="raw-json">' + esc(JSON.stringify(advisory.records.length === 1 ? advisory.records[0] : advisory.records, null, 2)) + "</pre></div></details></div>";
 }
@@ -84,7 +87,7 @@ function lockfileHtml(r: LockfileReport, index: number): string {
 const tool: Tool = {
   id: "dependency-audit",
   name: "Dependency Audit",
-  subtitle: "Check every package in a lockfile against OSV.dev: package-lock.json, yarn.lock, pnpm-lock.yaml, bun.lock, and uv.lock, pasted, dropped, or fetched from GitHub.",
+  subtitle: "Check every package in a lockfile against the OSV.dev vulnerability database.",
   keywords: ["vulnerability", "vulnerabilities", "cve", "ghsa", "osv", "security", "audit", "npm", "pypi", "python", "javascript", "lockfile",
     "package-lock", "yarn", "pnpm", "bun", "uv", "dependencies", "packages", "advisory"],
   mount(el, ctx) {
@@ -96,7 +99,7 @@ const tool: Tool = {
       </div>
       <section class="pane input-pane">
         <div class="pane-head">
-          <span>lockfile</span><span class="kind-label"></span>
+          <span>Lockfile</span><span class="kind-label"></span>
           <span class="spacer"></span>
           <button class="btn-paste" type="button">Paste<span class="wide-only"> from clipboard</span></button>
           <button class="btn-choose" type="button">Choose<span class="wide-only"> files</span>…</button>
@@ -104,23 +107,23 @@ const tool: Tool = {
           <button class="btn-audit primary" type="button">Audit</button>
         </div>
         <textarea class="src" spellcheck="false" autocapitalize="off" autocomplete="off"
-          placeholder="Paste a lockfile: package-lock.json, yarn.lock, pnpm-lock.yaml, bun.lock, or uv.lock. Or drop lockfiles anywhere on this tool."></textarea>
+          placeholder="package-lock.json, yarn.lock, pnpm-lock.yaml, bun.lock, or uv.lock. Paste one here, or drop files anywhere."></textarea>
         <div class="files" hidden></div>
         <input type="file" class="file-input" multiple hidden>
       </section>
       <div class="filters" hidden>
         <span class="filter-group sev-filters">${BANDS.map((b) => '<label class="opt"><input type="checkbox" class="f-sev" value="' + b + '" checked> <span class="sev ' + b + '">' + b + "</span></label>").join("")}</span>
-        <label class="opt">scope <select class="f-scope"><option value="a">all</option><option value="d">direct only</option><option value="t">transitive only</option></select></label>
-        <label class="opt">groups <select class="f-group"><option value="a">all</option><option value="p">production only</option></select></label>
-        <label class="opt f-file-wrap" hidden>lockfile <select class="f-file"></select></label>
+        <label class="opt">Scope <select class="f-scope"><option value="a">All</option><option value="d">Direct only</option><option value="t">Transitive only</option></select></label>
+        <label class="opt">Groups <select class="f-group"><option value="a">All</option><option value="p">Production only</option></select></label>
+        <label class="opt f-file-wrap" hidden>Lockfile <select class="f-file"></select></label>
       </div>
       <section class="pane results-pane">
         <div class="pane-head">
-          <span class="results-title">advisories</span><span class="spacer"></span>
+          <span class="results-title">Advisories</span><span class="spacer"></span>
           <button class="btn-markdown" type="button" disabled>Copy<span class="wide-only"> as Markdown</span></button>
         </div>
-        <div class="results"><p class="note">Paste or drop a lockfile, or name a GitHub repository, then press Audit. Package names and versions are sent to OSV.dev; nothing else leaves the browser.</p></div>
-        <div class="statusbar"><span class="dot">&#9679;</span><span class="status-text">Waiting for a lockfile</span></div>
+        <div class="results"><p class="note">${PRIVACY_NOTE}</p></div>
+        <div class="statusbar"><span class="status-text"></span></div>
       </section>`;
 
     const $ = (sel: string) => el.querySelector(sel) as HTMLElement;
@@ -251,7 +254,7 @@ const tool: Tool = {
 
     function renderResult(r: AuditResult, ms: number) {
       result = r;
-      $resultsTitle.innerHTML = "advisories" + (source?.kind === "repo" ? " · " + link(sourcePage(source), sourceLabel(source)) : "");
+      $resultsTitle.innerHTML = "Advisories" + (source?.kind === "repo" ? " · " + link(sourcePage(source), sourceLabel(source)) : "");
       $results.innerHTML = r.lockfiles.map(lockfileHtml).join("");
       r.lockfiles.forEach((lf, i) => {
         const node = $results.querySelector('.lockfile[data-file="' + i + '"]') as HTMLElement;
@@ -261,7 +264,7 @@ const tool: Tool = {
       $filters.hidden = false;
       const readable = r.lockfiles.filter((lf) => lf.parsed);
       $fileWrap.hidden = r.lockfiles.length < 2;
-      $file.innerHTML = '<option value="">all</option>' + r.lockfiles.map((lf, i) => '<option value="' + i + '">' + esc(lf.name) + "</option>").join("");
+      $file.innerHTML = '<option value="">All</option>' + r.lockfiles.map((lf, i) => '<option value="' + i + '">' + esc(lf.name) + "</option>").join("");
       $file.value = "";
       $btnMarkdown.disabled = false;
       applyFilters();
@@ -296,7 +299,7 @@ const tool: Tool = {
     function fail(ctrl: AbortController, e: unknown) {
       if (ctrl.signal.aborted) return;
       const msg = e instanceof Error ? e.message : String(e);
-      $resultsTitle.textContent = "advisories";
+      $resultsTitle.textContent = "Advisories";
       $results.innerHTML = '<div class="error-box">' + esc(msg) + "</div>";
       $filters.hidden = true;
       $btnMarkdown.disabled = true;
@@ -314,7 +317,7 @@ const tool: Tool = {
       const started = performance.now();
       const fits = publishState();
       setStatus("", "Reading " + plural(files.length, "lockfile") + "…");
-      $results.innerHTML = '<p class="note">Reading ' + plural(files.length, "lockfile") + "…</p>";
+      $results.replaceChildren();
       const r = await runAudit(files, browserFetch, ctrl.signal, (msg) => {
         if (!ctrl.signal.aborted) setStatus("", msg);
       });
@@ -339,7 +342,7 @@ const tool: Tool = {
       const ctrl = begin();
       try {
         setStatus("", "Fetching lockfiles from " + sourceLabel(src) + "…");
-        $results.innerHTML = '<p class="note">Fetching from ' + esc(sourceLabel(src)) + "…</p>";
+        $results.replaceChildren();
         const files: InputFile[] = [];
         if (src.kind === "file") {
           const text = await fetchText(src.url, ctrl.signal);
@@ -414,7 +417,7 @@ const tool: Tool = {
             publishState();
             const bad = loaded.filter((x) => !detectKind(x.text, x.name).kind);
             setStatus(bad.length ? "error" : "", plural(loaded.length, "file") + " loaded" +
-              (bad.length ? " · " + bad.map((x) => x.name).join(", ") + ": " + (detectKind(bad[0]!.text, bad[0]!.name) as { refusal: string }).refusal : " · press Audit"));
+              (bad.length ? " · " + bad.map((x) => x.name).join(", ") + ": " + (detectKind(bad[0]!.text, bad[0]!.name) as { refusal: string }).refusal : ""));
           }
         });
       }
@@ -440,9 +443,9 @@ const tool: Tool = {
         $src.value = await navigator.clipboard.readText();
         source = null;
         syncKindLabel();
-        setStatus("", "Pasted · press Audit");
+        setStatus("", "");
       } catch {
-        setStatus("error", "Clipboard access denied. Paste manually into the text area instead.");
+        setStatus("error", "The browser blocked clipboard access. Paste with the keyboard instead.");
       }
     });
     $(".btn-clear").addEventListener("click", () => {
@@ -454,11 +457,11 @@ const tool: Tool = {
       $repo.value = "";
       syncKindLabel();
       renderFiles();
-      $resultsTitle.textContent = "advisories";
-      $results.innerHTML = '<p class="note">Paste or drop a lockfile, or name a GitHub repository, then press Audit.</p>';
+      $resultsTitle.textContent = "Advisories";
+      $results.innerHTML = '<p class="note">' + PRIVACY_NOTE + "</p>";
       $filters.hidden = true;
       $btnMarkdown.disabled = true;
-      setStatus("", "Waiting for a lockfile");
+      setStatus("", "");
       publishState();
       $src.focus();
     });

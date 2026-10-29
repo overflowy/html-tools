@@ -66,7 +66,7 @@ const tool: Tool = {
   mount(el) {
     const cardHtml = (row: Row) => `
       <section class="pane" data-row="${row}">
-        <div class="pane-head"><span>${ROW_LABEL[row].toLowerCase()}</span><span class="spacer"></span><button class="btn-copy" type="button" disabled>Copy</button></div>
+        <div class="pane-head"><span>${ROW_LABEL[row]}</span><span class="spacer"></span><button class="btn-copy" type="button" disabled>Copy</button></div>
         <div class="value"></div>
       </section>`;
     el.innerHTML = `

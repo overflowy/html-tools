@@ -20,19 +20,19 @@ const tool: Tool = {
   mount(el, ctx) {
     el.innerHTML = `
       <div class="options">
-        <label class="opt">indent
+        <label class="opt">Indent
           <select class="opt-indent">
             <option value="2">2 spaces</option>
             <option value="4" selected>4 spaces</option>
-            <option value="tab">tab</option>
-            <option value="off">off</option>
+            <option value="tab">Tab</option>
+            <option value="off">Off</option>
           </select>
         </label>
       </div>
       <div class="panes">
         <section class="pane">
           <div class="pane-head">
-            <span>encoded</span>
+            <span>Encoded</span>
             <span class="spacer"></span>
             <button class="btn-paste-enc" type="button">Paste<span class="wide-only"> from clipboard</span></button>
             <button class="btn-clear-enc" type="button">Clear</button>
@@ -40,11 +40,11 @@ const tool: Tool = {
           </div>
           <textarea class="src enc" spellcheck="false" autocapitalize="off" autocomplete="off"
             placeholder="Paste an LZString-compressed base64 save here to decode it."></textarea>
-          <div class="statusbar enc-status"><span class="dot">&#9679;</span><span class="status-text">Waiting for input</span></div>
+          <div class="statusbar enc-status"><span class="status-text"></span></div>
         </section>
         <section class="pane">
           <div class="pane-head">
-            <span>decoded</span>
+            <span>Decoded</span>
             <span class="spacer"></span>
             <button class="btn-paste-dec" type="button">Paste<span class="wide-only"> from clipboard</span></button>
             <button class="btn-clear-dec" type="button">Clear</button>
@@ -52,7 +52,7 @@ const tool: Tool = {
           </div>
           <textarea class="src dec" spellcheck="false" autocapitalize="off" autocomplete="off"
             placeholder="Paste or edit JSON here to encode it."></textarea>
-          <div class="statusbar dec-status"><span class="dot">&#9679;</span><span class="status-text">Waiting for input</span></div>
+          <div class="statusbar dec-status"><span class="status-text"></span></div>
         </section>
       </div>`;
 
@@ -91,7 +91,7 @@ const tool: Tool = {
       const raw = $enc.value.replace(/\s+/g, "");
       const linked = publishState();
       if (!raw) {
-        setStatus($encStatus, "", "Waiting for input");
+        setStatus($encStatus, "", "");
         return;
       }
       let decoded: string | null = null;
@@ -117,13 +117,13 @@ const tool: Tool = {
       $dec.value = out;
       setStatus($encStatus, "ok", formatBytes(raw.length) + " decoded to " + formatBytes(out.length) + " (" + note + ")" +
         (linked ? "" : " · too large to keep in the URL"));
-      setStatus($decStatus, "", "Decoded output");
+      setStatus($decStatus, "", "");
     }
 
     function encode() {
       const raw = $dec.value.trim();
       if (!raw) {
-        setStatus($decStatus, "", "Waiting for input");
+        setStatus($decStatus, "", "");
         return;
       }
       let data: string;
@@ -170,7 +170,7 @@ const tool: Tool = {
         area.value = await navigator.clipboard.readText();
         run();
       } catch {
-        setStatus(bar, "error", "Clipboard access denied. Paste manually into the text area instead.");
+        setStatus(bar, "error", "The browser blocked clipboard access. Paste with the keyboard instead.");
       }
     }
 
@@ -190,12 +190,12 @@ const tool: Tool = {
     (el.querySelector(".btn-clear-enc") as HTMLButtonElement).addEventListener("click", () => {
       $enc.value = "";
       publishState();
-      setStatus($encStatus, "", "Waiting for input");
+      setStatus($encStatus, "", "");
       $enc.focus();
     });
     (el.querySelector(".btn-clear-dec") as HTMLButtonElement).addEventListener("click", () => {
       $dec.value = "";
-      setStatus($decStatus, "", "Waiting for input");
+      setStatus($decStatus, "", "");
       $dec.focus();
     });
   },

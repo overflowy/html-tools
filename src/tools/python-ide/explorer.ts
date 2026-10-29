@@ -167,7 +167,7 @@ export function renderPackages(
   if (specs.length === 0) {
     const empty = document.createElement("div");
     empty.className = "pkg-empty";
-    empty.textContent = "No dependencies yet. Add one above.";
+    empty.textContent = "No dependencies";
     direct.appendChild(empty);
   }
   transitive.replaceChildren();

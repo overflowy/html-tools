@@ -118,7 +118,7 @@ function monoFontsLoaded(): Promise<unknown> {
 const tool: Tool = {
   id: "python-ide",
   name: "Python IDE",
-  subtitle: "Edit and run Python projects in the browser: Pyodide, Pyright, Ruff, and a terminal, with packages per project.",
+  subtitle: "Write and run Python in the browser, checked by Pyright and formatted by Ruff, with packages per project.",
   keywords: ["python", "ide", "pyodide", "pyright", "ruff", "editor", "repl", "terminal", "pip", "notebook", "matplotlib"],
   fullHeight: true,
   mount(el, ctx) {

@@ -112,6 +112,24 @@ export async function listCached(): Promise<CachedEngine[]> {
   }
 }
 
+/**
+ * The cached Engines grouped by what they are part of, for a tooltip. An
+ * engine split into many files (Monaco into its chunks, KaTeX into its fonts)
+ * names every file after itself, so the first word of a label is its family;
+ * a family of one keeps its whole label.
+ */
+export function cachedFamilies(rows: CachedEngine[]): { label: string; bytes: number }[] {
+  const families = new Map<string, CachedEngine[]>();
+  for (const r of rows) {
+    const family = r.label.split(" ")[0]!;
+    families.set(family, [...(families.get(family) ?? []), r]);
+  }
+  return [...families].map(([family, members]) => ({
+    label: members.length === 1 ? members[0]!.label : family,
+    bytes: members.reduce((n, m) => n + m.bytes, 0),
+  }));
+}
+
 export async function clearCached(): Promise<void> {
   const db = await openDb();
   if (!db) return;

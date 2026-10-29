@@ -27,7 +27,7 @@ const tool: Tool = {
         <button class="btn-copy" type="button">Copy</button>
       </div>
       <section class="pane">
-        <div class="pane-head"><span>uuid</span></div>
+        <div class="pane-head"><span>UUID</span></div>
         <div class="value" role="button" tabindex="0" title="Click to copy"></div>
       </section>`;
 

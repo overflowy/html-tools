@@ -36,7 +36,7 @@ const GROUP_TITLES: Record<string, string> = {
 const tool: Tool = {
   id: "image-metadata",
   name: "Image Metadata",
-  subtitle: "Inspect EXIF, GPS and other metadata; download a losslessly stripped copy.",
+  subtitle: "Read an image's EXIF, GPS, and other metadata, and download a copy without it.",
   keywords: ["exif", "metadata", "gps", "strip", "privacy", "xmp", "iptc", "icc", "jpeg", "png", "webp", "heic", "avif", "tiff", "location"],
   mount(el) {
     el.innerHTML = `

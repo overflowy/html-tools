@@ -408,19 +408,19 @@ function countStats(node: Node, acc: { keys: number; comments: number }) {
 const tool: Tool = {
   id: "jsonc-sorter",
   name: "JSON/JSONC Key Sorter",
-  subtitle: "Sorts keys in JSON and JSONC, keeps every comment where it belongs.",
+  subtitle: "Sort JSON or JSONC keys without losing comments.",
   keywords: ["json", "jsonc", "sort", "keys", "comments", "settings", "format"],
   mount(el, ctx) {
     el.innerHTML = `
       <div class="options">
-        <label class="opt">indent
+        <label class="opt">Indent
           <select class="opt-indent">
             <option value="2" selected>2 spaces</option>
             <option value="4">4 spaces</option>
-            <option value="tab">tab</option>
+            <option value="tab">Tab</option>
           </select>
         </label>
-        <label class="opt">order
+        <label class="opt">Order
           <select class="opt-order">
             <option value="asc" selected>A to Z</option>
             <option value="desc">Z to A</option>
@@ -428,24 +428,24 @@ const tool: Tool = {
         </label>
         <label class="opt">
           <input type="checkbox" class="opt-brackets" checked>
-          sort [bracket] segments in keys
+          Sort [bracket] segments in keys
         </label>
       </div>
       <div class="panes">
         <section class="pane">
           <div class="pane-head">
-            <span>input</span>
+            <span>Input</span>
             <span class="spacer"></span>
             <button class="btn-paste" type="button">Paste<span class="wide-only"> from clipboard</span></button>
             <button class="btn-clear" type="button">Clear</button>
           </div>
           <textarea class="src" spellcheck="false" autocapitalize="off" autocomplete="off"
-            placeholder="Paste JSON or JSONC here. Comments (// and /* */) survive the sort; trailing commas are dropped."></textarea>
-          <div class="statusbar"><span class="dot">&#9679;</span><span class="status-text">Waiting for input</span></div>
+            placeholder="Paste JSON or JSONC. Trailing commas are dropped."></textarea>
+          <div class="statusbar"><span class="status-text"></span></div>
         </section>
         <section class="pane">
           <div class="pane-head">
-            <span>output</span>
+            <span>Output</span>
             <span class="spacer"></span>
             <button class="btn-copy primary" type="button">Copy</button>
           </div>
@@ -492,7 +492,7 @@ const tool: Tool = {
       if (!src.trim()) {
         $output.innerHTML = "";
         lastResult = "";
-        setStatus("", "Waiting for input");
+        setStatus("", "");
         publishState();
         return;
       }
@@ -571,7 +571,7 @@ const tool: Tool = {
         $input.value = await navigator.clipboard.readText();
         run();
       } catch {
-        setStatus("error", "Clipboard access denied. Paste manually into the text area instead.");
+        setStatus("error", "The browser blocked clipboard access. Paste with the keyboard instead.");
       }
     });
 

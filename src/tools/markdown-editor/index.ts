@@ -79,8 +79,7 @@ function saveBlob(blob: Blob, name: string) {
 const tool: Tool = {
   id: "markdown-editor",
   name: "Markdown Editor",
-  subtitle:
-    "Read, edit, and save Markdown with a live preview, table of contents, math, and diagrams.",
+  subtitle: "Edit Markdown beside a live preview, with math and diagrams.",
   keywords: [
     "markdown",
     "md",

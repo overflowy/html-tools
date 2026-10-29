@@ -48,14 +48,10 @@
   border-bottom: 1px solid var(--border);
   font-size: 12px;
   color: var(--text-muted);
-  font-family: var(--mono);
 }
 
 .tool-save-decoder .pane-head .spacer { flex: 1; }
 
-.tool-save-decoder .pane-head button {
-  font-family: var(--sans);
-}
 
 .tool-save-decoder .src {
   flex: 1;
@@ -80,12 +76,12 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
 }
 
+/* Nothing to report, no bar: it appears with the first result or error. */
+.tool-save-decoder .statusbar:has(.status-text:empty) { display: none; }
 .tool-save-decoder .statusbar.error { color: var(--danger-text); }
-.tool-save-decoder .statusbar.ok .dot { color: var(--ok); }
-.tool-save-decoder .dot { font-size: 10px; }
 
 @media (max-width: 1000px) {
   .tool-save-decoder .panes { grid-template-columns: 1fr; }

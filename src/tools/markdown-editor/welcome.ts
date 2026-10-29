@@ -4,7 +4,7 @@
 export function welcome(mod: string): string {
   return `# Markdown Editor
 
-Everything on this page happens in your browser. The file you open, the text you type, and the document you save never go anywhere else.
+Nothing you open or type here leaves your browser.
 
 ## First steps
 

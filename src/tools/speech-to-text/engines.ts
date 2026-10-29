@@ -6,7 +6,7 @@
 
 import type { EngineAsset } from "../../shared/engines";
 
-export { cacheAvailable, clearCached, getEngine, listCached, type OnProgress, type Progress } from "../../shared/engines";
+export { cacheAvailable, cachedFamilies, clearCached, getEngine, listCached, type OnProgress, type Progress } from "../../shared/engines";
 
 /** Cactus-Compute/needle3, the commit whose wasm/ folder is used. */
 export const NEEDLE_REVISION = "d6c7d6a2e9655505e0f8e23339356dd1705900eb";

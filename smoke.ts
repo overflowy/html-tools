@@ -420,7 +420,7 @@ await page.locator(".tool-dns-lookup .name").fill("8.8.8.8");
 await page.locator(".tool-dns-lookup .btn-lookup").click();
 await page.waitForFunction(() => document.querySelector(".tool-dns-lookup .status-text")?.textContent?.startsWith("1 record"));
 check("dns IP input queries the arpa name for PTR", dnsHits.at(-1) === "cloudflare-dns.com 8.8.8.8.in-addr.arpa PTR", dnsHits.at(-1));
-check("dns reverse lookup is labelled", (await page.locator(".tool-dns-lookup .results-title").textContent()) === "reverse lookup");
+check("dns reverse lookup is labelled", (await page.locator(".tool-dns-lookup .results-title").textContent()) === "Reverse lookup");
 check("dns reverse lookup shows the PTR", (await page.locator(".tool-dns-lookup .records .c-data").first().textContent()) === "dns.google.");
 
 // Resolver-side failure (NOTIMP with an EDE comment) renders as an error, not as "no records".
@@ -864,7 +864,7 @@ check("second visit converts from cached engines with no download",
   docPhases.join(" | ").slice(0, 200));
 const cachedText = await page.locator(".tool-doc-to-markdown .engines-text").textContent();
 const cachedTitle = await page.locator(".tool-doc-to-markdown .engines-text").getAttribute("title");
-check("engines footer shows the cached total, breakdown on hover", /^Engines cached: [\d.]+ MB$/.test(cachedText!) && cachedTitle!.includes("anydoc") && cachedTitle!.includes("tesseract eng"), cachedText! + " | " + cachedTitle!.slice(0, 60));
+check("engines footer shows the cached total, breakdown by family on hover", /^Engines cached: [\d.]+ MB$/.test(cachedText!) && /^anydoc \d/m.test(cachedTitle!) && /^tesseract \d/m.test(cachedTitle!) && !cachedTitle!.includes("tesseract eng"), cachedText! + " | " + cachedTitle!.slice(0, 60));
 await page.locator(".tool-doc-to-markdown .engines-clear").click();
 await page.waitForFunction(() => (document.querySelector(".tool-doc-to-markdown .engines-text")!.textContent ?? "").startsWith("No engines cached"));
 check("clear cached engines empties the store", true);

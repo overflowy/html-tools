@@ -1,7 +1,7 @@
 import "./tool.css";
 import type { Tool } from "../../shell/types";
 import { ACCEPT } from "./detect";
-import { cacheAvailable, clearCached, listCached } from "./engines";
+import { cacheAvailable, cachedFamilies, clearCached, listCached } from "./engines";
 import { LANGUAGES, languageName } from "./languages";
 import { cancelConversion, convertDocument, type Phase } from "./convert";
 
@@ -50,7 +50,7 @@ function normalizeLangs(codes: string[]): string[] {
 const tool: Tool = {
   id: "doc-to-markdown",
   name: "Document to Markdown",
-  subtitle: "Convert Word, Excel, PowerPoint, PDF and more to Markdown; scanned pages and images go through OCR.",
+  subtitle: "Convert a document, a scanned PDF, or an image of text to Markdown.",
   keywords: ["ocr", "pdf", "docx", "word", "xlsx", "excel", "pptx", "powerpoint", "odt", "epub", "rtf", "csv", "markdown", "scan", "tesseract", "convert", "image", "text", "extract"],
   mount(el, ctx) {
     el.innerHTML = `
@@ -71,8 +71,7 @@ const tool: Tool = {
       <div class="empty-hint">
         <strong>Drop a document anywhere here</strong>, choose a file, or paste an image with &#8984;V.
         <span>Word, PowerPoint, Excel, OpenDocument, RTF, EPUB, CSV, PDF, or an image.</span>
-        <span>Pages without a text layer and images go through OCR.</span>
-        <span>Nothing you drop leaves the browser. The converters are downloaded on first use and kept locally.</span>
+        <span>Nothing you drop leaves the browser. The converters download on first use and stay cached.</span>
       </div>
       <div class="progress">
         <span class="phase"></span>
@@ -82,7 +81,7 @@ const tool: Tool = {
       <div class="note"></div>
       <div class="result">
         <div class="pane-head">
-          markdown
+          Markdown
           <span class="meta"></span>
           <span class="spacer"></span>
           <button type="button" class="copy-btn">Copy</button>
@@ -222,14 +221,14 @@ const tool: Tool = {
       }
       const rows = await listCached();
       if (rows.length === 0) {
-        enginesText.textContent = "No engines cached yet. They download on first use and stay here for next time.";
+        enginesText.textContent = "No engines cached";
         enginesClear.hidden = true;
         return;
       }
       const total = rows.reduce((n, r) => n + r.bytes, 0);
       enginesText.textContent = "Engines cached: " + formatBytes(total);
       // The breakdown is a hover away, not in the way.
-      enginesText.title = rows.map((r) => r.label + " " + formatBytes(r.bytes)).join("\n");
+      enginesText.title = cachedFamilies(rows).map((f) => f.label + " " + formatBytes(f.bytes)).join("\n");
       enginesClear.hidden = false;
     }
     enginesClear.addEventListener("click", async () => {
