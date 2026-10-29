@@ -31,6 +31,17 @@ bun run test        # browser smoke test against dist/ (headless Chromium)
 
 Adding a tool: create `src/tools/<id>/` with an `index.ts` exporting a `Tool` and a `tool.css` scoped under `.tool-<id>`, then add one line to `src/registry.ts`.
 
+## Fonts
+
+Text is set in Mona Sans and code in IBM Plex Mono. The files live in `src/shell/fonts/` and the build inlines them, so the page needs no network for them.
+
+IBM Plex Mono is taken as is from `@fontsource/ibm-plex-mono`. Mona Sans is built from the variable fonts in GitHub's official release (`mona-sans-webfonts-<version>.zip`, under `fonts/webfonts/variable`) by `scripts/build-mona-sans.py`, which pins the optical size, swaps the slashed tabular 0 and footed tabular 1 for the plain digits, and subsets to Latin and Latin Extended. To rebuild:
+
+```sh
+uv run --with fonttools --with brotli python scripts/build-mona-sans.py "MonaSansVF[opsz,wght].woff2" src/shell/fonts/mona-sans-latin-wght-normal.woff2
+uv run --with fonttools --with brotli python scripts/build-mona-sans.py "MonaSansVF-Italic[opsz,wght].woff2" src/shell/fonts/mona-sans-latin-wght-italic.woff2
+```
+
 ## Acknowledgements
 
 - https://simonwillison.net/2025/Dec/10/html-tools/
@@ -38,4 +49,4 @@ Adding a tool: create `src/tools/<id>/` with an `index.ts` exporting a `Tool` an
 
 ## License
 
-MIT
+MIT, except the fonts in `src/shell/fonts/`, which are under the SIL Open Font License 1.1 (license files alongside).
