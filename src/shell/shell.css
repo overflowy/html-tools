@@ -58,6 +58,7 @@ body { overflow: hidden; }
   align-items: center;
   justify-content: center;
   padding: 0;
+  border-radius: var(--radius-md);
   flex-shrink: 0;
 }
 .collapse-btn {
@@ -85,9 +86,13 @@ body.sidebar-collapsed .collapse-btn {
 }
 
 .filter-wrap { position: relative; }
+/* A field on its own at the head of the list, as tall as the rows below it. */
 .filter-wrap input {
   width: 100%;
-  padding-right: 34px;
+  height: auto;
+  font-size: 13px;
+  padding: 7px 34px 7px 10px;
+  border-radius: var(--radius-md);
   -webkit-appearance: none;
   appearance: none;
 }

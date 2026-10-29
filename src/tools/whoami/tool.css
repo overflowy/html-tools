@@ -12,14 +12,7 @@
   gap: 8px;
 }
 
-/* Same size as the buttons in the cards' heads and in the other tools' panes. */
-.tool-whoami .toolbar button,
-.tool-whoami .pane-head button {
-  font-family: var(--sans);
-  font-size: 12px;
-  padding: 3px 10px;
-  border-radius: var(--radius-sm);
-}
+.tool-whoami .pane-head button { font-family: var(--sans); }
 .tool-whoami button:disabled {
   opacity: 0.4;
   cursor: default;

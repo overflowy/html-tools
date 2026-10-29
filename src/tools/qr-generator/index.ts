@@ -93,14 +93,14 @@ const tool: Tool = {
   keywords: ["qr", "qr code", "generator", "wifi", "vcard", "contact", "barcode", "url", "link", "email", "sms", "phone", "geo", "share"],
   mount(el, ctx) {
     el.innerHTML = `
-      <div class="type-row">
-        <button type="button" data-type="text" class="active">Text / URL</button>
-        <button type="button" data-type="wifi">WiFi</button>
-        <button type="button" data-type="contact">Contact</button>
-        <button type="button" data-type="email">Email</button>
-        <button type="button" data-type="sms">SMS</button>
-        <button type="button" data-type="phone">Phone</button>
-        <button type="button" data-type="geo">Geo</button>
+      <div class="type-row seg" role="tablist" aria-label="Payload type">
+        <button type="button" role="tab" aria-selected="true" data-type="text" class="active">Text / URL</button>
+        <button type="button" role="tab" aria-selected="false" data-type="wifi">WiFi</button>
+        <button type="button" role="tab" aria-selected="false" data-type="contact">Contact</button>
+        <button type="button" role="tab" aria-selected="false" data-type="email">Email</button>
+        <button type="button" role="tab" aria-selected="false" data-type="sms">SMS</button>
+        <button type="button" role="tab" aria-selected="false" data-type="phone">Phone</button>
+        <button type="button" role="tab" aria-selected="false" data-type="geo">Geo</button>
       </div>
       <div class="options">
         <label class="opt">error correction
@@ -181,8 +181,8 @@ const tool: Tool = {
           <div class="pane-head">
             <span>preview</span>
             <span class="spacer"></span>
-            <button class="btn-png" type="button">Download PNG</button>
-            <button class="btn-svg" type="button">Download SVG</button>
+            <button class="btn-png" type="button"><span class="wide-only">Download </span>PNG</button>
+            <button class="btn-svg" type="button"><span class="wide-only">Download </span>SVG</button>
             <button class="btn-copy primary" type="button">Copy</button>
           </div>
           <div class="preview-frame">
@@ -319,7 +319,11 @@ const tool: Tool = {
 
     function selectType(type: PayloadType) {
       currentType = type;
-      for (const b of typeButtons) b.classList.toggle("active", b.dataset.type === type);
+      for (const b of typeButtons) {
+        const on = b.dataset.type === type;
+        b.classList.toggle("active", on);
+        b.setAttribute("aria-selected", String(on));
+      }
       for (const f of el.querySelectorAll<HTMLElement>(".form")) f.hidden = f.dataset.form !== type;
       run();
     }

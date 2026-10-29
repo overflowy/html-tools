@@ -27,14 +27,6 @@
   font-family: var(--mono);
 }
 
-/* Same size as the buttons in the other tools' toolbars. */
-.tool-uuid-generator .toolbar button {
-  font-family: var(--sans);
-  font-size: 12px;
-  padding: 3px 10px;
-  border-radius: var(--radius-sm);
-}
-
 .tool-uuid-generator .value {
   padding: 20px 12px;
   font-family: var(--mono);
@@ -49,7 +41,9 @@
   word-break: normal;
 }
 
-.tool-uuid-generator .value:hover { background: var(--surface-2); }
+@media (hover: hover) {
+  .tool-uuid-generator .value:hover { background: var(--surface-2); }
+}
 
 .tool-uuid-generator .value:focus-visible {
   outline: 2px solid var(--accent);

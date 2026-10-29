@@ -7,25 +7,10 @@
   padding: 0.25rem var(--gutter) 2rem;
 }
 
+/* The Payload Type: the Theme's choice pill, as wide as its options. */
 .tool-qr-generator .type-row {
-  display: flex;
+  align-self: flex-start;
   flex-wrap: wrap;
-  gap: 6px;
-}
-
-.tool-qr-generator .type-row button {
-  font-size: 12.5px;
-  padding: 5px 12px;
-  border-radius: var(--radius-sm);
-}
-
-/* Selected: the ring line without the halo (see --ring-line in theme.css). */
-.tool-qr-generator .type-row button.active {
-  background: var(--accent-soft);
-  border-color: transparent;
-  outline: var(--ring-line);
-  outline-offset: -1px;
-  color: var(--text);
 }
 
 .tool-qr-generator .options {
@@ -51,15 +36,16 @@
   border-radius: var(--radius-sm);
   color: var(--text);
   font-family: var(--mono);
-  font-size: 12.5px;
-  padding: 4px 6px;
+  font-size: 12px;
+  height: var(--control-h);
+  padding: 0 6px;
 }
 
 /* The native color input draws its own chrome (thickly in Safari), so clip an
    oversized input inside a small bordered wrapper and let only the color show. */
 .tool-qr-generator .swatch {
   width: 32px;
-  height: 24px;
+  height: var(--control-h);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-sm);
   overflow: hidden;
@@ -111,9 +97,6 @@
 
 .tool-qr-generator .pane-head button {
   font-family: var(--sans);
-  font-size: 12px;
-  padding: 3px 10px;
-  border-radius: var(--radius-sm);
 }
 
 .tool-qr-generator .forms {
@@ -161,6 +144,14 @@
   flex-direction: row;
   align-items: center;
   gap: 7px;
+}
+
+/* The forms are fields on their own, not a row of actions: a size up. */
+.tool-qr-generator .field :is(input[type="text"], select) {
+  height: 33px;
+  font-size: 13px;
+  padding: 0 10px;
+  border-radius: var(--radius-md);
 }
 
 .tool-qr-generator .field textarea {
@@ -222,5 +213,11 @@
 }
 
 @media (max-width: 767px) {
+  /* Full width, in even columns of touch-sized options. */
+  .tool-qr-generator .type-row {
+    align-self: stretch;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(76px, 1fr));
+  }
   .tool-qr-generator .type-row button { min-height: 40px; }
 }

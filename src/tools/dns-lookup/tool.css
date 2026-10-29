@@ -20,11 +20,7 @@
   font-family: var(--mono);
 }
 
-.tool-dns-lookup .type {
-  font-family: var(--mono);
-  padding: 7px 8px;
-  border-radius: var(--radius-md);
-}
+.tool-dns-lookup .type { font-family: var(--mono); }
 
 .tool-dns-lookup .custom-type {
   width: 130px;
@@ -88,9 +84,6 @@
 
 .tool-dns-lookup .pane-head button {
   font-family: var(--sans);
-  font-size: 12px;
-  padding: 3px 10px;
-  border-radius: var(--radius-sm);
 }
 
 .tool-dns-lookup .results {
@@ -224,6 +217,7 @@
 /* ---- subdomain rows ---- */
 
 .tool-dns-lookup button.link {
+  min-height: 0;
   padding: 0;
   border: none;
   border-radius: 0;
@@ -403,13 +397,6 @@
   flex: 1;
   min-width: 0;
   font-family: var(--mono);
-  padding: 4px 8px;
-  font-size: 12px;
-}
-.tool-dns-lookup .btn-dkim {
-  font-size: 12px;
-  padding: 3px 10px;
-  border-radius: var(--radius-sm);
 }
 .tool-dns-lookup .dkim-extra .note { margin-top: 8px; }
 
@@ -506,9 +493,11 @@
 
 @media (max-width: 767px) {
   .tool-dns-lookup .name { flex-basis: 100%; }
-  /* Touch targets for the buttons that are not in a pane head. */
-  .tool-dns-lookup .actions button { min-height: 40px; }
-  .tool-dns-lookup .btn-dkim { min-height: 36px; }
+  /* Touch targets for the buttons that are not in a pane head, and the
+     fields in their row at the same height. */
+  .tool-dns-lookup .actions button,
+  .tool-dns-lookup .query :is(.name, .type, .custom-type) { min-height: 40px; }
+  .tool-dns-lookup :is(.btn-dkim, .dkim-selector) { min-height: 36px; }
   .tool-dns-lookup .facts { grid-template-columns: 1fr; gap: 2px; }
   .tool-dns-lookup .facts dd { margin-bottom: 6px; }
   .tool-dns-lookup .actions { flex-wrap: wrap; }

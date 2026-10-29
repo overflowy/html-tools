@@ -230,7 +230,7 @@ export function renderMarkdown(src: string, root: HTMLElement, opts: RenderOptio
     wrap.appendChild(pre);
     const btn = document.createElement("button");
     btn.type = "button";
-    btn.className = "copy-btn";
+    btn.className = "copy-btn inline";
     btn.textContent = "Copy";
     btn.title = "Copy this code block";
     wrap.appendChild(btn);

@@ -2,12 +2,6 @@
 
 .tool-image-metadata .container { max-width: 760px; width: 100%; }
 
-.tool-image-metadata button {
-  font-size: 12px;
-  padding: 3px 10px;
-  border-radius: var(--radius-sm);
-}
-
 .tool-image-metadata .toolbar {
   display: flex;
   gap: 8px;

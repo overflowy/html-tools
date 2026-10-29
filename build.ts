@@ -22,9 +22,11 @@ const loader = { ".py": "text" } as const;
 // Icons are Lucide's SVG files, one import per icon so only the ones used
 // are bundled. Each becomes the string the app inlines: license comment,
 // class, size, and namespace dropped, whitespace collapsed, hidden from
-// assistive technology, and drawn at the stroke the Collection's 16px icons
-// have always had (1.5px, which on Lucide's 24-unit grid is 2.25).
-const ICON_STROKE = "2.25";
+// assistive technology, and drawn with a 1.5px stroke. That is screen
+// pixels at every icon size, not units of Lucide's 24-unit grid: theme.css
+// makes the strokes non-scaling, so a 12px chevron is drawn as heavily as a
+// 16px button icon beside the same text.
+const ICON_STROKE = "1.5";
 const lucide: Bun.BunPlugin = {
   name: "lucide icons",
   setup(build) {

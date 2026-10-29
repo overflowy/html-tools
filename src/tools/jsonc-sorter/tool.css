@@ -64,9 +64,6 @@
 
 .tool-jsonc-sorter .pane-head button {
   font-family: var(--sans);
-  font-size: 12px;
-  padding: 3px 10px;
-  border-radius: var(--radius-sm);
 }
 
 .tool-jsonc-sorter .src {

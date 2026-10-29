@@ -7,12 +7,6 @@
   padding: 0.25rem var(--gutter) 2rem;
 }
 
-.tool-doc-to-markdown button {
-  font-size: 12px;
-  padding: 3px 10px;
-  border-radius: var(--radius-sm);
-}
-
 .tool-doc-to-markdown .toolbar {
   display: flex;
   gap: 8px;
@@ -51,9 +45,13 @@
   list-style: none;
   cursor: pointer;
   font-size: 12px;
-  /* Buttons use the UA's `normal` line height; the summary would inherit the body's 1.5 and stand 3px taller. */
-  line-height: normal;
-  padding: 3px 10px;
+  /* A button in all but name: the action height, set outright like theirs.
+     Flex swallows the space between "OCR:" and the names; the gap puts it back. */
+  display: flex;
+  align-items: center;
+  gap: 0.3em;
+  height: var(--control-h);
+  padding: 0 10px;
   border: 0.5px solid var(--border-strong);
   border-radius: var(--radius-sm);
   color: var(--text);
@@ -85,20 +83,20 @@
   flex-direction: column;
   background: var(--surface);
   border: 0.5px solid var(--border-strong);
-  border-radius: var(--radius-md);
+  /* Its rows' radius plus the 4px they sit in from every edge, so a
+     highlighted row's corners run parallel to the panel's. The filter sits
+     in the same 4px and takes the rows' radius. */
+  border-radius: calc(var(--radius-sm) + 4px);
   box-shadow: 0 8px 24px rgb(0 0 0 / 0.4);
   overflow: hidden;
 }
 
-.tool-doc-to-markdown .lang-filter {
-  margin: 8px;
-  padding: 5px 8px;
-  font-size: 12.5px;
-}
+/* flex: none, or the long list below squeezes it under its height. */
+.tool-doc-to-markdown .lang-filter { margin: 4px; flex: none; }
 
 .tool-doc-to-markdown .lang-list {
   overflow-y: auto;
-  padding: 0 4px 6px;
+  padding: 0 4px 4px;
   display: flex;
   flex-direction: column;
 }
@@ -208,6 +206,11 @@
 @keyframes doc-sweep {
   from { transform: translateX(-100%); }
   to { transform: translateX(300%); }
+}
+/* Without motion the busy bar stands still, full and dimmed; the phase
+   beside it says what is going on. */
+@media (prefers-reduced-motion: reduce) {
+  .tool-doc-to-markdown .bar.busy .fill { width: 100%; opacity: 0.5; animation: none; }
 }
 
 /* ---- result ---- */

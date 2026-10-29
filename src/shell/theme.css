@@ -28,6 +28,10 @@
   --radius-sm: 6px;
   --radius-md: 8px;
   --radius-lg: 12px;
+  /* The height of every action: a text button's 12px line and 3px padding
+     come to it, and a select, field, or icon button in the same row is set
+     to it. See "Control sizes" below. */
+  --control-h: 25px;
   --gutter: 2rem;
   --sidebar-width: 220px;
   --sans: "Mona Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
@@ -117,14 +121,33 @@ h1 {
   text-wrap: pretty;
 }
 
+/* Control sizes, one tier per rank and never one per Tool:
+   - Action, --control-h (25px): every text button in a toolbar, pane head,
+     query row, or dialog, and the selects and fields that share its row.
+     A primary differs from its neighbours by colour and weight, not size.
+   - Icon: the height of its row. --control-h beside actions, 22px in the
+     Python IDE's dense section and panel heads.
+   - Choice (.seg): a pill no taller than an action, for picking one of a few.
+   - Inline (button.inline, 20px): a small action inside content, such as
+     Copy on a code block. Lighter than an action, never heavier.
+   Hit-area toggles (the Shell's 40px icon buttons) and list rows (menus,
+   the Tool list) are sized by what they hold, outside this scale.
+
+   Heights are set, never left to padding and line height: the "normal"
+   line of 12px text is 17px in Chromium and 18px in Firefox, and a 0.5px
+   border is a whole pixel on a 1x screen and half of one on a 2x screen,
+   so a padded button and a fixed field beside it drift a pixel apart. A
+   button that is not an action (a row in a list, a glyph inside text) opts
+   out with min-height: 0. The padding is only what a wrapped label needs. */
 button {
   font-family: inherit;
-  font-size: 13px;
-  padding: 7px 14px;
+  font-size: 12px;
+  min-height: var(--control-h);
+  padding: 2px 10px;
   background: transparent;
   color: var(--text);
   border: 0.5px solid var(--border-strong);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-sm);
   cursor: pointer;
   transition: background 0.15s, filter 0.15s;
 }
@@ -170,15 +193,24 @@ textarea:focus {
 
 textarea::placeholder { color: var(--text-muted); opacity: 0.7; }
 
+/* A select's native box runs taller than a button's for the same padding,
+   so it is given the action height outright. */
 select {
   font-family: inherit;
-  font-size: 12.5px;
-  padding: 4px 8px;
+  font-size: 12px;
+  height: var(--control-h);
+  padding: 0 8px;
   background: var(--surface);
   color: var(--text);
   border: 0.5px solid var(--border-strong);
   border-radius: var(--radius-sm);
 }
+
+/* Icons (the Lucide ones are the only SVGs with a stroke-width on the root):
+   the stroke is measured in screen pixels, so the 1.5px build.ts gives them
+   is 1.5px at 12px and at 16px alike, matching the regular-weight text they
+   sit beside. A rule may set a heavier one beside heavier text. */
+svg[stroke-width] * { vector-effect: non-scaling-stroke; }
 
 input[type="checkbox"] {
   accent-color: var(--accent);
@@ -186,15 +218,57 @@ input[type="checkbox"] {
   height: 14px;
 }
 
+/* At the action height: a field mostly sits in a row of buttons. A form
+   field standing on its own (the Filter, the QR Code forms) sets its own. */
 input[type="search"],
 input[type="text"] {
   font-family: inherit;
-  font-size: 13px;
-  padding: 7px 10px;
+  font-size: 12px;
+  height: var(--control-h);
+  padding: 0 8px;
   background: var(--bg);
   color: var(--text);
   border: 0.5px solid var(--border);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-sm);
+}
+
+/* Choice: one pill, the picked option raised inside it. The pill is the
+   action height and its options stretch to fill it inside 2px of padding;
+   its radius is theirs plus that padding. Options carry .active. */
+.seg {
+  display: flex;
+  min-height: var(--control-h);
+  background: var(--surface);
+  border: 0.5px solid var(--border-strong);
+  border-radius: calc(var(--radius-sm) + 2px);
+  padding: 2px;
+  gap: 2px;
+}
+.seg button {
+  min-height: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-weight: 500;
+  padding: 0 10px;
+  border-radius: var(--radius-sm);
+}
+@media (hover: hover) {
+  .seg button:hover { color: var(--text); background: transparent; }
+}
+.seg button.active {
+  background: var(--surface-3);
+  color: var(--text);
+}
+.seg button:active { transform: none; }
+
+/* Inline: a small action inside content. A Tool may restyle its colours. */
+button.inline {
+  font-size: 11px;
+  font-weight: 400;
+  min-height: 0;
+  height: 20px;
+  padding: 0 7px;
 }
 
 input:focus-visible,

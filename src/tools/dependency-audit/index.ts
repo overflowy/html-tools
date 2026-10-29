@@ -39,7 +39,7 @@ function advisoryHtml(ap: AuditedPackage, index: number): string {
     (fixText ? '<p class="adv-fix ' + (fix.fixed ? "has-fix" : "") + '">' + esc(fixText) + "</p>" : "") +
     failed +
     '<details class="raw"><summary>raw record' + (others.length ? "s (" + others.map(esc).join(", ") + ")" : "") + "</summary>" +
-    '<div class="raw-body"><button type="button" class="btn-copy-raw" data-id="' + esc(advisory.id) + '">Copy JSON</button>' +
+    '<div class="raw-body"><button type="button" class="btn-copy-raw inline" data-id="' + esc(advisory.id) + '">Copy JSON</button>' +
     '<pre class="raw-json">' + esc(JSON.stringify(advisory.records.length === 1 ? advisory.records[0] : advisory.records, null, 2)) + "</pre></div></details></div>";
 }
 

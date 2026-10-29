@@ -63,9 +63,6 @@
 
 .tool-dependency-audit .pane-head button {
   font-family: var(--sans);
-  font-size: 12px;
-  padding: 3px 10px;
-  border-radius: var(--radius-sm);
 }
 
 .tool-dependency-audit .input-pane { flex-shrink: 0; }
@@ -93,7 +90,7 @@
 .tool-dependency-audit .files {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 8px;
   padding: 8px 12px;
   border-top: 1px solid var(--border);
 }
@@ -112,12 +109,22 @@
 .tool-dependency-audit .chip.bad { color: var(--danger-text); border-color: rgba(247, 193, 193, 0.4); }
 .tool-dependency-audit .chip-kind { color: var(--text-muted); }
 .tool-dependency-audit .chip-x {
+  min-height: 0;
   padding: 0 6px;
   border: none;
   border-radius: 999px;
   font-size: 14px;
   line-height: 1.2;
   color: var(--text-muted);
+  position: relative;
+}
+/* The visible button is 20 by 17; take clicks 4px further on every side.
+   That reaches the chip's right edge and 2px past its top and bottom,
+   which the 8px gap between wrapped rows of chips leaves room for. */
+.tool-dependency-audit .chip-x::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
 }
 
 /* ---- filters ---- */
@@ -346,9 +353,6 @@
   position: absolute;
   top: 6px;
   right: 6px;
-  font-size: 11px;
-  padding: 2px 8px;
-  border-radius: var(--radius-sm);
   background: var(--surface);
 }
 .tool-dependency-audit .raw-json {
@@ -406,7 +410,7 @@
   .tool-dependency-audit .repo { flex-basis: 100%; }
   /* Touch targets: the fetch button sits outside any pane head, and the
      chip grows around its remove button. */
-  .tool-dependency-audit .repo-row button { min-height: 40px; }
+  .tool-dependency-audit .repo-row :is(button, .repo) { min-height: 40px; }
   .tool-dependency-audit .chip-x { min-width: 36px; min-height: 36px; }
   .tool-dependency-audit .lockfile .count { display: none; }
   .tool-dependency-audit .hit-count { display: none; }
