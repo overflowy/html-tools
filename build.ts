@@ -12,6 +12,7 @@ const WORKERS = [
   { entry: "src/tools/doc-to-markdown/worker.ts", constant: "DOC_WORKER_SRC" },
   { entry: "src/tools/python-ide/py-worker.ts", constant: "PYIDE_PY_WORKER_SRC" },
   { entry: "src/tools/python-ide/ruff-worker.ts", constant: "PYIDE_RUFF_WORKER_SRC" },
+  { entry: "src/tools/speech-to-text/worker.ts", constant: "STT_WORKER_SRC" },
 ];
 
 // Python source files are imported as text: the interpreter worker writes

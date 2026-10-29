@@ -1,5 +1,8 @@
 // Browser smoke test for the built dist/index.html. Run: bun run smoke.ts
 // Uses the Playwright headless Chromium already present in ~/Library/Caches/ms-playwright.
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { chromium } from "playwright-core";
 import jsQR from "jsqr";
 import dnsFixtures from "./src/tools/dns-lookup/fixtures.json";
@@ -11,7 +14,27 @@ const exe =
   process.env.CHROMIUM_PATH ??
   process.env.HOME + "/Library/Caches/ms-playwright/chromium_headless_shell-1234/chrome-headless-shell-mac-arm64/chrome-headless-shell";
 
-const browser = await chromium.launch({ executablePath: exe });
+// Speech to Text's fixtures: speech synthesized by macOS `say` as 16 kHz
+// 16-bit WAV, so no audio is committed. The English clip is also what the
+// fake microphone hears.
+const speechDir = mkdtempSync(join(tmpdir(), "html-tools-speech-"));
+const SPEECH: Record<string, [voice: string, rate: string, text: string]> = {
+  en: ["Samantha", "175", "The quick brown fox jumps over the lazy dog. Please turn off the kitchen lights at nine thirty."],
+  de: ["Anna", "175", "Der Zug nach Berlin fährt heute um halb zehn vom zweiten Gleis ab."],
+  long: ["Samantha", "105", "Welcome to the weekly planning meeting. First, the release is scheduled for the twelfth of March. The design team finished the new onboarding screens last Friday. Second, we still need volunteers for the customer interviews next week. Please send me an email if you can help. Third, the office will be closed on Monday because of the public holiday. The kitchen renovation should be done by the end of the month. Finally, remember that the quarterly report is due on Thursday afternoon. If anything is unclear, ask in the team channel. Thank you all, and have a great week. One more thing: the parking garage will be repainted on Wednesday, so please park on the street that day."],
+};
+for (const [name, [voice, rate, text]] of Object.entries(SPEECH)) {
+  const aiff = join(speechDir, name + ".aiff");
+  for (const cmd of [["say", "-v", voice, "-r", rate, "-o", aiff, text], ["afconvert", "-f", "WAVE", "-d", "LEI16@16000", "-c", "1", aiff, join(speechDir, name + ".wav")]]) {
+    const run = Bun.spawnSync(cmd);
+    if (run.exitCode !== 0) throw new Error(cmd[0] + " failed: " + run.stderr.toString());
+  }
+}
+
+const browser = await chromium.launch({
+  executablePath: exe,
+  args: ["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream", `--use-file-for-fake-audio-capture=${join(speechDir, "en.wav")}%noloop`],
+});
 const page = await browser.newPage();
 const errors: string[] = [];
 page.on("pageerror", (e) => errors.push("pageerror: " + e.message));
@@ -31,7 +54,7 @@ function check(label: string, ok: boolean, detail = "") {
 
 await page.goto(url);
 const names = await page.locator(".tool-list button").allTextContents();
-check("sidebar lists all tools", names.length === 12, names.join(", "));
+check("sidebar lists all tools", names.length === 13, names.join(", "));
 
 // base64 tool: paste a tiny valid png via direct input.
 await page.goto(url + "#base64-to-image");
@@ -894,6 +917,153 @@ await page.locator(".tool-whoami .btn-refresh").click();
 await page.waitForFunction(() => !document.querySelector(".tool-whoami .value.pending"));
 check("whoami shows both countries when the traces disagree",
   (await whoamiValue("country"))!.startsWith("IT · Italy via IPv4, DE · Germany via IPv6"), (await whoamiValue("country")) ?? "");
+
+// Speech to Text: real transcriptions over the real CDN, from file://. What
+// this proves is that the engine loads in its worker from a data: URL, that
+// the language is detected, that audio past one Window is cut and stitched
+// with nothing lost or doubled, that an option change transcribes again and
+// rides in the Deep Link, that the exports and the player follow the Words,
+// that the microphone is transcribed while it records, and that a second
+// visit fetches nothing.
+const stt = ".tool-speech-to-text ";
+const sttProgress = () => page.evaluate(() => document.querySelector(".tool-speech-to-text .progress")!.classList.contains("on"));
+const sttDone = () => page.waitForFunction(() => !document.querySelector(".tool-speech-to-text .progress")!.classList.contains("on"), null, { timeout: 180000 });
+const sttText = () => page.evaluate(() => [...document.querySelectorAll(".tool-speech-to-text .cue p")].map((p) => p.textContent).join(" "));
+const sttMeta = () => page.locator(stt + ".meta").textContent();
+const sttError = () => page.evaluate(() => document.querySelector(".tool-speech-to-text .error-box.on")?.textContent ?? "");
+async function dropSpeech(name: string) {
+  const b64 = Buffer.from(await Bun.file(join(speechDir, name + ".wav")).arrayBuffer()).toString("base64");
+  await page.evaluate(([n, s]) => {
+    const b = Uint8Array.from(atob(s!), (c) => c.charCodeAt(0));
+    const dt = new DataTransfer();
+    dt.items.add(new File([b], n!, { type: "audio/wav" }));
+    document.querySelector(".tool-speech-to-text")!.dispatchEvent(new DragEvent("drop", { dataTransfer: dt, bubbles: true, cancelable: true }));
+  }, [name + ".wav", b64]);
+  await page.waitForFunction(() => document.querySelector(".tool-speech-to-text .progress")!.classList.contains("on"));
+}
+async function sttDownload(format: string): Promise<{ name: string; text: string }> {
+  const [dl] = await Promise.all([page.waitForEvent("download"), page.locator(stt + `.dl[data-format=${format}]`).click()]);
+  return { name: dl.suggestedFilename(), text: await new Response(await dl.createReadStream() as unknown as ReadableStream).text() };
+}
+
+await page.goto("about:blank");
+await page.goto(url + "#speech-to-text");
+await page.waitForSelector(stt + ".empty-hint");
+const sttPhases: string[] = [];
+await page.exposeFunction("sttPhase", (t: string) => sttPhases.push(t));
+const watchSttPhases = () => page.evaluate(() => {
+  new MutationObserver(() => (window as unknown as { sttPhase(t: string): void }).sttPhase(document.querySelector(".tool-speech-to-text .phase")!.textContent ?? ""))
+    .observe(document.querySelector(".tool-speech-to-text .phase")!, { childList: true, characterData: true, subtree: true });
+});
+await watchSttPhases();
+await dropSpeech("en");
+await sttDone();
+check("speech: English is detected and transcribed",
+  /quick brown fox jumps over the lazy dog\./i.test(await sttText()) && (await sttMeta())!.startsWith("English (detected) · 0:0") && !(await sttError()),
+  (await sttMeta()) + " | " + (await sttText()) + (await sttError()));
+check("speech: the engine was downloaded on first use", sttPhases.some((p) => p.startsWith("Downloading the engine")), sttPhases.slice(0, 3).join(" | "));
+check("speech: one Cue per sentence, timed from the start",
+  (await page.locator(stt + ".cue").count()) === 2 && (await page.locator(stt + ".cue .t").first().textContent()) === "0:00");
+
+const srt = await sttDownload("srt");
+check("speech: SRT export", srt.name === "en.srt" && /^1\n00:00:00,\d{3} --> 00:00:0\d,\d{3}\nThe quick brown fox/.test(srt.text) && srt.text.includes("\n2\n"), srt.text.slice(0, 80));
+const vtt = await sttDownload("vtt");
+check("speech: WebVTT export", vtt.name === "en.vtt" && vtt.text.startsWith("WEBVTT\n\n00:00:00."), vtt.text.slice(0, 40));
+const json = JSON.parse((await sttDownload("json")).text);
+check("speech: JSON export has every Word with its times",
+  json.language === "en" && json.words.length >= 15 && json.words.every((w: { start: number; end: number }, i: number, a: { start: number }[]) => w.end >= w.start && (i === 0 || w.start >= a[i - 1]!.start)),
+  JSON.stringify(json).slice(0, 120));
+const sttCopied = await page.evaluate(() => {
+  let out = "";
+  navigator.clipboard.writeText = async (t: string) => { out = t; };
+  (document.querySelector(".tool-speech-to-text .copy-btn") as HTMLElement).click();
+  return new Promise<string>((resolve) => setTimeout(() => resolve(out), 50));
+});
+check("speech: Copy puts the text on the clipboard", sttCopied.startsWith("The quick brown fox") && sttCopied.endsWith("\n"), sttCopied.slice(0, 40));
+
+// Clicking a Word puts the player at that Word.
+const fox = json.words.find((w: { word: string }) => w.word === "fox");
+await page.locator(stt + ".w", { hasText: /^fox$/ }).click();
+await page.waitForFunction((t: number) => Math.abs((document.querySelector(".tool-speech-to-text .player") as HTMLAudioElement).currentTime - t) < 0.05, fox.start);
+check("speech: clicking a Word seeks the player to it", true);
+
+await dropSpeech("de");
+await sttDone();
+check("speech: German is detected and transcribed", (await sttMeta())!.startsWith("German (detected)") && /Berlin/.test(await sttText()), (await sttMeta()) + " | " + (await sttText()));
+
+// Over one Window: cut at a sentence end and stitched, the times running on past 30 s.
+await dropSpeech("long");
+await sttDone();
+const sttLong = await sttText();
+const longJson = JSON.parse((await sttDownload("json")).text);
+const longStarts: number[] = longJson.words.map((w: { start: number }) => w.start);
+check("speech: audio past one Window is stitched with nothing lost or doubled",
+  sttLong.startsWith("Welcome to the weekly planning meeting.") && sttLong.endsWith("park on the street that day.") &&
+  (sttLong.match(/quarterly report/g) ?? []).length === 1 && (sttLong.match(/public holiday/g) ?? []).length === 1 &&
+  longStarts.at(-1)! > 40 && longStarts.every((s, i) => i === 0 || s >= longStarts[i - 1]!),
+  sttLong.slice(0, 60) + " … " + sttLong.slice(-60));
+
+// An option change transcribes the same audio again, and goes in the Deep Link.
+await page.locator(stt + ".lang-select").selectOption("en");
+await page.waitForFunction(() => document.querySelector(".tool-speech-to-text .progress")!.classList.contains("on"));
+await sttDone();
+check("speech: picking a language transcribes again in it",
+  (await sttMeta())!.startsWith("English · 0:4") && (await page.evaluate(() => location.hash)) === "#speech-to-text/en", (await sttMeta()) + " " + (await page.evaluate(() => location.hash)));
+await page.locator(stt + ".keywords").fill("Kubernetes, Nowak");
+await page.locator(stt + ".keywords").press("Enter");
+await page.waitForFunction(() => document.querySelector(".tool-speech-to-text .progress")!.classList.contains("on"));
+await sttDone();
+check("speech: keywords go in the Deep Link", (await page.evaluate(() => location.hash)) === "#speech-to-text/en.Kubernetes%2C%20Nowak", await page.evaluate(() => location.hash));
+
+// Cancel mid-way: the words so far stay, with a note saying where it stopped.
+// Clicked the moment the first Window lands, since the whole clip takes about two seconds.
+await page.evaluate(() => {
+  const phase = document.querySelector(".tool-speech-to-text .phase")!;
+  const obs = new MutationObserver(() => {
+    if (!/Transcribing \(0:[1-9]/.test(phase.textContent ?? "")) return;
+    obs.disconnect();
+    (document.querySelector(".tool-speech-to-text .cancel-btn") as HTMLElement).click();
+  });
+  obs.observe(phase, { childList: true, characterData: true, subtree: true });
+});
+await page.locator(stt + ".lang-select").selectOption("");
+await page.waitForFunction(() => document.querySelector(".tool-speech-to-text .note.on"), null, { timeout: 60000 });
+check("speech: cancel keeps the words so far and says where it stopped",
+  !(await sttProgress()) && /^Stopped at 0:\d\d of 0:46/.test((await page.locator(stt + ".note").textContent())!) && (await page.locator(stt + ".cue").count()) > 0,
+  (await page.locator(stt + ".note").textContent())!);
+
+// The microphone: Chromium's fake device plays the English clip once.
+await page.locator(stt + ".record-btn").click();
+await page.waitForFunction(() => /quick brown fox/i.test([...document.querySelectorAll(".tool-speech-to-text .cue p, .tool-speech-to-text .pending")].map((p) => p.textContent).join(" ")), null, { timeout: 60000 });
+check("speech: the microphone is transcribed while it records",
+  (await page.locator(stt + ".record-btn").textContent()) === "Stop" && /^Recording 0:\d\d$/.test((await page.locator(stt + ".phase").textContent())!));
+// Past the clip's end (5 s), so the speaker has finished when Stop is pressed.
+await page.waitForFunction(() => /^Recording 0:0[7-9]$/.test(document.querySelector(".tool-speech-to-text .phase")!.textContent ?? ""), null, { timeout: 30000 });
+await page.locator(stt + ".record-btn").click();
+await sttDone();
+const recordedText = await sttText();
+check("speech: stopping finishes the Recording and makes it playable",
+  /quick brown fox jumps over the lazy dog\. Please turn off the kitchen lights/i.test(recordedText) &&
+  (await page.locator(stt + ".status").textContent()) === "Microphone recording" &&
+  (await page.evaluate(() => (document.querySelector(".tool-speech-to-text .player") as HTMLAudioElement).src.startsWith("blob:"))) &&
+  /^recording-\d{4}-\d\d-\d\d-\d{4}\.srt$/.test((await sttDownload("srt")).name),
+  recordedText);
+
+// Second visit: the Deep Link restores the options, and the engine comes from IndexedDB.
+await page.goto("about:blank");
+await page.goto(url + "#speech-to-text/de.Berlin");
+await page.waitForFunction(() => (document.querySelector(".tool-speech-to-text .engines-text")!.textContent ?? "").startsWith("Engines cached"));
+check("speech: a Deep Link restores language and keywords",
+  (await page.locator(stt + ".lang-select").inputValue()) === "de" && (await page.locator(stt + ".keywords").inputValue()) === "Berlin");
+const hfRequests: string[] = [];
+const hfSpy = (r: { url(): string }) => { if (r.url().includes("huggingface.co")) hfRequests.push(r.url()); };
+page.on("request", hfSpy);
+await dropSpeech("de");
+await sttDone();
+page.off("request", hfSpy);
+check("speech: second visit transcribes from the cached engine with no download",
+  hfRequests.length === 0 && /Berlin/.test(await sttText()) && (await sttMeta())!.startsWith("German · "), hfRequests.join(" ") + " " + (await sttMeta()));
+await page.evaluate(() => { localStorage.removeItem("html-tools:speech-to-text:language"); localStorage.removeItem("html-tools:speech-to-text:keywords"); });
 
 // UUID Generator: one version 4 UUID on selection, another on Generate, and
 // both Copy and the value itself put it on the clipboard. No State, so the

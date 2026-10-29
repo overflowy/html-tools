@@ -1,6 +1,6 @@
 # html tools
 
-A collection of browser utilities built into one self-contained `index.html`. Open it from disk; nothing you type or drop leaves the browser. Heavy engines (Pyodide, OCR, Monaco) are fetched from a CDN on first use and cached.
+A collection of browser utilities built into one self-contained `index.html`. Open it from disk; nothing you type or drop leaves the browser. Heavy engines (Pyodide, OCR, Monaco, speech recognition) are fetched from a CDN on first use and cached.
 
 ## Tools
 
@@ -14,6 +14,7 @@ A collection of browser utilities built into one self-contained `index.html`. Op
 - **Markdown Editor**: editor, live preview, math, diagrams
 - **Python IDE**: Pyodide, Pyright, Ruff, and a terminal, per-project packages
 - **QR Code Generator**: links, WiFi, contacts, and more
+- **Speech to Text**: transcribe a file or the microphone in seven languages, with word timestamps and subtitles
 - **UUID Generator**: one random v4 UUID
 - **Whoami**: your public IPv4, IPv6, country, and user agent
 
