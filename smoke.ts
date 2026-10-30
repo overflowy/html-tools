@@ -13,6 +13,15 @@ import osvFixtures from "./src/tools/dependency-audit/fixtures/osv.json";
 import { DKIM_SELECTORS } from "./src/tools/dns-lookup/email";
 import dnsFixtures from "./src/tools/dns-lookup/fixtures.json";
 import { buildDocx, buildPdf } from "./src/tools/doc-to-markdown/fixtures";
+import { imagesToPdf } from "./src/tools/pdf-toolkit/pdf/images";
+import { protect } from "./src/tools/pdf-toolkit/pdf/security";
+import { makeSigner, signPdf } from "./src/tools/pdf-toolkit/pdf/sign-fixture";
+import {
+  makePdf,
+  openTest,
+  pageTexts,
+  testEnv,
+} from "./src/tools/pdf-toolkit/test-env";
 
 const exe =
   process.env.CHROMIUM_PATH ??
@@ -131,7 +140,7 @@ const present = <T>(v: T | null | undefined, what: string): T => {
 
 await page.goto(url);
 const names = await page.locator(".tool-list button").allTextContents();
-check("sidebar lists all tools", names.length === 17, names.join(", "));
+check("sidebar lists all tools", names.length === 18, names.join(", "));
 
 // base64 tool: paste a tiny valid png via direct input.
 await page.goto(`${url}#base64-to-image`);
@@ -4704,6 +4713,420 @@ await page.evaluate(() => {
     localStorage.removeItem(`html-tools:markdown-editor:${k}`);
   }
 });
+
+// PDF Toolkit: MuPDF and qpdf over the real CDN, from file://. The fixtures
+// are made here with the same engines: two text PDFs (one with a turned
+// page), one encrypted with a password full of commas, one signed with a
+// fresh key, and a scan with no text layer. What this proves: both engines
+// start in a data: URL worker; files merge, and the grid turns, deletes,
+// drags, and undoes; previews come out live and Apply makes them the
+// Workspace; every download is a PDF that says what it should (checked
+// here with MuPDF); redaction removes the text under a box; a password
+// prompt takes a wrong password and then the right one; a fresh signature
+// checks out; OCR gives a scan selectable text; and a Deep Link restores an
+// Operation's options.
+const ptk = ".tool-pdf-toolkit ";
+const ptkDir = mkdtempSync(path.join(tmpdir(), "html-tools-pdf-"));
+const ptkEnv = await testEnv();
+const ptkFiles = {
+  alpha: path.join(ptkDir, "alpha.pdf"),
+  beta: path.join(ptkDir, "beta.pdf"),
+  locked: path.join(ptkDir, "locked.pdf"),
+  scan: path.join(ptkDir, "scan.pdf"),
+  signed: path.join(ptkDir, "signed.pdf"),
+};
+await Bun.write(ptkFiles.alpha, makePdf(3, { label: "Alpha" }));
+await Bun.write(ptkFiles.beta, makePdf(2, { label: "Beta", rotate: 90 }));
+const PTK_PASSWORD = "open, sesame = yes";
+await Bun.write(
+  ptkFiles.locked,
+  protect(ptkEnv, makePdf(1, { label: "Locked" }), {
+    accessibility: true,
+    annotate: true,
+    assemble: true,
+    bits: 256,
+    copy: true,
+    forms: true,
+    modify: true,
+    ownerPassword: "",
+    print: "full",
+    userPassword: PTK_PASSWORD,
+  })
+);
+await Bun.write(
+  ptkFiles.signed,
+  await signPdf(
+    makePdf(1, { label: "Signed" }),
+    await makeSigner("Smoke Signer")
+  )
+);
+{
+  // A scan: a page of text rendered to a JPEG, made into a page with no text layer.
+  const text = openTest(makePdf(1, { label: "The quick brown fox" }));
+  const pix = text
+    .loadPage(0)
+    .toPixmap(
+      [3, 0, 0, 3, 0, 0],
+      ptkEnv.mupdf.ColorSpace.DeviceRGB,
+      false,
+      true
+    );
+  pix.setResolution(216, 216);
+  await Bun.write(
+    ptkFiles.scan,
+    imagesToPdf(ptkEnv, [new Uint8Array(pix.asJPEG(90, false))], {
+      fit: "contain",
+      margin: 0,
+      orientation: "auto",
+      page: "image",
+    })
+  );
+}
+
+const ptkIdle = () =>
+  page.waitForFunction(
+    () => !document.querySelector(".tool-pdf-toolkit .progress.on"),
+    undefined,
+    { timeout: 180_000 }
+  );
+const ptkStatus = () => textOf(page.locator(`${ptk}.status`));
+const ptkFoot = () => textOf(page.locator(`${ptk}.foot-status`));
+const ptkPanel = async (id: string) => {
+  await page.selectOption(`${ptk}.panel-select`, id);
+  await ptkIdle();
+};
+/** A live preview settled: the Result on screen and the foot no longer updating. */
+const ptkPreview = () =>
+  page.waitForFunction(
+    () => {
+      const root = document.querySelector(".tool-pdf-toolkit");
+      const foot =
+        root?.querySelector(".foot-status")?.textContent ?? "Updating";
+      return (
+        root?.classList.contains("showing-result") &&
+        !foot.startsWith("Updating") &&
+        !foot.startsWith("Working")
+      );
+    },
+    undefined,
+    { timeout: 60_000 }
+  );
+const ptkDownload = async (click: () => Promise<void>) => {
+  const [d] = await Promise.all([page.waitForEvent("download"), click()]);
+  const file = await d.path();
+  return {
+    bytes: new Uint8Array(await Bun.file(file).arrayBuffer()),
+    name: d.suggestedFilename(),
+  };
+};
+const ptkThumbs = () =>
+  page.evaluate(() =>
+    [
+      ...document.querySelectorAll<HTMLCanvasElement>(
+        ".tool-pdf-toolkit .thumb canvas"
+      ),
+    ].map((c) => (c.width > c.height ? "wide" : "tall"))
+  );
+/** Drag across a page in the Pages view, from and to points given in page points. */
+const ptkDrag = async (
+  pageIndex: number,
+  from: [number, number],
+  to: [number, number]
+) => {
+  const overlay = page.locator(`${ptk}.page .overlay`).nth(pageIndex);
+  await overlay.scrollIntoViewIfNeeded();
+  const box = await overlay.boundingBox();
+  const size = await overlay.evaluate((svg) =>
+    svg.getAttribute("viewBox")?.split(" ").map(Number)
+  );
+  if (!box || !size) {
+    throw new Error("The page has no overlay to draw on");
+  }
+  const at = ([x, y]: [number, number]) => [
+    box.x + (x / (size[2] ?? 1)) * box.width,
+    box.y + (y / (size[3] ?? 1)) * box.height,
+  ];
+  const [x0 = 0, y0 = 0] = at(from);
+  const [x1 = 0, y1 = 0] = at(to);
+  await page.mouse.move(x0, y0);
+  await page.mouse.down();
+  await page.mouse.move((x0 + x1) / 2, (y0 + y1) / 2, { steps: 4 });
+  await page.mouse.move(x1, y1, { steps: 4 });
+  await page.mouse.up();
+};
+
+await page.goto("about:blank");
+await page.goto(`${url}#pdf-toolkit`);
+await page.setInputFiles(`${ptk}.open-input`, [ptkFiles.alpha, ptkFiles.beta]);
+await page.waitForSelector(`${ptk}.workspace.on`, { timeout: 180_000 });
+await ptkIdle();
+check(
+  "pdf: two files open as one Workspace of five pages",
+  (await ptkStatus()) === "alpha + 1 file · 5 pages" &&
+    (await page.locator(`${ptk}.thumb`).count()) === 5,
+  await ptkStatus()
+);
+await page.waitForFunction(() =>
+  [
+    ...document.querySelectorAll<HTMLCanvasElement>(
+      ".tool-pdf-toolkit .thumb canvas"
+    ),
+  ].every((c) => c.width > 0)
+);
+check(
+  "pdf: the turned file's pages are shown turned",
+  JSON.stringify(await ptkThumbs()) ===
+    JSON.stringify(["tall", "tall", "tall", "wide", "wide"])
+);
+
+// The grid: turn all, undo; delete with the keyboard, undo; drag the last page first.
+await page.locator(`${ptk}.panel-body button`, { hasText: "All" }).click();
+await page
+  .locator(`${ptk}.panel-body button`, { hasText: "Turn right" })
+  .click();
+await page.waitForFunction(
+  () =>
+    (
+      document.querySelector(
+        ".tool-pdf-toolkit .thumb canvas"
+      ) as HTMLCanvasElement
+    )?.width > 0
+);
+await page.waitForTimeout(300);
+const turnedThumbs = await ptkThumbs();
+await page.keyboard.press("Meta+z");
+await page.waitForTimeout(300);
+check(
+  "pdf: turning every page, then undo",
+  JSON.stringify(turnedThumbs) ===
+    JSON.stringify(["wide", "wide", "wide", "tall", "tall"]) &&
+    JSON.stringify(await ptkThumbs()) ===
+      JSON.stringify(["tall", "tall", "tall", "wide", "wide"]),
+  JSON.stringify(turnedThumbs)
+);
+await page.locator(`${ptk}.thumb`).nth(1).click();
+await page.keyboard.press("Delete");
+const afterDelete = await page.locator(`${ptk}.thumb`).count();
+await page.keyboard.press("Meta+z");
+check(
+  "pdf: Delete removes the selected page, undo brings it back",
+  afterDelete === 4 && (await page.locator(`${ptk}.thumb`).count()) === 5
+);
+await page
+  .locator(`${ptk}.thumb`)
+  .nth(4)
+  .dragTo(page.locator(`${ptk}.thumb`).nth(0), {
+    targetPosition: { x: 10, y: 60 },
+  });
+const merged = await ptkDownload(() =>
+  page.locator(`${ptk}.download-btn`).click()
+);
+check(
+  "pdf: Download PDF is the Page List, dragged page first, turned page kept turned",
+  JSON.stringify(pageTexts(merged.bytes)) ===
+    JSON.stringify(["Beta 2", "Alpha 1", "Alpha 2", "Alpha 3", "Beta 1"]) &&
+    openTest(merged.bytes)
+      .loadPage(0)
+      .getObject()
+      .getInheritable("Rotate")
+      .asNumber() === 90,
+  JSON.stringify(pageTexts(merged.bytes))
+);
+await page.keyboard.press("Meta+z");
+
+// A live preview, applied, downloaded.
+await ptkPanel("watermark");
+await ptkPreview();
+await page.locator(`${ptk}.panel-body input[type=text]`).first().fill("SMOKE");
+// The preview of the text typed: it starts once typing settles, then settles itself.
+await page.waitForFunction(
+  () =>
+    (
+      document.querySelector(".tool-pdf-toolkit .foot-status")?.textContent ??
+      ""
+    ).startsWith("Updating"),
+  undefined,
+  { polling: "raf" }
+);
+await ptkPreview();
+const markedFoot = await ptkFoot();
+await page.locator(`${ptk}.panel-foot button`, { hasText: "Apply" }).click();
+await page.waitForFunction(
+  () =>
+    document.querySelector<HTMLSelectElement>(".tool-pdf-toolkit .panel-select")
+      ?.value === "organize"
+);
+const marked = await ptkDownload(() =>
+  page.locator(`${ptk}.download-btn`).click()
+);
+check(
+  "pdf: a watermark previews live, applies, and is in every page's text",
+  markedFoot.startsWith("5 pages · ") &&
+    pageTexts(marked.bytes).every((t) => t.includes("SMOKE")),
+  `${markedFoot} ${JSON.stringify(pageTexts(marked.bytes))}`
+);
+await page.keyboard.press("Meta+z");
+
+// Split into single pages: a zip of five PDFs.
+await ptkPanel("split");
+const parts = await ptkDownload(() =>
+  page.locator(`${ptk}.panel-body button`, { hasText: "Split" }).click()
+);
+{
+  const zipPath = path.join(ptkDir, parts.name);
+  await Bun.write(zipPath, parts.bytes);
+  const listing = Bun.spawnSync([
+    "python3",
+    "-I",
+    "-c",
+    "import sys, zipfile; z = zipfile.ZipFile(sys.argv[1]); print(z.testzip()); print(len(z.namelist()))",
+    zipPath,
+  ]).stdout.toString();
+  check(
+    "pdf: split into single pages downloads a zip of five PDFs",
+    parts.name === "alpha-split.zip" && listing.trim() === "None\n5",
+    `${parts.name} ${listing}`
+  );
+}
+
+// Redact a box drawn over the first page's heading.
+await ptkPanel("redact");
+await ptkDrag(0, [60, 40], [220, 84]);
+await page.locator(`${ptk}.panel-body button`, { hasText: "Preview" }).click();
+await ptkIdle();
+const redacted = await ptkDownload(() =>
+  page.locator(`${ptk}.panel-foot button`, { hasText: "Download" }).click()
+);
+check(
+  "pdf: redaction removes the text under the box from the file",
+  pageTexts(redacted.bytes)[0] === "" &&
+    !new TextDecoder("latin1").decode(redacted.bytes).includes("Alpha 1"),
+  pageTexts(redacted.bytes)[0]
+);
+
+// Highlight by dragging across text, then apply.
+await ptkPanel("annotate");
+await ptkDrag(1, [60, 60], [200, 80]);
+await page.waitForFunction(() =>
+  (
+    document.querySelector(".tool-pdf-toolkit .foot-status")?.textContent ?? ""
+  ).startsWith("1 new")
+);
+const annotated = await ptkDownload(() =>
+  page.locator(`${ptk}.panel-foot button`, { hasText: "Download" }).click()
+);
+check(
+  "pdf: a highlight dragged across text is a Highlight annotation on that page",
+  openTest(annotated.bytes)
+    .loadPage(1)
+    .getAnnotations()
+    .map((a) => a.getType())
+    .join(",") === "Highlight"
+);
+
+// Protect with a password, then open what came out.
+await ptkPanel("protect");
+await page
+  .locator(`${ptk}.panel-body input[type=password]`)
+  .first()
+  .fill(PTK_PASSWORD);
+await page.locator(`${ptk}.panel-body button`, { hasText: "Encrypt" }).click();
+await ptkIdle();
+const protectedPdf = await ptkDownload(() =>
+  page.locator(`${ptk}.panel-foot button`, { hasText: "Download" }).click()
+);
+{
+  const doc = ptkEnv.mupdf.Document.openDocument(
+    protectedPdf.bytes,
+    "application/pdf"
+  );
+  check(
+    "pdf: Protect encrypts with a password that has commas in it",
+    doc.needsPassword() && doc.authenticatePassword(PTK_PASSWORD) > 0
+  );
+}
+
+// An encrypted file: a wrong password, then the right one.
+await page.setInputFiles(`${ptk}.add-input`, [ptkFiles.locked]);
+await page.waitForSelector(`${ptk}.locked.on`);
+await page.locator(`${ptk}.unlock-pw`).fill("wrong");
+await page.locator(`${ptk}.unlock-btn`).click();
+await page.waitForFunction(() =>
+  (
+    document.querySelector(".tool-pdf-toolkit .locked-text")?.textContent ?? ""
+  ).startsWith("Wrong password")
+);
+await page.locator(`${ptk}.unlock-pw`).fill(PTK_PASSWORD);
+await page.locator(`${ptk}.unlock-btn`).click();
+await ptkIdle();
+const lockedStatus = await ptkStatus();
+const lockedNote = await textOf(page.locator(`${ptk}.note-text`));
+check(
+  "pdf: an encrypted file asks again after a wrong password, then joins the Workspace",
+  lockedStatus.endsWith("6 pages") && lockedNote.includes("was encrypted"),
+  lockedStatus
+);
+
+// A signed file on its own: the signature checks out.
+await page.setInputFiles(`${ptk}.open-input`, [ptkFiles.signed]);
+await ptkIdle();
+await ptkPanel("signatures");
+await page.waitForSelector(`${ptk}.sig-card`, { timeout: 30_000 });
+const sigVerdict = await textOf(page.locator(`${ptk}.sig-card .verdict-line`));
+const sigCard = await textOf(page.locator(`${ptk}.sig-card`));
+check(
+  "pdf: a fresh signature is valid and covers the whole file",
+  sigVerdict === "Valid, and the document is unchanged since" &&
+    sigCard.includes("Smoke Signer"),
+  sigCard
+);
+
+// OCR a scan: the result has text to search.
+await page.setInputFiles(`${ptk}.open-input`, [ptkFiles.scan]);
+await ptkIdle();
+await ptkPanel("ocr");
+await page
+  .locator(`${ptk}.panel-body button`, { hasText: "Recognize" })
+  .click();
+await page.waitForFunction(
+  () =>
+    document
+      .querySelector(".tool-pdf-toolkit")
+      ?.classList.contains("showing-result"),
+  undefined,
+  { timeout: 240_000 }
+);
+const ocred = await ptkDownload(() =>
+  page.locator(`${ptk}.panel-foot button`, { hasText: "Download" }).click()
+);
+check(
+  "pdf: OCR gives a scan a text layer that reads what the scan says",
+  /quick brown fox/iu.test(pageTexts(ocred.bytes)[0] ?? ""),
+  pageTexts(ocred.bytes)[0]
+);
+
+// A Deep Link opens an Operation with its options.
+await page.goto("about:blank");
+await page.goto(`${url}#pdf-toolkit/watermark?text=SECRET&angle=30`);
+await page.setInputFiles(`${ptk}.open-input`, [ptkFiles.alpha]);
+await ptkIdle();
+check(
+  "pdf: a Deep Link restores the Operation and its options",
+  (await page.locator(`${ptk}.panel-select`).inputValue()) === "watermark" &&
+    (await page
+      .locator(`${ptk}.panel-body input[type=text]`)
+      .first()
+      .inputValue()) === "SECRET" &&
+    (await page
+      .locator(`${ptk}.panel-body input[type=number]`)
+      .nth(1)
+      .inputValue()) === "30"
+);
+await page.waitForFunction(() =>
+  (
+    document.querySelector(".tool-pdf-toolkit .engines-text")?.textContent ?? ""
+  ).startsWith("Engines cached")
+);
 
 // Narrow layout: below 768px the sidebar becomes an on-demand drawer.
 await page.setViewportSize({ height: 667, width: 375 });

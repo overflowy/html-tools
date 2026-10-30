@@ -11,6 +11,7 @@ import fileHashes from "./tools/file-hashes";
 import imageMetadata from "./tools/image-metadata";
 import jsoncSorter from "./tools/jsonc-sorter";
 import markdownEditor from "./tools/markdown-editor";
+import pdfToolkit from "./tools/pdf-toolkit";
 import pythonIde from "./tools/python-ide";
 import qrGenerator from "./tools/qr-generator";
 import saveDecoder from "./tools/save-decoder";
@@ -30,6 +31,7 @@ export const tools: Tool[] = [
   imageMetadata,
   jsoncSorter,
   markdownEditor,
+  pdfToolkit,
   pythonIde,
   qrGenerator,
   saveDecoder,

@@ -1,6 +1,6 @@
 # html tools
 
-A collection of browser utilities built into one self-contained `index.html`. Open it from disk; nothing you type or drop leaves the browser. Heavy engines (Pyodide, OCR, Monaco, speech recognition, 7-Zip) are fetched from a CDN on first use and cached.
+A collection of browser utilities built into one self-contained `index.html`. Open it from disk; nothing you type or drop leaves the browser. Heavy engines (Pyodide, OCR, Monaco, speech recognition, 7-Zip, MuPDF, qpdf) are fetched from a CDN on first use and cached.
 
 ## Tools
 
@@ -16,6 +16,7 @@ A collection of browser utilities built into one self-contained `index.html`. Op
 - **JSON/JSONC Key Sorter**: sort keys, keep comments
 - **LZString Save Decoder**: decode and encode incremental-game saves
 - **Markdown Editor**: editor, live preview, math, diagrams
+- **PDF Toolkit**: merge, organize, booklets, posters, watermarks, page numbers, forms, annotations, redaction, passwords, signatures, compression, compare, OCR, and more, previewed before they are made
 - **Python IDE**: Pyodide, Pyright, Ruff, and a terminal, per-project packages
 - **QR Code Generator**: links, WiFi, contacts, and more
 - **Speech to Text**: transcribe a file or the microphone in seven languages, with word timestamps and subtitles
@@ -53,4 +54,4 @@ uv run --with fonttools --with brotli python scripts/build-mona-sans.py "MonaSan
 
 ## License
 
-MIT, except the fonts in `src/shell/fonts/`, which are under the SIL Open Font License 1.1 (license files alongside), the sounds in `src/tools/dual-n-back/sounds/`, which are under the GNU GPL v2 (`NOTICE.md` alongside), and the 7-Zip build in `vendor/js7z/`, which is under the GNU LGPL with the unRAR license restriction (`README.md` and the license files alongside).
+MIT, except the fonts in `src/shell/fonts/`, which are under the SIL Open Font License 1.1 (license files alongside), the sounds in `src/tools/dual-n-back/sounds/`, which are under the GNU GPL v2 (`NOTICE.md` alongside), and the 7-Zip build in `vendor/js7z/`, which is under the GNU LGPL with the unRAR license restriction (`README.md` and the license files alongside). The engines fetched at run time keep their own licenses; among them, MuPDF is under the GNU AGPL and qpdf under the Apache License 2.0.

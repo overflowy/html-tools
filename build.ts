@@ -16,6 +16,7 @@ const WORKERS = [
   },
   { constant: "DOC_WORKER_SRC", entry: "src/tools/doc-to-markdown/worker.ts" },
   { constant: "HASH_WORKER_SRC", entry: "src/tools/file-hashes/worker.ts" },
+  { constant: "PDF_WORKER_SRC", entry: "src/tools/pdf-toolkit/worker.ts" },
   {
     constant: "PYIDE_PY_WORKER_SRC",
     entry: "src/tools/python-ide/py-worker.ts",

@@ -1,5 +1,7 @@
 /** Source of the Archive Manager's 7-Zip worker bundle, injected by build.ts. */
 declare const ARCHIVE_WORKER_SRC: string;
+/** Source of the PDF Toolkit's MuPDF and qpdf worker bundle, injected by build.ts. */
+declare const PDF_WORKER_SRC: string;
 /** Source of the File Hashes worker bundle, injected by build.ts. */
 declare const HASH_WORKER_SRC: string;
 /** Source of the Document to Markdown worker bundle, injected by build.ts. */

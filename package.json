@@ -22,6 +22,7 @@
     "tesseract.js": "7.0.0"
   },
   "devDependencies": {
+    "@neslinesli93/qpdf-wasm": "0.3.0",
     "@react-symbols/icons": "1.4.1",
     "@types/bun": "^1.4.0",
     "@types/react": "^19.2.18",
@@ -31,6 +32,7 @@
     "jsqr": "^1.4.0",
     "lucide-static": "1.39.0",
     "monaco-editor": "0.56.0",
+    "mupdf": "1.28.1",
     "oxfmt": "^0.71.0",
     "oxlint": "^1.86.0",
     "playwright-core": "^1.62.1",
