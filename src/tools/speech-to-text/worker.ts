@@ -1,4 +1,3 @@
-/* oxlint-disable no-underscore-dangle -- Emscripten exports the C functions with a leading underscore */
 // The transcription worker. The Needle runtime is synchronous WebAssembly and
 // blocks whichever thread calls it, so it lives here, off the main thread,
 // and the Tool talks to it by message. Built as its own bundle by build.ts.
@@ -79,8 +78,7 @@ let out = 0;
 let ready = Promise.withResolvers<Needle>().promise;
 
 // A dedicated worker has no targetOrigin to give.
-// oxlint-disable-next-line unicorn/require-post-message-target-origin
-const post = (msg: WorkerResponse) => self.postMessage(msg);
+const post = (msg: WorkerResponse) => self.postMessage(msg, { transfer: [] });
 
 const lastError = (m: Needle) =>
   m.UTF8ToString(m._needle_last_error()) || "unknown error";
