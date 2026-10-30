@@ -36,7 +36,7 @@ export type TraceResult =
  * The trace body is `key=value` lines. Only the three keys Whoami shows are
  * read; a body missing any of them is not a trace.
  */
-export function parseTrace(text: string): TraceInfo | null {
+export const parseTrace = (text: string): TraceInfo | null => {
   const fields = new Map<string, string>();
   for (const line of text.split("\n")) {
     const eq = line.indexOf("=");
@@ -50,10 +50,10 @@ export function parseTrace(text: string): TraceInfo | null {
   if (!ip || userAgent === undefined || !country) {
     return null;
   }
-  return { ip, userAgent, country };
-}
+  return { country, ip, userAgent };
+};
 
-function timeoutSignal(parent: AbortSignal, ms: number): AbortSignal {
+const timeoutSignal = (parent: AbortSignal, ms: number): AbortSignal => {
   const ctrl = new AbortController();
   const timer = setTimeout(
     () =>
@@ -74,7 +74,7 @@ function timeoutSignal(parent: AbortSignal, ms: number): AbortSignal {
     once: true,
   });
   return ctrl.signal;
-}
+};
 
 /**
  * Run one Trace. Never throws except when `signal` aborts: from a browser a
@@ -82,10 +82,10 @@ function timeoutSignal(parent: AbortSignal, ms: number): AbortSignal {
  * reported as "unreachable over this protocol" and the message keeps both
  * possibilities open.
  */
-export async function fetchTrace(
+export const fetchTrace = async (
   protocol: Protocol,
   signal: AbortSignal
-): Promise<TraceResult> {
+): Promise<TraceResult> => {
   const label = PROTOCOL_LABEL[protocol];
   let res: Response;
   try {
@@ -121,12 +121,12 @@ export async function fetchTrace(
       message: `Cloudflare's answer over ${label} was not a trace.`,
     };
   }
-  return { kind: "found", info };
-}
+  return { info, kind: "found" };
+};
 
 /** "IT" -> "Italy" where the browser knows the code; null for codes it does not (XX, T1). */
-export function countryName(code: string): string | null {
-  if (!/^[A-Z]{2}$/.test(code)) {
+export const countryName = (code: string): string | null => {
+  if (!/^[A-Z]{2}$/u.test(code)) {
     return null;
   }
   try {
@@ -135,4 +135,4 @@ export function countryName(code: string): string | null {
   } catch {
     return null;
   }
-}
+};

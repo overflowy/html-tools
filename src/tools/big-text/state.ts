@@ -42,20 +42,20 @@ export interface Settings {
 export const LIMITS = { pad: [0, 40], secs: [0.5, 3600] } as const;
 
 export const DEFAULTS: Settings = {
-  message: "",
-  font: "sans",
-  fg: "#ffffff",
   bg: "#000000",
-  pad: 5,
-  wrap: true,
-  scroll: false,
-  speed: "normal",
-  secs: 5,
-  transition: "fade",
   countdown: { kind: "none" },
-  style: "label",
   end: "freeze",
   endText: "",
+  fg: "#ffffff",
+  font: "sans",
+  message: "",
+  pad: 5,
+  scroll: false,
+  secs: 5,
+  speed: "normal",
+  style: "label",
+  transition: "fade",
+  wrap: true,
 };
 
 const pick = <T extends string>(
@@ -64,32 +64,29 @@ const pick = <T extends string>(
   fallback: T
 ): T => (list.includes(v as T) ? (v as T) : fallback);
 
-function num(
+const num = (
   v: string | null,
   [lo, hi]: readonly [number, number],
   fallback: number
-): number {
+): number => {
   if (v === null || v.trim() === "") {
     return fallback;
   }
   const n = Number(v);
   return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : fallback;
-}
+};
 
 const hex = (v: string | null, fallback: string) =>
-  v && /^[0-9a-f]{6}$/i.test(v) ? `#${v.toLowerCase()}` : fallback;
+  v && /^[0-9a-f]{6}$/iu.test(v) ? `#${v.toLowerCase()}` : fallback;
 
 /** An instant as UTC to the second: `2026-12-31T23:00:00Z`. */
 const isoSeconds = (ms: number) =>
-  new Date(ms).toISOString().replace(/\.\d{3}Z$/, "Z");
+  new Date(ms).toISOString().replace(/\.\d{3}Z$/u, "Z");
 
-/** `show` marks a Present Link: it opens straight onto the display. */
-export function encode(s: Settings, show = false): string {
-  const p = new URLSearchParams();
+// The parts of `encode`, each appending its parameters in Deep Link order.
+
+const encodeLook = (s: Settings, p: URLSearchParams) => {
   const d = DEFAULTS;
-  if (s.message) {
-    p.set("m", s.message);
-  }
   if (s.font !== d.font) {
     p.set("font", s.font);
   }
@@ -105,6 +102,10 @@ export function encode(s: Settings, show = false): string {
   if (!s.wrap) {
     p.set("wrap", "0");
   }
+};
+
+const encodeMotion = (s: Settings, p: URLSearchParams) => {
+  const d = DEFAULTS;
   if (s.scroll) {
     p.set("scroll", "1");
   }
@@ -117,6 +118,10 @@ export function encode(s: Settings, show = false): string {
   if (s.transition !== d.transition) {
     p.set("trans", s.transition);
   }
+};
+
+const encodeCountdown = (s: Settings, p: URLSearchParams) => {
+  const d = DEFAULTS;
   const cd = s.countdown;
   if (cd.kind === "until") {
     p.set("until", isoSeconds(cd.at));
@@ -135,39 +140,58 @@ export function encode(s: Settings, show = false): string {
       p.set("endtext", s.endText);
     }
   }
+};
+
+/** `show` marks a Present Link: it opens straight onto the display. */
+export const encode = (s: Settings, show = false): string => {
+  const p = new URLSearchParams();
+  if (s.message) {
+    p.set("m", s.message);
+  }
+  encodeLook(s, p);
+  encodeMotion(s, p);
+  encodeCountdown(s, p);
   if (show) {
     p.set("show", "1");
   }
   return p.toString();
-}
+};
 
-export function decode(payload: string): { settings: Settings; show: boolean } {
+/** An Until wins over a Timer when a link somehow carries both. */
+const countdownOf = (until: number, timer: number | null): Countdown => {
+  if (Number.isFinite(until)) {
+    return { at: until, kind: "until" };
+  }
+  if (timer) {
+    return { kind: "timer", secs: timer };
+  }
+  return { kind: "none" };
+};
+
+export const decode = (
+  payload: string
+): { settings: Settings; show: boolean } => {
   const p = new URLSearchParams(payload);
   const d = DEFAULTS;
   const until = Date.parse(p.get("until") ?? "");
   const timer = parseDuration(p.get("timer") ?? "");
-  const countdown: Countdown = Number.isFinite(until)
-    ? { kind: "until", at: until }
-    : timer
-      ? { kind: "timer", secs: timer }
-      : { kind: "none" };
   return {
     settings: {
-      message: p.get("m") ?? "",
-      font: pick(FONTS, p.get("font"), d.font),
-      fg: hex(p.get("fg"), d.fg),
       bg: hex(p.get("bg"), d.bg),
-      pad: num(p.get("pad"), LIMITS.pad, d.pad),
-      wrap: p.get("wrap") !== "0",
-      scroll: p.get("scroll") === "1",
-      speed: pick(SPEEDS, p.get("speed"), d.speed),
-      secs: num(p.get("secs"), LIMITS.secs, d.secs),
-      transition: pick(TRANSITIONS, p.get("trans"), d.transition),
-      countdown,
-      style: p.get("style") === "clock" ? "clock" : "label",
+      countdown: countdownOf(until, timer),
       end: pick(ENDS, p.get("end"), d.end),
       endText: p.get("endtext") ?? "",
+      fg: hex(p.get("fg"), d.fg),
+      font: pick(FONTS, p.get("font"), d.font),
+      message: p.get("m") ?? "",
+      pad: num(p.get("pad"), LIMITS.pad, d.pad),
+      scroll: p.get("scroll") === "1",
+      secs: num(p.get("secs"), LIMITS.secs, d.secs),
+      speed: pick(SPEEDS, p.get("speed"), d.speed),
+      style: p.get("style") === "clock" ? "clock" : "label",
+      transition: pick(TRANSITIONS, p.get("trans"), d.transition),
+      wrap: p.get("wrap") !== "0",
     },
     show: p.get("show") === "1",
   };
-}
+};

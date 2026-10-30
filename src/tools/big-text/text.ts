@@ -29,13 +29,13 @@ type Token =
   | { k: "slide"; at: number }
   | { k: "countdown" };
 
-function tokenize(src: string): Token[] {
+const tokenize = (src: string): Token[] => {
   const out: Token[] = [];
   for (let i = 0; i < src.length;) {
-    const c = src[i]!;
+    const c = src.charAt(i);
     const next = src[i + 1];
     if (c === "\\" && next !== undefined && next !== "\n") {
-      out.push({ k: "ch", c: next, literal: true });
+      out.push({ c: next, k: "ch", literal: true });
       i += 2;
     } else if (c === "\n") {
       out.push({ k: "nl" });
@@ -48,25 +48,25 @@ function tokenize(src: string): Token[] {
         out.push({ k: "code", text: src.slice(i + 1, end) });
         i = end + 1;
       } else {
-        out.push({ k: "ch", c, literal: false });
+        out.push({ c, k: "ch", literal: false });
         i += 1;
       }
     } else if (c === "|" && next === "|") {
-      out.push({ k: "slide", at: i });
+      out.push({ at: i, k: "slide" });
       i += 2;
     } else if (src.startsWith(COUNTDOWN, i)) {
       out.push({ k: "countdown" });
       i += COUNTDOWN.length;
     } else {
-      out.push({ k: "ch", c, literal: false });
+      out.push({ c, k: "ch", literal: false });
       i += 1;
     }
   }
   return out;
-}
+};
 
 const isBlank = (t: Token) =>
-  t.k === "nl" || (t.k === "ch" && !t.literal && /\s/.test(t.c));
+  t.k === "nl" || (t.k === "ch" && !t.literal && /\s/u.test(t.c));
 
 /* ---------------- emphasis ---------------- */
 
@@ -78,7 +78,7 @@ interface Run {
 }
 
 /** Whitespace, or undefined at either end of the block. */
-function charOf(t: Token | undefined): string | undefined {
+const charOf = (t: Token | undefined): string | undefined => {
   if (!t) {
     return undefined;
   }
@@ -89,114 +89,25 @@ function charOf(t: Token | undefined): string | undefined {
     return "\n";
   }
   return "x";
-}
+};
 
-/**
- * Inline marks for one block. A closing run matches the nearest open run of
- * the same character and length; anything left unmatched is shown as typed.
- * An underscore inside a word is always literal (`snake_case`).
- */
-function inlines(tokens: Token[]): Inline[] {
-  const out: (Inline | Run)[] = [];
-  const stack: number[] = [];
-  const space = (c: string | undefined) => c === undefined || /\s/.test(c);
-  const word = (c: string | undefined) =>
-    c !== undefined && /[\p{L}\p{N}]/u.test(c);
+const isRun = (x: Inline | Run): x is Run => typeof x === "object" && "n" in x;
 
-  for (let i = 0; i < tokens.length;) {
-    const t = tokens[i]!;
-    if (t.k === "code") {
-      out.push({ tag: "code", text: t.text });
-      i += 1;
-      continue;
-    }
-    if (t.k === "countdown") {
-      out.push({ tag: "countdown" });
-      i += 1;
-      continue;
-    }
-    if (t.k === "nl") {
-      out.push("\n");
-      i += 1;
-      continue;
-    }
-    if (t.k !== "ch") {
-      i += 1;
-      continue;
-    }
-
-    const { c } = t;
-    if (t.literal || (c !== "*" && c !== "_" && c !== "~")) {
-      out.push(c);
-      i += 1;
-      continue;
-    }
-    let j = i;
-    while (
-      j < tokens.length &&
-      tokens[j]!.k === "ch" &&
-      !(tokens[j] as { literal: boolean }).literal &&
-      (tokens[j] as { c: string }).c === c
-    ) {
-      j += 1;
-    }
-    const n = j - i;
-    const before = charOf(tokens[i - 1]);
-    const after = charOf(tokens[j]);
-    i = j;
-
-    const usable = c === "~" ? n === 2 : n <= 3;
-    let open = usable && !space(after);
-    let close = usable && !space(before);
-    if (c === "_") {
-      open &&= !word(before);
-      close &&= !word(after);
-    }
-    if (close) {
-      const at = stack.findLastIndex((s) => {
-        const r = out[s] as Run;
-        return r.c === c && r.n === n;
-      });
-      if (at !== -1) {
-        const start = stack[at]!;
-        const inner = out
-          .splice(start)
-          .slice(1)
-          .map((x) => (isRun(x) ? x.c.repeat(x.n) : x));
-        stack.length = at;
-        out.push(wrap(c, n, merge(inner)));
-        continue;
-      }
-    }
-    if (open) {
-      stack.push(out.length);
-      out.push({ c, n, open, close });
-      continue;
-    }
-    out.push(c.repeat(n));
-  }
-  return merge(out.map((x) => (isRun(x) ? x.c.repeat(x.n) : x)));
-}
-
-function isRun(x: Inline | Run): x is Run {
-  return typeof x === "object" && "n" in x;
-}
-
-function wrap(c: Run["c"], n: number, children: Inline[]): Inline {
+const wrap = (c: Run["c"], n: number, children: Inline[]): Inline => {
   if (c === "~") {
-    return { tag: "del", children };
+    return { children, tag: "del" };
   }
   if (n === 1) {
-    return { tag: "em", children };
+    return { children, tag: "em" };
   }
   if (n === 2) {
-    return { tag: "strong", children };
+    return { children, tag: "strong" };
   }
-  return { tag: "strong", children: [{ tag: "em", children }] };
-}
+  return { children: [{ children, tag: "em" }], tag: "strong" };
+};
 
 /** Joins neighbouring strings, so the tree holds one string per text run. */
-function merge(xs: Inline[]): Inline[] {
+const merge = (xs: Inline[]): Inline[] => {
   const out: Inline[] = [];
   for (const x of xs) {
     const last = out.at(-1);
@@ -207,24 +118,136 @@ function merge(xs: Inline[]): Inline[] {
     }
   }
   return out;
-}
+};
+
+/** What a token shows as when it is not part of a run of marks; null for none. */
+const plainInline = (t: Token): Inline | null => {
+  if (t.k === "code") {
+    return { tag: "code", text: t.text };
+  }
+  if (t.k === "countdown") {
+    return { tag: "countdown" };
+  }
+  if (t.k === "nl") {
+    return "\n";
+  }
+  if (t.k === "ch") {
+    return t.c;
+  }
+  return null;
+};
+
+const MARKS = new Set(["*", "_", "~"]);
+
+/** An unescaped `*`, `_` or `~`. */
+const isMark = (t: Token): t is { k: "ch"; c: Run["c"]; literal: false } =>
+  t.k === "ch" && !t.literal && MARKS.has(t.c);
+
+/**
+ * The tokens as single tokens and runs of one mark character; a run covers
+ * `tokens[start]` up to, not including, `tokens[end]`.
+ */
+type Unit =
+  | { token: Token }
+  | { c: Run["c"]; n: number; start: number; end: number };
+
+const units = (tokens: Token[]): Unit[] => {
+  const out: Unit[] = [];
+  for (const [i, t] of tokens.entries()) {
+    const last = out.at(-1);
+    if (!isMark(t)) {
+      out.push({ token: t });
+    } else if (last && "c" in last && last.c === t.c && last.end === i) {
+      last.n += 1;
+      last.end = i + 1;
+    } else {
+      out.push({ c: t.c, end: i + 1, n: 1, start: i });
+    }
+  }
+  return out;
+};
+
+const isSpace = (c: string | undefined) => c === undefined || /\s/u.test(c);
+const isWordChar = (c: string | undefined) =>
+  c !== undefined && /[\p{L}\p{N}]/u.test(c);
+
+/** Whether a run of `n` marks `c` between `before` and `after` can open or close emphasis. */
+const runSides = (
+  c: Run["c"],
+  n: number,
+  before: string | undefined,
+  after: string | undefined
+): { open: boolean; close: boolean } => {
+  const usable = c === "~" ? n === 2 : n <= 3;
+  let open = usable && !isSpace(after);
+  let close = usable && !isSpace(before);
+  if (c === "_") {
+    open &&= !isWordChar(before);
+    close &&= !isWordChar(after);
+  }
+  return { close, open };
+};
+
+/**
+ * Inline marks for one block. A closing run matches the nearest open run of
+ * the same character and length; anything left unmatched is shown as typed.
+ * An underscore inside a word is always literal (`snake_case`).
+ */
+const inlines = (tokens: Token[]): Inline[] => {
+  const out: (Inline | Run)[] = [];
+  const stack: number[] = [];
+  const flat = (x: Inline | Run) => (isRun(x) ? x.c.repeat(x.n) : x);
+
+  for (const u of units(tokens)) {
+    if ("token" in u) {
+      const x = plainInline(u.token);
+      if (x !== null) {
+        out.push(x);
+      }
+      continue;
+    }
+    const { c, n } = u;
+    const { open, close } = runSides(
+      c,
+      n,
+      charOf(tokens[u.start - 1]),
+      charOf(tokens[u.end])
+    );
+    // Stack entries are distinct indexes into `out`, so the nearest match is
+    // found by value.
+    const start = close
+      ? stack.findLast((s) => {
+          const r = out[s] as Run;
+          return r.c === c && r.n === n;
+        })
+      : undefined;
+    if (start !== undefined) {
+      const inner = out.splice(start).slice(1).map(flat);
+      stack.splice(stack.indexOf(start));
+      out.push(wrap(c, n, merge(inner)));
+    } else if (open) {
+      stack.push(out.length);
+      out.push({ c, close, n, open });
+    } else {
+      out.push(c.repeat(n));
+    }
+  }
+  return merge(out.map(flat));
+};
 
 /* ---------------- blocks and slides ---------------- */
 
-function trim(tokens: Token[]): Token[] {
-  let a = 0;
-  let b = tokens.length;
-  while (a < b && isBlank(tokens[a]!)) {
-    a += 1;
+const trim = (tokens: Token[]): Token[] => {
+  const first = tokens.findIndex((t) => !isBlank(t));
+  if (first === -1) {
+    return [];
   }
-  while (b > a && isBlank(tokens[b - 1]!)) {
-    b -= 1;
-  }
-  return tokens.slice(a, b);
-}
+  const last = tokens.findLastIndex((t) => !isBlank(t));
+  return tokens.slice(first, last + 1);
+};
 
 /** `# ` or `## ` at the start of a line, unescaped: the heading level, else 0. */
-function headingLevel(line: Token[]): 0 | 1 | 2 {
+const headingLevel = (line: Token[]): 0 | 1 | 2 => {
   const marks = (i: number) =>
     line[i]?.k === "ch" &&
     !(line[i] as { literal: boolean }).literal &&
@@ -239,22 +262,24 @@ function headingLevel(line: Token[]): 0 | 1 | 2 {
     return 2;
   }
   return 0;
-}
+};
 
-function blocks(tokens: Token[]): Block[] {
-  const lines: Token[][] = [[]];
+const blocks = (tokens: Token[]): Block[] => {
+  let current: Token[] = [];
+  const lines: Token[][] = [current];
   for (const t of tokens) {
     if (t.k === "nl") {
-      lines.push([]);
+      current = [];
+      lines.push(current);
     } else {
-      lines.at(-1)!.push(t);
+      current.push(t);
     }
   }
   const out: Block[] = [];
   let para: Token[] | null = null;
   const flush = () => {
     if (para) {
-      out.push({ level: 0, inline: inlines(para) });
+      out.push({ inline: inlines(para), level: 0 });
     }
     para = null;
   };
@@ -262,11 +287,11 @@ function blocks(tokens: Token[]): Block[] {
     const level = headingLevel(line);
     if (level) {
       flush();
-      out.push({ level, inline: inlines(trim(line.slice(level + 1))) });
+      out.push({ inline: inlines(trim(line.slice(level + 1))), level });
     } else if (line.every(isBlank)) {
       // A blank line keeps its height and ends any emphasis left open.
       flush();
-      out.push({ level: 0, inline: [] });
+      out.push({ inline: [], level: 0 });
     } else if (para) {
       para.push({ k: "nl" }, ...line);
     } else {
@@ -275,25 +300,26 @@ function blocks(tokens: Token[]): Block[] {
   }
   flush();
   return out;
-}
+};
 
-function mentionsCountdown(xs: Inline[]): boolean {
-  return xs.some(
+const mentionsCountdown = (xs: Inline[]): boolean =>
+  xs.some(
     (x) =>
       typeof x === "object" &&
       (x.tag === "countdown" ||
         ("children" in x && mentionsCountdown(x.children)))
   );
-}
 
-export function parse(message: string): Slide[] {
-  const tokens = tokenize(message.replaceAll(/\r\n?/g, "\n"));
-  const groups: Token[][] = [[]];
+export const parse = (message: string): Slide[] => {
+  const tokens = tokenize(message.replaceAll(/\r\n?/gu, "\n"));
+  let group: Token[] = [];
+  const groups: Token[][] = [group];
   for (const t of tokens) {
     if (t.k === "slide") {
-      groups.push([]);
+      group = [];
+      groups.push(group);
     } else {
-      groups.at(-1)!.push(t);
+      group.push(t);
     }
   }
   return groups.map((g) => {
@@ -304,15 +330,12 @@ export function parse(message: string): Slide[] {
       hasCountdown: bs.some((b) => mentionsCountdown(b.inline)),
     };
   });
-}
+};
 
 /** Which Slide the character at `offset` belongs to. */
-export function slideAt(message: string, offset: number): number {
-  return tokenize(message).filter((t) => t.k === "slide" && t.at < offset)
-    .length;
-}
+export const slideAt = (message: string, offset: number): number =>
+  tokenize(message).filter((t) => t.k === "slide" && t.at < offset).length;
 
 /** Whether the message has a `{countdown}` that would be shown. */
-export function hasCountdown(message: string): boolean {
-  return tokenize(message).some((t) => t.k === "countdown");
-}
+export const hasCountdown = (message: string): boolean =>
+  tokenize(message).some((t) => t.k === "countdown");

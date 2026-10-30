@@ -4,7 +4,7 @@ import LZString from "lz-string";
 import "./tool.css";
 import type { Tool } from "../../shell/types";
 
-function formatBytes(n: number) {
+const formatBytes = (n: number) => {
   if (n < 1024) {
     return `${n} B`;
   }
@@ -12,16 +12,13 @@ function formatBytes(n: number) {
     return `${(n / 1024).toFixed(1)} KB`;
   }
   return `${(n / 1024 / 1024).toFixed(2)} MB`;
-}
+};
 
 /** Longest encoded save we are willing to put in the Deep Link. */
 const STATE_CAP = 30_000;
 
 const tool: Tool = {
   id: "save-decoder",
-  name: "LZString Save Decoder",
-  subtitle:
-    "Decode and encode LZString-compressed base64 saves from incremental games.",
   keywords: [
     "lzstring",
     "lz-string",
@@ -82,33 +79,33 @@ const tool: Tool = {
     const $copyDec = el.querySelector(".btn-copy-dec") as HTMLButtonElement;
 
     /** Each side's Copy has something to copy only while that side holds text. */
-    function syncCopy() {
+    const syncCopy = () => {
       $copyEnc.disabled = !$enc.value;
       $copyDec.disabled = !$dec.value;
-    }
+    };
 
-    function setStatus(bar: HTMLElement, kind: string, msg: string) {
-      bar.className = bar.className.replace(/ (ok|error)$/, "");
+    const setStatus = (bar: HTMLElement, kind: string, msg: string) => {
+      bar.className = bar.className.replace(/ (?:ok|error)$/u, "");
       if (kind) {
         bar.className += ` ${kind}`;
       }
       (bar.querySelector(".status-text") as HTMLElement).textContent = msg;
-    }
+    };
 
-    function indentValue(): string | null {
+    const indentValue = (): string | null => {
       const v = $optIndent.value;
       if (v === "off") {
         return null;
       }
       return v === "tab" ? "\t" : " ".repeat(Number(v));
-    }
+    };
 
     /** State layout: `<indent>.<encoded save, base64 with + and / made URL-safe>`. */
-    function publishState(): boolean {
-      const raw = $enc.value.replaceAll(/\s+/g, "");
+    const publishState = (): boolean => {
+      const raw = $enc.value.replaceAll(/\s+/gu, "");
       let packed = "";
       let fits = true;
-      if (raw && /^[A-Za-z0-9+/=]+$/.test(raw)) {
+      if (raw && /^[A-Za-z0-9+/=]+$/u.test(raw)) {
         if (raw.length <= STATE_CAP) {
           packed = raw.replaceAll("+", "-").replaceAll("/", "_");
         } else {
@@ -117,10 +114,10 @@ const tool: Tool = {
       }
       ctx.setState(`${$optIndent.value}.${packed}`);
       return fits;
-    }
+    };
 
-    function decode() {
-      const raw = $enc.value.replaceAll(/\s+/g, "");
+    const decode = () => {
+      const raw = $enc.value.replaceAll(/\s+/gu, "");
       const linked = publishState();
       if (!raw) {
         setStatus($encStatus, "", "");
@@ -159,9 +156,9 @@ const tool: Tool = {
         })${linked ? "" : " · too large to keep in the URL"}`
       );
       setStatus($decStatus, "", "");
-    }
+    };
 
-    function encode() {
+    const encode = () => {
       const raw = $dec.value.trim();
       if (!raw) {
         setStatus($decStatus, "", "");
@@ -192,13 +189,13 @@ const tool: Tool = {
         )} (JSON, minified)${linked ? "" : " · too large to keep in the URL"}`
       );
       setStatus($encStatus, "", "Encoded output");
-    }
+    };
 
     let timer: ReturnType<typeof setTimeout>;
-    function schedule(fn: () => void) {
+    const schedule = (fn: () => void) => {
       clearTimeout(timer);
       timer = setTimeout(fn, 120);
-    }
+    };
 
     $enc.addEventListener("input", () => {
       syncCopy();
@@ -232,11 +229,11 @@ const tool: Tool = {
       syncCopy();
     });
 
-    async function pasteInto(
+    const pasteInto = async (
       area: HTMLTextAreaElement,
       run: () => void,
       bar: HTMLElement
-    ) {
+    ) => {
       try {
         area.value = await navigator.clipboard.readText();
         syncCopy();
@@ -248,20 +245,22 @@ const tool: Tool = {
           "The browser blocked clipboard access. Paste with the keyboard instead."
         );
       }
-    }
+    };
 
-    function copyFrom(area: HTMLTextAreaElement, btn: HTMLButtonElement) {
+    const copyFrom = async (
+      area: HTMLTextAreaElement,
+      btn: HTMLButtonElement
+    ) => {
       if (!area.value) {
         return;
       }
-      navigator.clipboard.writeText(area.value).then(() => {
-        const old = btn.textContent;
-        btn.textContent = "Copied";
-        setTimeout(() => {
-          btn.textContent = old;
-        }, 1200);
-      });
-    }
+      await navigator.clipboard.writeText(area.value);
+      const old = btn.textContent;
+      btn.textContent = "Copied";
+      setTimeout(() => {
+        btn.textContent = old;
+      }, 1200);
+    };
 
     (el.querySelector(".btn-paste-enc") as HTMLButtonElement).addEventListener(
       "click",
@@ -272,10 +271,10 @@ const tool: Tool = {
       () => pasteInto($dec, encode, $decStatus)
     );
     $copyEnc.addEventListener("click", function mount() {
-      copyFrom($enc, this);
+      void copyFrom($enc, this);
     });
     $copyDec.addEventListener("click", function mount() {
-      copyFrom($dec, this);
+      void copyFrom($dec, this);
     });
     (el.querySelector(".btn-clear-enc") as HTMLButtonElement).addEventListener(
       "click",
@@ -297,6 +296,9 @@ const tool: Tool = {
       }
     );
   },
+  name: "LZString Save Decoder",
+  subtitle:
+    "Decode and encode LZString-compressed base64 saves from incremental games.",
 };
 
 export default tool;

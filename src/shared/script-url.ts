@@ -16,27 +16,58 @@
 // in Firefox than in Chromium. So every data: URL script ends with a
 // `//# sourceURL=` pragma naming it, which is the name the engine uses instead.
 
-const CHUNK = 0x80_00;
+const ALPHABET = new TextEncoder().encode(
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+);
+const PAD = 61;
 
-function base64(bytes: Uint8Array): string {
-  let bin = "";
-  for (let i = 0; i < bytes.length; i += CHUNK) {
-    bin += String.fromCharCode.apply(
-      null,
-      bytes.subarray(i, i + CHUNK) as unknown as number[]
-    );
-  }
-  return btoa(bin);
+// The two base64 digits of every 12-bit value, as ASCII codes: each three
+// bytes are two such values, so encoding is four table reads per triple and
+// never builds the multi-megabyte binary string btoa() would need.
+const PAIRS = new Uint8Array(2 * 4096);
+for (let v = 0; v < 4096; v += 1) {
+  PAIRS[2 * v] = ALPHABET[Math.floor(v / 64)];
+  PAIRS[2 * v + 1] = ALPHABET[v % 64];
 }
+
+const putPair = (out: Uint8Array, at: number, v: number) => {
+  out[at] = PAIRS[2 * v];
+  out[at + 1] = PAIRS[2 * v + 1];
+};
+
+const base64 = (bytes: Uint8Array): string => {
+  const whole = bytes.length - (bytes.length % 3);
+  const out = new Uint8Array(Math.ceil(bytes.length / 3) * 4);
+  let at = 0;
+  for (let i = 0; i < whole; i += 3) {
+    const b0 = bytes[i];
+    const b1 = bytes[i + 1];
+    const b2 = bytes[i + 2];
+    putPair(out, at, b0 * 16 + Math.floor(b1 / 16));
+    putPair(out, at + 2, (b1 % 16) * 256 + b2);
+    at += 4;
+  }
+  const tail = bytes.length - whole;
+  if (tail > 0) {
+    const [b0 = 0, b1 = 0] = bytes.subarray(whole);
+    putPair(out, at, b0 * 16 + Math.floor(b1 / 16));
+    putPair(out, at + 2, (b1 % 16) * 256);
+    out[at + 3] = PAD;
+    if (tail === 1) {
+      out[at + 2] = PAD;
+    }
+  }
+  return new TextDecoder().decode(out);
+};
 
 /**
  * A data: URL for JavaScript source, decoded as UTF-8 by the loader. `name`
  * is what stack traces and the console call the script.
  */
-export function scriptDataUrl(
+export const scriptDataUrl = (
   source: string | ArrayBuffer,
   name: string
-): string {
+): string => {
   const pragma = new TextEncoder().encode(`\n//# sourceURL=${name}\n`);
   const body =
     typeof source === "string"
@@ -46,12 +77,11 @@ export function scriptDataUrl(
   bytes.set(body);
   bytes.set(pragma, body.length);
   return `data:text/javascript;charset=utf-8;base64,${base64(bytes)}`;
-}
+};
 
 /** A blob: URL for JavaScript source. Revoke it when the loader is done. */
-export function scriptBlobUrl(source: string | ArrayBuffer): string {
-  return URL.createObjectURL(new Blob([source], { type: "text/javascript" }));
-}
+export const scriptBlobUrl = (source: string | ArrayBuffer): string =>
+  URL.createObjectURL(new Blob([source], { type: "text/javascript" }));
 
 let blobModuleWorkers: Promise<boolean> | null = null;
 
@@ -63,28 +93,28 @@ let blobModuleWorkers: Promise<boolean> | null = null;
  * multi-megabyte string to hold and clone. Probed once, with a one-line
  * worker; Chromium answers with an error event within milliseconds.
  */
-export function blobModuleWorkersWork(): Promise<boolean> {
+export const blobModuleWorkersWork = (): Promise<boolean> => {
   if (blobModuleWorkers) {
     return blobModuleWorkers;
   }
-  blobModuleWorkers = new Promise((resolve) => {
-    const url = scriptBlobUrl("self.postMessage(true)");
-    let worker: Worker;
-    try {
-      worker = new Worker(url, { type: "module" });
-    } catch {
-      URL.revokeObjectURL(url);
-      resolve(false);
-      return;
-    }
-    const settle = (ok: boolean) => {
-      resolve(ok);
-      worker.terminate();
-      URL.revokeObjectURL(url);
-    };
-    worker.onmessage = () => settle(true);
-    worker.onerror = () => settle(false);
-    setTimeout(() => settle(false), 5000);
-  });
-  return blobModuleWorkers;
-}
+  const { promise, resolve } = Promise.withResolvers<boolean>();
+  blobModuleWorkers = promise;
+  const url = scriptBlobUrl("self.postMessage(true)");
+  let worker: Worker;
+  try {
+    worker = new Worker(url, { type: "module" });
+  } catch {
+    URL.revokeObjectURL(url);
+    resolve(false);
+    return promise;
+  }
+  const settle = (ok: boolean) => {
+    resolve(ok);
+    worker.terminate();
+    URL.revokeObjectURL(url);
+  };
+  worker.onmessage = () => settle(true);
+  worker.onerror = () => settle(false);
+  setTimeout(() => settle(false), 5000);
+  return promise;
+};

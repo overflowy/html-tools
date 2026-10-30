@@ -10,10 +10,19 @@ import { DEFAULTS, decode, encode } from "./state";
 import type { Settings } from "./state";
 import { hasCountdown, parse, slideAt } from "./text";
 
+/** `v`, failing the test where it is missing. */
+const present = <T>(v: T | undefined): T => {
+  if (v === undefined) {
+    throw new Error("Expected a value, got undefined.");
+  }
+  return v;
+};
+
 /** The first Slide's blocks, as `[level, inline]` pairs. */
 const blocks = (message: string) =>
-  parse(message)[0]!.blocks.map((b) => [b.level, b.inline]);
-const one = (message: string) => parse(message)[0]!.blocks[0]!.inline;
+  present(parse(message)[0]).blocks.map((b) => [b.level, b.inline]);
+const one = (message: string) =>
+  present(present(parse(message)[0]).blocks[0]).inline;
 
 describe("message", () => {
   test("plain text, with its line breaks", () => {
@@ -22,26 +31,26 @@ describe("message", () => {
 
   test("bold, italic, both, strike, code", () => {
     expect(one("**a** *b* ***c*** ~~d~~ `e*f*`")).toEqual([
-      { tag: "strong", children: ["a"] },
+      { children: ["a"], tag: "strong" },
       " ",
-      { tag: "em", children: ["b"] },
+      { children: ["b"], tag: "em" },
       " ",
-      { tag: "strong", children: [{ tag: "em", children: ["c"] }] },
+      { children: [{ children: ["c"], tag: "em" }], tag: "strong" },
       " ",
-      { tag: "del", children: ["d"] },
+      { children: ["d"], tag: "del" },
       " ",
       { tag: "code", text: "e*f*" },
     ]);
     expect(one("__a__ _b_")).toEqual([
-      { tag: "strong", children: ["a"] },
+      { children: ["a"], tag: "strong" },
       " ",
-      { tag: "em", children: ["b"] },
+      { children: ["b"], tag: "em" },
     ]);
   });
 
   test("nesting", () => {
     expect(one("**a *b* c**")).toEqual([
-      { tag: "strong", children: ["a ", { tag: "em", children: ["b"] }, " c"] },
+      { children: ["a ", { children: ["b"], tag: "em" }, " c"], tag: "strong" },
     ]);
   });
 
@@ -54,7 +63,7 @@ describe("message", () => {
 
   test("underscores inside words are literal", () => {
     expect(one("snake_case_name")).toEqual(["snake_case_name"]);
-    expect(one("a_b _c_")).toEqual(["a_b ", { tag: "em", children: ["c"] }]);
+    expect(one("a_b _c_")).toEqual(["a_b ", { children: ["c"], tag: "em" }]);
   });
 
   test("escapes make the next character literal", () => {
@@ -85,7 +94,7 @@ describe("message", () => {
   });
 
   test("emphasis spans lines, but a blank line or heading ends it", () => {
-    expect(one("**a\nb**")).toEqual([{ tag: "strong", children: ["a\nb"] }]);
+    expect(one("**a\nb**")).toEqual([{ children: ["a\nb"], tag: "strong" }]);
     expect(blocks("**a\n\nb**")).toEqual([
       [0, ["**a"]],
       [0, []],
@@ -105,8 +114,8 @@ describe("message", () => {
 
   test("countdown placement", () => {
     const [a, b] = parse("Starts in **{countdown}** || Welcome");
-    expect(a!.hasCountdown).toBe(true);
-    expect(b!.hasCountdown).toBe(false);
+    expect(present(a).hasCountdown).toBe(true);
+    expect(present(b).hasCountdown).toBe(false);
     expect(one("{countdown}")).toEqual([{ tag: "countdown" }]);
     expect(hasCountdown("x `{countdown}`")).toBe(false);
     expect(hasCountdown("x {countdown}")).toBe(true);
@@ -179,26 +188,26 @@ describe("deep link", () => {
 
   test("everything round-trips", () => {
     const s: Settings = {
-      message: "Hi & bye || **#1** {countdown}",
-      font: "mono",
-      fg: "#ff0000",
       bg: "#00ff00",
-      pad: 12,
-      wrap: false,
-      scroll: true,
-      speed: "fast",
-      secs: 2.5,
-      transition: "slide",
-      countdown: { kind: "until", at: Date.UTC(2026, 11, 31, 23) },
-      style: "clock",
+      countdown: { at: Date.UTC(2026, 11, 31, 23), kind: "until" },
       end: "text",
       endText: "Happy new year",
+      fg: "#ff0000",
+      font: "mono",
+      message: "Hi & bye || **#1** {countdown}",
+      pad: 12,
+      scroll: true,
+      secs: 2.5,
+      speed: "fast",
+      style: "clock",
+      transition: "slide",
+      wrap: false,
     };
     expect(decode(encode(s, true))).toEqual({ settings: s, show: true });
     const timer: Settings = {
       ...DEFAULTS,
-      message: "x",
       countdown: { kind: "timer", secs: 5400 },
+      message: "x",
     };
     expect(encode(timer)).toBe("m=x&timer=1h30m");
     expect(decode(encode(timer)).settings).toEqual(timer);
@@ -208,7 +217,7 @@ describe("deep link", () => {
     expect(
       encode({
         ...DEFAULTS,
-        countdown: { kind: "until", at: Date.UTC(2026, 0, 2, 3, 4, 5) },
+        countdown: { at: Date.UTC(2026, 0, 2, 3, 4, 5), kind: "until" },
       })
     ).toBe("until=2026-01-02T03%3A04%3A05Z");
   });

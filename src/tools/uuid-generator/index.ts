@@ -2,7 +2,7 @@ import type { Tool } from "../../shell/types";
 
 import "./tool.css";
 
-async function copyText(text: string) {
+const copyText = async (text: string) => {
   try {
     await navigator.clipboard.writeText(text);
   } catch {
@@ -14,12 +14,10 @@ async function copyText(text: string) {
     document.execCommand("copy");
     ta.remove();
   }
-}
+};
 
 const tool: Tool = {
   id: "uuid-generator",
-  name: "UUID Generator",
-  subtitle: "Generate a random UUID.",
   keywords: ["guid", "v4", "uuid4", "random"],
   mount(el) {
     el.innerHTML = `
@@ -41,21 +39,21 @@ const tool: Tool = {
     // A second click inside the flash must not capture "Copied" as the label to
     // restore, so the label is fixed and the pending restore is replaced.
     let copyTimer = 0;
-    function flash(btn: HTMLButtonElement) {
+    const flash = (btn: HTMLButtonElement) => {
       clearTimeout(copyTimer);
       btn.textContent = "Copied";
       copyTimer = window.setTimeout(() => {
         btn.textContent = "Copy";
       }, 1200);
-    }
+    };
 
-    function generate() {
+    const generate = () => {
       uuid = crypto.randomUUID();
       $value.textContent = uuid;
-    }
+    };
 
     let valueTimer = 0;
-    async function copyFromValue() {
+    const copyFromValue = async () => {
       await copyText(uuid);
       clearTimeout(valueTimer);
       $value.textContent = "Copied";
@@ -63,7 +61,7 @@ const tool: Tool = {
       valueTimer = window.setTimeout(() => {
         $value.textContent = uuid;
       }, 1200);
-    }
+    };
 
     $btnCopy.addEventListener("click", async () => {
       await copyText(uuid);
@@ -87,6 +85,8 @@ const tool: Tool = {
 
     generate();
   },
+  name: "UUID Generator",
+  subtitle: "Generate a random UUID.",
 };
 
 export default tool;

@@ -17,18 +17,15 @@ import { hasCountdown, slideAt } from "./text";
 const CHROME_MS = 2500;
 
 /** A datetime-local value, in local time, for an instant. */
-function localValue(ms: number): string {
+const localValue = (ms: number): string => {
   const d = new Date(ms);
   const p = (n: number) => String(n).padStart(2, "0");
   const secs = d.getSeconds() ? `:${p(d.getSeconds())}` : "";
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}${secs}`;
-}
+};
 
 const tool: Tool = {
   id: "big-text",
-  name: "Big Text",
-  subtitle:
-    "Show a message as large as the screen allows, with slides and a countdown.",
   keywords: [
     "big",
     "text",
@@ -144,13 +141,13 @@ const tool: Tool = {
 
     /* ---------------- settings ⇄ fields ---------------- */
 
-    function countdownField(): Countdown {
+    const countdownField = (): Countdown => {
       $until.removeAttribute("aria-invalid");
       $timer.removeAttribute("aria-invalid");
       if ($cd.value === "until") {
         const at = new Date($until.value).getTime();
         if (Number.isFinite(at)) {
-          return { kind: "until", at };
+          return { at, kind: "until" };
         }
         $until.setAttribute("aria-invalid", "true");
       } else if ($cd.value === "timer") {
@@ -163,9 +160,9 @@ const tool: Tool = {
         }
       }
       return { kind: "none" };
-    }
+    };
 
-    function read(): Settings {
+    const read = (): Settings => {
       const n = (
         input: HTMLInputElement,
         [lo, hi]: readonly [number, number],
@@ -177,24 +174,24 @@ const tool: Tool = {
           : fallback;
       };
       return {
-        message: $message.value,
-        font: $font.value as Font,
-        fg: $fg.value,
         bg: $bg.value,
-        pad: n($pad, LIMITS.pad, DEFAULTS.pad),
-        wrap: $wrap.checked,
-        scroll: $scroll.checked,
-        speed: $speed.value as Speed,
-        secs: n($secs, LIMITS.secs, DEFAULTS.secs),
-        transition: $trans.value as Transition,
         countdown: countdownField(),
-        style: $style.value === "clock" ? "clock" : "label",
         end: $end.value as End,
         endText: $endText.value,
+        fg: $fg.value,
+        font: $font.value as Font,
+        message: $message.value,
+        pad: n($pad, LIMITS.pad, DEFAULTS.pad),
+        scroll: $scroll.checked,
+        secs: n($secs, LIMITS.secs, DEFAULTS.secs),
+        speed: $speed.value as Speed,
+        style: $style.value === "clock" ? "clock" : "label",
+        transition: $trans.value as Transition,
+        wrap: $wrap.checked,
       };
-    }
+    };
 
-    function fill(s: Settings) {
+    const fill = (s: Settings) => {
       $message.value = s.message;
       $font.value = s.font;
       $fg.value = s.fg;
@@ -213,23 +210,23 @@ const tool: Tool = {
       $style.value = s.style;
       $end.value = s.end;
       $endText.value = s.endText;
-    }
+    };
 
     /** Shows only the fields that apply, and says what is missing. */
-    function sync() {
+    const sync = () => {
       const s = settings;
       const cd = $cd.value;
       const on: Record<string, boolean> = {
-        scroll: s.scroll,
-        wrap: !s.scroll,
-        until: cd === "until",
-        timer: cd === "timer",
         countdown: cd !== "none",
         endtext: cd !== "none" && s.end === "text",
+        scroll: s.scroll,
         slides: !s.scroll && display.count > 1,
+        timer: cd === "timer",
+        until: cd === "until",
+        wrap: !s.scroll,
       };
       for (const f of el.querySelectorAll<HTMLElement>("[data-when]")) {
-        f.hidden = !on[f.dataset.when!];
+        f.hidden = !on[f.dataset.when ?? ""];
       }
       const empty = !s.message.trim() && s.countdown.kind === "none";
       $link.disabled = empty;
@@ -240,27 +237,27 @@ const tool: Tool = {
         !hasCountdown(s.message)
           ? "Put {countdown} where the time should go."
           : "";
-    }
+    };
 
-    function publish() {
+    const publish = () => {
       ctx.setState(encode(settings, presenting));
-    }
+    };
 
-    function update() {
+    const update = () => {
       settings = read();
       display.set(settings);
       sync();
       publish();
-    }
+    };
 
     /* ---------------- preview ---------------- */
 
     // The preview has the shape of this screen, as large as the pane allows.
     new ResizeObserver(([entry]) => {
-      if (presenting) {
+      if (presenting || !entry) {
         return;
       }
-      const { width: w, height: h } = entry!.contentRect;
+      const { width: w, height: h } = entry.contentRect;
       const ratio = screen.width / screen.height || 16 / 9;
       const sw = Math.min(w, h * ratio);
       $stage.style.setProperty("--w", `${Math.floor(sw)}px`);
@@ -274,53 +271,53 @@ const tool: Tool = {
 
     // The preview follows the caret: editing a Slide shows it.
     let caretSlide = 0;
-    function followCaret() {
+    const followCaret = () => {
       const i = slideAt($message.value, $message.selectionStart);
       if (i !== caretSlide) {
         caretSlide = i;
         display.goTo(i);
       }
-    }
+    };
 
     /* ---------------- present ---------------- */
 
     let chromeTimer = 0;
-    function wakeChrome() {
+    const wakeChrome = () => {
       $stage.classList.add("awake");
       clearTimeout(chromeTimer);
       chromeTimer = window.setTimeout(
         () => $stage.classList.remove("awake"),
         CHROME_MS
       );
-    }
+    };
 
-    function syncHint() {
+    const syncHint = () => {
       $hint.hidden =
         !document.fullscreenEnabled || !!document.fullscreenElement;
-    }
+    };
 
-    async function keepAwake() {
+    const keepAwake = async () => {
       try {
         wake = await navigator.wakeLock?.request("screen");
       } catch {
         wake = null;
       }
-    }
+    };
 
-    function fullscreen() {
+    const fullscreen = () => {
       if (document.fullscreenEnabled && !document.fullscreenElement) {
         document.documentElement.requestFullscreen().catch(() => {
           // The browser may refuse; presenting works in the window too.
         });
       }
-    }
+    };
 
     /**
      * Covers the window with the Display. Full screen needs a click or a key,
      * and a click is taken by the Slides, so a Present Link opens covering
      * the window and goes full screen on F.
      */
-    function present(clicked: boolean) {
+    const present = (clicked: boolean) => {
       presenting = true;
       $stage.classList.add("presenting");
       display.startTimer();
@@ -333,9 +330,9 @@ const tool: Tool = {
       wakeChrome();
       void keepAwake();
       $stage.focus();
-    }
+    };
 
-    function exitPresent() {
+    const exitPresent = () => {
       if (!presenting) {
         return;
       }
@@ -351,7 +348,7 @@ const tool: Tool = {
       wake = null;
       publish();
       $present.focus();
-    }
+    };
 
     // Leaving full screen (Esc, or the browser's own control) ends the presentation.
     let wasFullscreen = false;
@@ -438,7 +435,7 @@ const tool: Tool = {
     /* ---------------- fields ---------------- */
 
     // A new Countdown starts filled in, so it shows at once.
-    function prefillCountdown() {
+    const prefillCountdown = () => {
       if ($cd.value === "until" && !$until.value) {
         const next = new Date();
         next.setHours(next.getHours() + 1, 0, 0, 0);
@@ -447,7 +444,7 @@ const tool: Tool = {
       if ($cd.value === "timer" && !$timer.value.trim()) {
         $timer.value = "10m";
       }
-    }
+    };
 
     // Selects and checkboxes fire input too, so one listener sees every change.
     el.addEventListener("input", (e) => {
@@ -480,6 +477,9 @@ const tool: Tool = {
     display.set(settings);
     sync();
   },
+  name: "Big Text",
+  subtitle:
+    "Show a message as large as the screen allows, with slides and a countdown.",
 };
 
 export default tool;

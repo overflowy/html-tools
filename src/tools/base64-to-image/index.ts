@@ -1,33 +1,33 @@
 import "./tool.css";
 import type { Tool } from "../../shell/types";
 
-function detectMime(b64: string) {
+const detectMime = (b64: string) => {
   const sig = b64.slice(0, 16);
   if (sig.startsWith("iVBORw0KGgo")) {
-    return { mime: "image/png", ext: "png" };
+    return { ext: "png", mime: "image/png" };
   }
   if (sig.startsWith("/9j/")) {
-    return { mime: "image/jpeg", ext: "jpg" };
+    return { ext: "jpg", mime: "image/jpeg" };
   }
   if (sig.startsWith("R0lGOD")) {
-    return { mime: "image/gif", ext: "gif" };
+    return { ext: "gif", mime: "image/gif" };
   }
   if (sig.startsWith("UklGR")) {
-    return { mime: "image/webp", ext: "webp" };
+    return { ext: "webp", mime: "image/webp" };
   }
   if (sig.startsWith("PHN2Zy") || sig.startsWith("PD94bW")) {
-    return { mime: "image/svg+xml", ext: "svg" };
+    return { ext: "svg", mime: "image/svg+xml" };
   }
   if (sig.startsWith("Qk")) {
-    return { mime: "image/bmp", ext: "bmp" };
+    return { ext: "bmp", mime: "image/bmp" };
   }
   if (sig.startsWith("AAABAA")) {
-    return { mime: "image/x-icon", ext: "ico" };
+    return { ext: "ico", mime: "image/x-icon" };
   }
-  return { mime: "image/png", ext: "png" };
-}
+  return { ext: "png", mime: "image/png" };
+};
 
-function formatBytes(n: number) {
+const formatBytes = (n: number) => {
   if (n < 1024) {
     return `${n} B`;
   }
@@ -35,12 +35,10 @@ function formatBytes(n: number) {
     return `${(n / 1024).toFixed(1)} KB`;
   }
   return `${(n / 1024 / 1024).toFixed(2)} MB`;
-}
+};
 
 const tool: Tool = {
   id: "base64-to-image",
-  name: "Base64 ⇄ Image",
-  subtitle: "Turn base64 into an image, or an image into base64.",
   keywords: [
     "base64",
     "image",
@@ -87,18 +85,18 @@ const tool: Tool = {
     let currentDataUri = "";
     let currentExt = "png";
 
-    function showError(msg: string) {
+    const showError = (msg: string) => {
       errorBox.textContent = msg;
       errorBox.style.display = "block";
       outputArea.style.display = "none";
       status.textContent = "";
-    }
+    };
 
-    function clearError() {
+    const clearError = () => {
       errorBox.style.display = "none";
-    }
+    };
 
-    function convert(raw: string) {
+    const convert = (raw: string) => {
       clearError();
       if (!raw || !raw.trim()) {
         outputArea.style.display = "none";
@@ -108,14 +106,16 @@ const tool: Tool = {
 
       let b64 = raw.trim();
       let declaredMime: string | null = null;
-      const dataUriMatch = b64.match(/^data:([^;]+);base64,(.+)$/);
-      if (dataUriMatch) {
-        declaredMime = dataUriMatch[1]!;
-        b64 = dataUriMatch[2]!;
+      const dataUriParts = b64.match(
+        /^data:(?<mime>[^;]+);base64,(?<payload>.+)$/u
+      )?.groups;
+      if (dataUriParts) {
+        declaredMime = dataUriParts.mime;
+        b64 = dataUriParts.payload;
       }
-      b64 = b64.replaceAll(/\s+/g, "");
+      b64 = b64.replaceAll(/\s+/gu, "");
 
-      if (!/^[A-Za-z0-9+/]*={0,2}$/.test(b64)) {
+      if (!/^[A-Za-z0-9+/]*={0,2}$/u.test(b64)) {
         showError(
           "Invalid base64: contains characters outside the base64 alphabet."
         );
@@ -135,7 +135,7 @@ const tool: Tool = {
         const ext = (declaredMime.split("/")[1] || "png")
           .replace("+xml", "")
           .replace("jpeg", "jpg");
-        detected = { mime: declaredMime, ext };
+        detected = { ext, mime: declaredMime };
       } else {
         detected = detectMime(b64);
       }
@@ -155,7 +155,7 @@ const tool: Tool = {
         showError("The base64 decodes, but not to an image.");
       };
       preview.src = dataUri;
-    }
+    };
 
     let debounce: ReturnType<typeof setTimeout>;
     input.addEventListener("input", () => {
@@ -164,14 +164,14 @@ const tool: Tool = {
       debounce = setTimeout(() => convert(input.value), 200);
     });
 
-    function loadImageBlob(blob: Blob) {
+    const loadImageBlob = (blob: Blob) => {
       const reader = new FileReader();
       reader.onload = () => {
         input.value = String(reader.result);
         convert(input.value);
       };
       reader.readAsDataURL(blob);
-    }
+    };
 
     $(".paste-btn").addEventListener("click", async () => {
       try {
@@ -204,7 +204,8 @@ const tool: Tool = {
     });
     el.addEventListener("dragover", (e) => e.preventDefault());
     el.addEventListener("dragleave", () => {
-      if (--dragDepth <= 0) {
+      dragDepth -= 1;
+      if (dragDepth <= 0) {
         dragDepth = 0;
         el.classList.remove("dragging");
       }
@@ -261,7 +262,7 @@ const tool: Tool = {
       a.download = `image.${currentExt}`;
       document.body.append(a);
       a.click();
-      document.body.removeChild(a);
+      a.remove();
     });
 
     copyBtn.addEventListener("click", async () => {
@@ -280,6 +281,8 @@ const tool: Tool = {
       }
     });
   },
+  name: "Base64 ⇄ Image",
+  subtitle: "Turn base64 into an image, or an image into base64.",
 };
 
 export default tool;

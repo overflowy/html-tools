@@ -26,21 +26,21 @@ const BODY = [
 describe("parseTrace", () => {
   test("reads ip, uag, and loc from key=value lines", () => {
     expect(parseTrace(BODY)).toEqual({
+      country: "IT",
       ip: "81.56.207.3",
       userAgent:
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15",
-      country: "IT",
     });
   });
   test("keeps '=' inside a value and tolerates CRLF", () => {
     const t = parseTrace("ip=2a01:e11::1\r\nuag=a=b c\r\nloc=DE\r\n");
-    expect(t).toEqual({ ip: "2a01:e11::1", userAgent: "a=b c", country: "DE" });
+    expect(t).toEqual({ country: "DE", ip: "2a01:e11::1", userAgent: "a=b c" });
   });
   test("an empty user agent is still a trace", () => {
     expect(parseTrace("ip=1.2.3.4\nuag=\nloc=XX\n")).toEqual({
+      country: "XX",
       ip: "1.2.3.4",
       userAgent: "",
-      country: "XX",
     });
   });
   test("anything missing ip or loc is not a trace", () => {

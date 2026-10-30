@@ -31,49 +31,49 @@ interface Row {
   storedAt: number;
 }
 
-function keyOf(a: EngineAsset) {
-  return `${a.id}@${a.version}`;
-}
+const keyOf = (a: EngineAsset) => `${a.id}@${a.version}`;
 
 let dbPromise: Promise<IDBDatabase | null> | null = null;
 
 /** Open the database once. Resolves to null where IndexedDB is unavailable, so callers just skip caching. */
-function openDb(): Promise<IDBDatabase | null> {
+const openDb = (): Promise<IDBDatabase | null> => {
   if (dbPromise) {
     return dbPromise;
   }
-  dbPromise = new Promise((resolve) => {
-    let req: IDBOpenDBRequest;
-    try {
-      if (typeof indexedDB === "undefined") {
-        return resolve(null);
-      }
-      req = indexedDB.open(DB_NAME, 1);
-    } catch {
-      return resolve(null);
+  const { promise, resolve } = Promise.withResolvers<IDBDatabase | null>();
+  dbPromise = promise;
+  let req: IDBOpenDBRequest;
+  try {
+    if (typeof indexedDB === "undefined") {
+      resolve(null);
+      return promise;
     }
-    req.onupgradeneeded = () => {
-      const db = req.result;
-      if (!db.objectStoreNames.contains(STORE)) {
-        const store = db.createObjectStore(STORE, { keyPath: "key" });
-        store.createIndex("id", "id", { unique: false });
-      }
-    };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => resolve(null);
-    req.onblocked = () => resolve(null);
-  });
-  return dbPromise;
-}
+    req = indexedDB.open(DB_NAME, 1);
+  } catch {
+    resolve(null);
+    return promise;
+  }
+  req.onupgradeneeded = () => {
+    const db = req.result;
+    if (!db.objectStoreNames.contains(STORE)) {
+      const store = db.createObjectStore(STORE, { keyPath: "key" });
+      store.createIndex("id", "id", { unique: false });
+    }
+  };
+  req.onsuccess = () => resolve(req.result);
+  req.onerror = () => resolve(null);
+  req.onblocked = () => resolve(null);
+  return promise;
+};
 
-function request<T>(r: IDBRequest<T>): Promise<T> {
-  return new Promise((resolve, reject) => {
-    r.onsuccess = () => resolve(r.result);
-    r.onerror = () => reject(r.error);
-  });
-}
+const request = <T>(r: IDBRequest<T>): Promise<T> => {
+  const { promise, resolve, reject } = Promise.withResolvers<T>();
+  r.onsuccess = () => resolve(r.result);
+  r.onerror = () => reject(r.error);
+  return promise;
+};
 
-async function readRow(key: string): Promise<Row | undefined> {
+const readRow = async (key: string): Promise<Row | undefined> => {
   const db = await openDb();
   if (!db) {
     return undefined;
@@ -88,9 +88,9 @@ async function readRow(key: string): Promise<Row | undefined> {
   } catch {
     return undefined;
   }
-}
+};
 
-async function writeRow(row: Row): Promise<void> {
+const writeRow = async (row: Row): Promise<void> => {
   const db = await openDb();
   if (!db) {
     return;
@@ -109,7 +109,7 @@ async function writeRow(row: Row): Promise<void> {
   } catch {
     // Quota or a private window: the engine still works for this visit.
   }
-}
+};
 
 export interface CachedEngine {
   id: string;
@@ -118,7 +118,7 @@ export interface CachedEngine {
   bytes: number;
 }
 
-export async function listCached(): Promise<CachedEngine[]> {
+export const listCached = async (): Promise<CachedEngine[]> => {
   const db = await openDb();
   if (!db) {
     return [];
@@ -131,15 +131,15 @@ export async function listCached(): Promise<CachedEngine[]> {
         .getAll() as IDBRequest<Row[]>
     );
     return rows.map((r) => ({
+      bytes: r.bytes.byteLength,
       id: r.id,
       label: r.label,
       version: r.version,
-      bytes: r.bytes.byteLength,
     }));
   } catch {
     return [];
   }
-}
+};
 
 /**
  * The cached Engines grouped by what they are part of, for a tooltip. An
@@ -147,31 +147,33 @@ export async function listCached(): Promise<CachedEngine[]> {
  * names every file after itself, so the first word of a label is its family;
  * a family of one keeps its whole label.
  */
-export function cachedFamilies(
+export const cachedFamilies = (
   rows: CachedEngine[]
-): { label: string; bytes: number }[] {
+): { label: string; bytes: number }[] => {
   const families = new Map<string, CachedEngine[]>();
   for (const r of rows) {
-    const family = r.label.split(" ")[0]!;
+    const [family = r.label] = r.label.split(" ");
     families.set(family, [...(families.get(family) ?? []), r]);
   }
-  return [...families].map(([family, members]) => ({
-    label: members.length === 1 ? members[0]!.label : family,
-    bytes: members.reduce((n, m) => n + m.bytes, 0),
-  }));
-}
+  return [...families].map(([family, members]) => {
+    const [only] = members;
+    return {
+      bytes: members.reduce((n, m) => n + m.bytes, 0),
+      label: members.length === 1 && only ? only.label : family,
+    };
+  });
+};
 
-export async function clearCached(): Promise<void> {
+export const clearCached = async (): Promise<void> => {
   const db = await openDb();
   if (!db) {
     return;
   }
   await request(db.transaction(STORE, "readwrite").objectStore(STORE).clear());
-}
+};
 
-export function cacheAvailable(): Promise<boolean> {
-  return openDb().then((db) => db !== null);
-}
+export const cacheAvailable = (): Promise<boolean> =>
+  openDb().then((db) => db !== null);
 
 /* ---------------- fetching ---------------- */
 
@@ -191,69 +193,10 @@ const inFlight = new Map<
   { promise: Promise<ArrayBuffer>; listeners: Set<OnProgress> }
 >();
 
-/**
- * Bytes of an engine asset: from the cache when present, else downloaded with
- * progress and stored. Concurrent callers for the same asset share one
- * download, each with their own progress. A download is never aborted: a
- * cancelled conversion still leaves the engine cached for the next one.
- */
-export function getEngine(
-  asset: EngineAsset,
-  onProgress?: OnProgress
-): Promise<ArrayBuffer> {
-  const key = keyOf(asset);
-  const existing = inFlight.get(key);
-  if (existing) {
-    if (onProgress) {
-      existing.listeners.add(onProgress);
-    }
-    return existing.promise;
-  }
-  const listeners = new Set<OnProgress>(onProgress ? [onProgress] : []);
-  const promise = fetchEngine(asset, key, (p) => {
-    for (const l of listeners) {
-      l(p);
-    }
-  });
-  inFlight.set(key, { promise, listeners });
-  promise.then(
-    () => inFlight.delete(key),
-    () => inFlight.delete(key)
-  );
-  return promise;
-}
-
-async function fetchEngine(
-  asset: EngineAsset,
-  key: string,
-  onProgress: OnProgress
-): Promise<ArrayBuffer> {
-  const row = await readRow(key);
-  if (row) {
-    onProgress({
-      asset,
-      loaded: row.bytes.byteLength,
-      total: row.bytes.byteLength,
-      fromCache: true,
-    });
-    return row.bytes;
-  }
-  const bytes = await download(asset, onProgress);
-  await writeRow({
-    key,
-    id: asset.id,
-    version: asset.version,
-    label: asset.label,
-    bytes,
-    storedAt: Date.now(),
-  });
-  return bytes;
-}
-
-async function download(
+const download = async (
   asset: EngineAsset,
   onProgress: OnProgress
-): Promise<ArrayBuffer> {
+): Promise<ArrayBuffer> => {
   let res: Response;
   try {
     res = await fetch(asset.url);
@@ -268,7 +211,7 @@ async function download(
   }
   const declared = Number(res.headers.get("content-length")) || 0;
   let total = declared || asset.approxBytes;
-  onProgress({ asset, loaded: 0, total, fromCache: false });
+  onProgress({ asset, fromCache: false, loaded: 0, total });
   if (!res.body) {
     return res.arrayBuffer();
   }
@@ -286,7 +229,7 @@ async function download(
     if (loaded > total) {
       total = loaded;
     }
-    onProgress({ asset, loaded, total, fromCache: false });
+    onProgress({ asset, fromCache: false, loaded, total });
   }
   const out = new Uint8Array(loaded);
   let off = 0;
@@ -295,4 +238,60 @@ async function download(
     off += c.byteLength;
   }
   return out.buffer;
-}
+};
+
+const fetchEngine = async (
+  asset: EngineAsset,
+  key: string,
+  onProgress: OnProgress
+): Promise<ArrayBuffer> => {
+  const row = await readRow(key);
+  if (row) {
+    onProgress({
+      asset,
+      fromCache: true,
+      loaded: row.bytes.byteLength,
+      total: row.bytes.byteLength,
+    });
+    return row.bytes;
+  }
+  const bytes = await download(asset, onProgress);
+  await writeRow({
+    bytes,
+    id: asset.id,
+    key,
+    label: asset.label,
+    storedAt: Date.now(),
+    version: asset.version,
+  });
+  return bytes;
+};
+
+/**
+ * Bytes of an engine asset: from the cache when present, else downloaded with
+ * progress and stored. Concurrent callers for the same asset share one
+ * download, each with their own progress. A download is never aborted: a
+ * cancelled conversion still leaves the engine cached for the next one.
+ */
+export const getEngine = (
+  asset: EngineAsset,
+  onProgress?: OnProgress
+): Promise<ArrayBuffer> => {
+  const key = keyOf(asset);
+  const existing = inFlight.get(key);
+  if (existing) {
+    if (onProgress) {
+      existing.listeners.add(onProgress);
+    }
+    return existing.promise;
+  }
+  const listeners = new Set<OnProgress>(onProgress ? [onProgress] : []);
+  const promise = fetchEngine(asset, key, (p) => {
+    for (const l of listeners) {
+      l(p);
+    }
+  });
+  inFlight.set(key, { listeners, promise });
+  promise.then(() => inFlight.delete(key)).catch(() => inFlight.delete(key));
+  return promise;
+};

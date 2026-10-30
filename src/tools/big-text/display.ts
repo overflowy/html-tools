@@ -10,12 +10,20 @@ import type { Inline, Slide } from "./text";
 /** Longest a transition runs; shorter when Slides change quickly. */
 const TRANSITION_MS = 600;
 /** Marquee speed, in ems per second. */
-const SPEED = { slow: 2.5, normal: 4, fast: 6 } as const;
+const SPEED = { fast: 6, normal: 4, slow: 2.5 } as const;
 const EASE_OUT = "cubic-bezier(0.2, 0, 0, 1)";
 
 const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 
-function inline(nodes: Inline[], parent: ParentNode, countdown: string | null) {
+const noListener = () => {
+  // No listener until the tool sets one.
+};
+
+const inline = (
+  nodes: Inline[],
+  parent: ParentNode,
+  countdown: string | null
+) => {
   for (const n of nodes) {
     if (typeof n === "string") {
       parent.append(document.createTextNode(n));
@@ -38,7 +46,7 @@ function inline(nodes: Inline[], parent: ParentNode, countdown: string | null) {
       parent.append(el);
     }
   }
-}
+};
 
 export class Display {
   private s!: Settings;
@@ -53,11 +61,11 @@ export class Display {
   private timerStart: number | null = null;
   private expired = false;
   /** Called whenever the Slide on screen or the number of Slides changes. */
-  onSlide: (index: number, count: number) => void = () => {
-    // No listener until the tool sets one.
-  };
+  onSlide: (index: number, count: number) => void = noListener;
+  private stage: HTMLElement;
 
-  constructor(private stage: HTMLElement) {
+  constructor(stage: HTMLElement) {
+    this.stage = stage;
     new ResizeObserver(() => this.fit()).observe(stage);
     reduceMotion.addEventListener("change", () => this.fit());
     // A font loading late changes every measurement.
@@ -66,11 +74,10 @@ export class Display {
 
   set(s: Settings) {
     this.s = s;
-    const shown = s.message.trim()
-      ? s.message
-      : s.countdown.kind === "none"
-        ? ""
-        : COUNTDOWN;
+    let shown = s.message;
+    if (!s.message.trim()) {
+      shown = s.countdown.kind === "none" ? "" : COUNTDOWN;
+    }
     this.slides = parse(shown);
     this.endSlides = parse(s.endText);
     const st = this.stage;
@@ -80,9 +87,8 @@ export class Display {
     st.style.setProperty("--pad", String(s.pad));
     st.classList.toggle("nowrap", !s.wrap);
     st.classList.toggle("scroll", s.scroll);
-    this.expired =
-      this.countdownEnd() !== null &&
-      secondsLeft(this.countdownEnd()!, Date.now()) === 0;
+    const end = this.countdownEnd();
+    this.expired = end !== null && secondsLeft(end, Date.now()) === 0;
     this.show(this.index, false);
     this.runTicks();
   }
@@ -138,13 +144,10 @@ export class Display {
       return null;
     }
     const end = this.countdownEnd();
-    const left =
-      end === null
-        ? cd.kind === "timer"
-          ? cd.secs
-          : 0
-        : secondsLeft(end, Date.now());
-    return formatRemaining(left, this.s.style);
+    if (end !== null) {
+      return formatRemaining(secondsLeft(end, Date.now()), this.s.style);
+    }
+    return formatRemaining(cd.kind === "timer" ? cd.secs : 0, this.s.style);
   }
 
   /** The Slides as they stand: at zero, `hide` drops those showing the Countdown and `text` swaps them for the end text. */
@@ -152,9 +155,8 @@ export class Display {
     if (!this.expired || this.s.end === "freeze") {
       return this.slides;
     }
-    const out = this.slides.flatMap((sl) =>
-      sl.hasCountdown ? (this.s.end === "text" ? this.endSlides : []) : [sl]
-    );
+    const atZero = this.s.end === "text" ? this.endSlides : [];
+    const out = this.slides.flatMap((sl) => (sl.hasCountdown ? atZero : [sl]));
     return out.length ? out : [{ blocks: [], hasCountdown: false }];
   }
 
@@ -168,9 +170,12 @@ export class Display {
     // Wake just after the next whole second to go.
     this.tick = window.setTimeout(
       () => {
-        const text = this.countdownText()!;
-        for (const el of this.stage.querySelectorAll(".cd")) {
-          el.textContent = text;
+        // Never null here: a tick runs only while there is a Countdown.
+        const text = this.countdownText();
+        if (text !== null) {
+          for (const el of this.stage.querySelectorAll(".cd")) {
+            el.textContent = text;
+          }
         }
         if (secondsLeft(end, Date.now()) === 0) {
           this.expired = true;

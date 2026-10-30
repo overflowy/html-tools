@@ -6,6 +6,7 @@ const UNITS = [
   ["m", 60],
   ["s", 1],
 ] as const;
+const UNIT_SECONDS = new Map<string, number>(UNITS);
 
 /** The longest Timer: 99 days. */
 export const MAX_TIMER = 99 * 86_400;
@@ -14,36 +15,37 @@ export const MAX_TIMER = 99 * 86_400;
  * A Timer length in seconds, or null. Accepts plain seconds (`90`), unit
  * amounts in any order (`1h30m`, `2d 12h`), or a clock (`1:30:00`, `5:00`).
  */
-export function parseDuration(input: string): number | null {
-  const s = input.trim().toLowerCase().replaceAll(/\s+/g, "");
+export const parseDuration = (input: string): number | null => {
+  const s = input.trim().toLowerCase().replaceAll(/\s+/gu, "");
   let secs: number;
-  if (/^\d+$/.test(s)) {
+  if (/^\d+$/u.test(s)) {
     secs = Number(s);
-  } else if (/^\d+(:\d{1,2}){1,3}$/.test(s)) {
+  } else if (/^\d+(?::\d{1,2}){1,3}$/u.test(s)) {
     const parts = s.split(":").map(Number);
     if (parts.slice(1).some((p) => p > 59)) {
       return null;
     }
     const weights = [86_400, 3600, 60, 1].slice(-parts.length);
-    secs = parts.reduce((sum, p, i) => sum + p * weights[i]!, 0);
-  } else if (/^(\d+[dhms])+$/.test(s)) {
+    secs = parts.reduce((sum, p, i) => sum + p * (weights[i] ?? 0), 0);
+  } else if (/^(?:\d+[dhms])+$/u.test(s)) {
     const seen = new Set<string>();
     secs = 0;
-    for (const [, n, unit] of s.matchAll(/(\d+)([dhms])/g)) {
-      if (seen.has(unit!)) {
+    for (const { groups = {} } of s.matchAll(/(?<n>\d+)(?<unit>[dhms])/gu)) {
+      const { n, unit } = groups;
+      if (seen.has(unit)) {
         return null;
       }
-      seen.add(unit!);
-      secs += Number(n) * UNITS.find(([u]) => u === unit)![1];
+      seen.add(unit);
+      secs += Number(n) * (UNIT_SECONDS.get(unit) ?? 0);
     }
   } else {
     return null;
   }
   return secs > 0 && secs <= MAX_TIMER ? secs : null;
-}
+};
 
 /** The canonical spelling of a Timer length, for the Deep Link: `1h30m`. */
-export function formatDuration(secs: number): string {
+export const formatDuration = (secs: number): string => {
   let rest = secs;
   let out = "";
   for (const [unit, size] of UNITS) {
@@ -54,7 +56,7 @@ export function formatDuration(secs: number): string {
     }
   }
   return out || "0s";
-}
+};
 
 export type CountdownStyle = "label" | "clock";
 
@@ -64,7 +66,10 @@ export type CountdownStyle = "label" | "clock";
  * Label units are held together by no-break spaces, so the Countdown never
  * wraps across lines.
  */
-export function formatRemaining(secs: number, style: CountdownStyle): string {
+export const formatRemaining = (
+  secs: number,
+  style: CountdownStyle
+): string => {
   const parts: number[] = [];
   let rest = Math.max(0, Math.floor(secs));
   for (const [, size] of UNITS) {
@@ -85,13 +90,11 @@ export function formatRemaining(secs: number, style: CountdownStyle): string {
   if (first === -1) {
     return "0s";
   }
-  return parts
-    .slice(first)
-    .map((p, i) => p + UNITS[first + i]![0])
+  return UNITS.slice(first)
+    .map(([unit], i) => `${parts[first + i]}${unit}`)
     .join("\u00A0");
-}
+};
 
 /** Whole seconds left until `end` (ms since the epoch), never negative. */
-export function secondsLeft(end: number, now: number): number {
-  return Math.max(0, Math.ceil((end - now) / 1000));
-}
+export const secondsLeft = (end: number, now: number): number =>
+  Math.max(0, Math.ceil((end - now) / 1000));

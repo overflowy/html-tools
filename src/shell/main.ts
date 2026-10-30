@@ -86,7 +86,7 @@ let collapsed =
   new URLSearchParams(location.search).get(SIDEBAR_PARAM) === SIDEBAR_COLLAPSED;
 document.body.classList.toggle("sidebar-collapsed", collapsed);
 
-function writeSidebarParam(next: boolean) {
+const writeSidebarParam = (next: boolean) => {
   const url = new URL(location.href);
   if (next) {
     url.searchParams.set(SIDEBAR_PARAM, SIDEBAR_COLLAPSED);
@@ -94,24 +94,22 @@ function writeSidebarParam(next: boolean) {
     url.searchParams.delete(SIDEBAR_PARAM);
   }
   history.replaceState(null, "", url);
-}
+};
 
 /** Whether the Sidebar is currently the Drawer rather than inline. */
-function drawerForm(): boolean {
-  return narrow.matches || collapsed;
-}
+const drawerForm = (): boolean => narrow.matches || collapsed;
 
 // The menu button reflects whichever form the Sidebar is in: open/closed for
 // the Drawer, shown/hidden for the inline Sidebar. (It is only displayed
 // while the Sidebar is not inline; see shell.css.)
-function syncMenuBtn() {
+const syncMenuBtn = () => {
   $menuBtn.setAttribute(
     "aria-expanded",
     String(drawerForm() ? drawerOpen : true)
   );
-}
+};
 
-function setDrawer(open: boolean) {
+const setDrawer = (open: boolean) => {
   if (open === drawerOpen) {
     return;
   }
@@ -141,11 +139,11 @@ function setDrawer(open: boolean) {
       $menuBtn.focus();
     }
   }
-}
+};
 
 const collapseListeners = new Set<(collapsed: boolean) => void>();
 
-function setCollapsed(next: boolean) {
+const setCollapsed = (next: boolean) => {
   if (next === collapsed) {
     return;
   }
@@ -168,7 +166,7 @@ function setCollapsed(next: boolean) {
   for (const fn of collapseListeners) {
     fn(next);
   }
-}
+};
 
 const hosts = new Map<string, HTMLElement>();
 const payloads = new Map<string, string>();
@@ -177,15 +175,25 @@ let current: Tool | null = null;
 let visible: Tool[] = [...tools];
 let cursor = 0;
 
-function matches(tool: Tool, query: string): boolean {
+const matches = (tool: Tool, query: string): boolean => {
   const hay = [tool.name, tool.id, ...tool.keywords].join(" ").toLowerCase();
   return query
     .toLowerCase()
-    .split(/\s+/)
+    .split(/\s+/u)
     .every((word) => hay.includes(word));
-}
+};
 
-function renderList() {
+// The cursor highlight is updated in place. Rebuilding the list on Filter
+// blur would swap the button out from under a mouse click on it (blur fires
+// on mousedown), so the click would never land.
+const renderCursor = () => {
+  const active = document.activeElement === $filter;
+  for (const [i, btn] of $list.querySelectorAll("button").entries()) {
+    btn.classList.toggle("cursor", active && i === cursor);
+  }
+};
+
+const renderList = () => {
   const query = $filter.value.trim();
   visible = tools.filter((t) => matches(t, query));
   cursor = Math.min(cursor, Math.max(0, visible.length - 1));
@@ -197,7 +205,7 @@ function renderList() {
     $list.append(empty);
     return;
   }
-  visible.forEach((tool) => {
+  for (const tool of visible) {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.textContent = tool.name;
@@ -211,24 +219,12 @@ function renderList() {
       setDrawer(false);
     });
     $list.append(btn);
-  });
+  }
   renderCursor();
-}
-
-// The cursor highlight is updated in place. Rebuilding the list on Filter
-// blur would swap the button out from under a mouse click on it (blur fires
-// on mousedown), so the click would never land.
-function renderCursor() {
-  const active = document.activeElement === $filter;
-  $list
-    .querySelectorAll("button")
-    .forEach((btn, i) =>
-      btn.classList.toggle("cursor", active && i === cursor)
-    );
-}
+};
 
 /** Deep Link format: `#<tool-id>` or `#<tool-id>/<payload>`. */
-function parseHash(): { id: string; payload: string } {
+const parseHash = (): { id: string; payload: string } => {
   const raw = location.hash.slice(1);
   const slash = raw.indexOf("/");
   if (slash === -1) {
@@ -238,18 +234,21 @@ function parseHash(): { id: string; payload: string } {
     id: decodeURIComponent(raw.slice(0, slash)),
     payload: raw.slice(slash + 1),
   };
-}
+};
 
-function writeHash(toolId: string) {
+const writeHash = (toolId: string) => {
   const payload = payloads.get(toolId);
   const hash = `#${toolId}${payload ? `/${payload}` : ""}`;
   if (location.hash !== hash) {
     history.replaceState(null, "", hash);
   }
-}
+};
 
-function selectTool(id: string, payload = "") {
-  const tool = tools.find((t) => t.id === id) ?? tools[0]!;
+const selectTool = (id: string, payload = "") => {
+  const tool = tools.find((t) => t.id === id) ?? tools[0];
+  if (!tool) {
+    throw new Error("The registry lists no tools.");
+  }
   // A hash without a payload (sidebar click, hand-typed URL) keeps the
   // tool's last-known State rather than wiping it. A payload meant for an
   // unknown tool id is dropped, not applied to the fallback tool.
@@ -280,6 +279,9 @@ function selectTool(id: string, payload = "") {
     $hosts.append(host);
     hosts.set(tool.id, host);
     tool.mount(host, {
+      onRestore(fn) {
+        restorers.set(tool.id, fn);
+      },
       setState(p) {
         if (p) {
           payloads.set(tool.id, p);
@@ -290,17 +292,14 @@ function selectTool(id: string, payload = "") {
           writeHash(tool.id);
         }
       },
-      onRestore(fn) {
-        restorers.set(tool.id, fn);
-      },
       sidebar: {
         get collapsed() {
           return collapsed;
         },
-        setCollapsed,
         onChange(fn) {
           collapseListeners.add(fn);
         },
+        setCollapsed,
       },
     });
     const stored = payloads.get(tool.id);
@@ -314,7 +313,7 @@ function selectTool(id: string, payload = "") {
     h.hidden = hostId !== tool.id;
   }
   renderList();
-}
+};
 
 window.addEventListener("hashchange", () => {
   const { id, payload } = parseHash();
