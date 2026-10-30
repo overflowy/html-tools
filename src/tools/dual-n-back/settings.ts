@@ -33,31 +33,31 @@ export interface Settings {
 }
 
 export const DEFAULTS: Settings = {
-  mode: DUAL,
-  manual: false,
-  manualN: 2,
-  jaeggi: false,
-  baseTrials: 20,
-  trialSeconds: null,
-  lureEighths: 1,
-  feedback: true,
-  gridLines: true,
-  shapes: "shapes",
   arithmetic: {
     max: 12,
     negatives: false,
     ops: ["add", "subtract", "multiply", "divide"],
   },
+  baseTrials: 20,
+  feedback: true,
+  gridLines: true,
+  jaeggi: false,
+  lureEighths: 1,
+  manual: false,
+  manualN: 2,
+  mode: DUAL,
+  shapes: "shapes",
   thresholds: STANDARD,
+  trialSeconds: null,
 };
 
 export const LIMITS = {
-  n: [1, 20],
   baseTrials: [5, 100],
-  trialSeconds: [1, 10],
   max: [1, 99],
+  n: [1, 20],
   percent: [0, 100],
   strikes: [1, 10],
+  trialSeconds: [1, 10],
 } as const;
 
 const OPS: [Op, string][] = [
@@ -70,29 +70,27 @@ const OPS: [Op, string][] = [
 export const clamp = (v: number, [lo, hi]: readonly [number, number]) =>
   Math.min(hi, Math.max(lo, v));
 
-export function clone(s: Settings): Settings {
-  return {
-    ...s,
-    mode: { ...s.mode },
-    arithmetic: { ...s.arithmetic, ops: [...s.arithmetic.ops] },
-    thresholds: { ...s.thresholds },
-  };
-}
+export const clone = (s: Settings): Settings => ({
+  ...s,
+  arithmetic: { ...s.arithmetic, ops: [...s.arithmetic.ops] },
+  mode: { ...s.mode },
+  thresholds: { ...s.thresholds },
+});
 
 /** The Settings a Session is played with: Jaeggi mode fixes the Mode, the scoring, and the feedback. */
-export function effective(
+export const effective = (
   s: Settings
-): Settings & { thresholdsInForce: Thresholds } {
+): Settings & { thresholdsInForce: Thresholds } => {
   const e = clone(s);
   if (e.jaeggi) {
     e.mode = { ...DUAL };
     e.feedback = false;
   }
   return { ...e, thresholdsInForce: e.jaeggi ? JAEGGI : e.thresholds };
-}
+};
 
 /** The Deep Link payload: `key=value` pairs for whatever differs from the defaults, "" when nothing does. */
-export function encode(s: Settings): string {
+export const encode = (s: Settings): string => {
   const p = new URLSearchParams();
   const d = DEFAULTS;
   const key = modeKey(s.mode);
@@ -146,16 +144,16 @@ export function encode(s: Settings): string {
     p.set("strikes", String(s.thresholds.strikes));
   }
   return p.toString();
-}
+};
 
 /** A whole number from the payload, or one with a decimal place where `tenths`. */
-function num(
+const num = (
   p: URLSearchParams,
   name: string,
   limits: readonly [number, number],
   fallback: number,
   tenths = false
-): number {
+): number => {
   const raw = p.get(name);
   if (raw === null || raw.trim() === "") {
     return fallback;
@@ -164,10 +162,10 @@ function num(
   return Number.isFinite(v)
     ? clamp(tenths ? Math.round(v * 10) / 10 : Math.round(v), limits)
     : fallback;
-}
+};
 
 /** Settings from a Deep Link payload: anything missing or unreadable takes its default. */
-export function decode(payload: string): Settings {
+export const decode = (payload: string): Settings => {
   let p: URLSearchParams;
   try {
     p = new URLSearchParams(payload);
@@ -184,26 +182,26 @@ export function decode(payload: string): Settings {
       : OPS.filter(([, l]) => opsRaw.includes(l)).map(([op]) => op);
   const secs = p.get("secs");
   return {
-    mode: parsed ? normalize(parsed, null) : { ...d.mode },
-    manual: p.get("manual") === "1",
-    manualN: num(p, "n", LIMITS.n, d.manualN),
-    jaeggi: p.get("jaeggi") === "1",
-    baseTrials: num(p, "trials", LIMITS.baseTrials, d.baseTrials),
-    trialSeconds:
-      secs === null ? null : num(p, "secs", LIMITS.trialSeconds, 3, true),
-    lureEighths: num(p, "lures", [0, 8], d.lureEighths),
-    feedback: p.get("feedback") !== "0",
-    gridLines: p.get("grid") !== "0",
-    shapes: shapes === "pentominoes" || shapes === "either" ? shapes : "shapes",
     arithmetic: {
       max: num(p, "max", LIMITS.max, d.arithmetic.max),
       negatives: p.get("neg") === "1",
       ops: ops.length ? ops : ["add"],
     },
+    baseTrials: num(p, "trials", LIMITS.baseTrials, d.baseTrials),
+    feedback: p.get("feedback") !== "0",
+    gridLines: p.get("grid") !== "0",
+    jaeggi: p.get("jaeggi") === "1",
+    lureEighths: num(p, "lures", [0, 8], d.lureEighths),
+    manual: p.get("manual") === "1",
+    manualN: num(p, "n", LIMITS.n, d.manualN),
+    mode: parsed ? normalize(parsed, null) : { ...d.mode },
+    shapes: shapes === "pentominoes" || shapes === "either" ? shapes : "shapes",
     thresholds: {
       advance: num(p, "raise", LIMITS.percent, d.thresholds.advance),
       fallback: num(p, "lower", LIMITS.percent, d.thresholds.fallback),
       strikes: num(p, "strikes", LIMITS.strikes, d.thresholds.strikes),
     },
+    trialSeconds:
+      secs === null ? null : num(p, "secs", LIMITS.trialSeconds, 3, true),
   };
-}
+};

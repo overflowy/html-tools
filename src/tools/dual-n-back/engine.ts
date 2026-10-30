@@ -37,16 +37,25 @@ export type Modality =
   | "sound";
 
 export const DUAL: Mode = {
-  position: true,
+  arithmetic: false,
   color: false,
+  combination: false,
+  crab: false,
+  multi: 1,
+  position: true,
+  selfPaced: false,
   shape: false,
   sound: true,
-  combination: false,
-  arithmetic: false,
-  multi: 1,
-  crab: false,
   variable: false,
-  selfPaced: false,
+};
+
+/** The item at `i`, where the logic around it guarantees there is one. */
+export const itemAt = <T>(items: readonly T[], i: number): T => {
+  const item = items[i];
+  if (item === undefined) {
+    throw new RangeError(`No item at ${i} of ${items.length}`);
+  }
+  return item;
 };
 
 /* ---------------- Modes ---------------- */
@@ -61,7 +70,7 @@ const BASE_LETTERS = [
 ] as const;
 
 /** Mode key: the base letters (`pcsaxm` order), then `-` and the Variants (multi digit, r crab, v variable, t self-paced). Dual is `pa`. */
-export function modeKey(m: Mode): string {
+export const modeKey = (m: Mode): string => {
   const base = BASE_LETTERS.filter(([k]) => m[k])
     .map(([, l]) => l)
     .join("");
@@ -71,25 +80,7 @@ export function modeKey(m: Mode): string {
     (m.variable ? "v" : "") +
     (m.selfPaced ? "t" : "");
   return flags ? `${base}-${flags}` : base;
-}
-
-/** The Mode a key names, or null when the key is not one `normalize` would produce. */
-export function parseModeKey(key: string): Mode | null {
-  const match = /^([pcsaxm]+)(?:-([234]?)(r?)(v?)(t?))?$/.exec(key);
-  if (!match) {
-    return null;
-  }
-  const m: Mode = { ...DUAL };
-  for (const [k, l] of BASE_LETTERS) {
-    m[k] = match[1]!.includes(l);
-  }
-  m.multi = (Number(match[2]) || 1) as Mode["multi"];
-  m.crab = !!match[3];
-  m.variable = !!match[4];
-  m.selfPaced = !!match[5];
-  // Only the key `modeKey` writes for the Mode it settles to: no stray `-`, no letters out of order, nothing it would change.
-  return modeKey(normalize(m, null)) === key ? m : null;
-}
+};
 
 /** The toggles a Mode is made of. */
 export type Toggle =
@@ -100,37 +91,27 @@ export type Toggle =
   | "combination"
   | "arithmetic";
 
-/**
- * Makes a Mode playable, keeping the toggle the player just changed the way
- * they set it: Combination needs Sound and excludes Shape and Arithmetic;
- * Arithmetic speaks its operations, so it excludes Sound and Shape;
- * Multi-stimulus needs Position, and not
- * both Color and Shape, Combination, or Arithmetic.
- */
-export function normalize(input: Mode, changed: Toggle | "multi" | null): Mode {
-  const m = { ...input };
+/** Turns off what conflicts with a toggle the player just turned on. */
+const applyTurnedOn = (m: Mode, changed: Toggle | "multi" | null) => {
   const on = (t: Toggle) => changed === t && m[t];
-  if (changed === "sound" && !m.sound) {
-    m.combination = false;
-  }
   if (on("combination")) {
     Object.assign(m, {
-      sound: true,
-      shape: false,
       arithmetic: false,
       multi: 1,
+      shape: false,
+      sound: true,
     });
   }
   if (on("arithmetic")) {
     Object.assign(m, {
-      sound: false,
-      shape: false,
       combination: false,
       multi: 1,
+      shape: false,
+      sound: false,
     });
   }
   if (on("shape")) {
-    Object.assign(m, { combination: false, arithmetic: false });
+    Object.assign(m, { arithmetic: false, combination: false });
     if (m.multi > 1 && m.color) {
       m.color = false;
     }
@@ -141,8 +122,16 @@ export function normalize(input: Mode, changed: Toggle | "multi" | null): Mode {
   if (on("sound")) {
     m.arithmetic = false;
   }
+};
+
+/** Settles the toggle the player just changed: the ones turned off, then the ones turned on, then multi. */
+const applyChange = (m: Mode, changed: Toggle | "multi" | null) => {
+  if (changed === "sound" && !m.sound) {
+    m.combination = false;
+  }
+  applyTurnedOn(m, changed);
   if (changed === "multi" && m.multi > 1) {
-    Object.assign(m, { position: true, combination: false, arithmetic: false });
+    Object.assign(m, { arithmetic: false, combination: false, position: true });
     if (m.color && m.shape) {
       m.shape = false;
     }
@@ -150,7 +139,10 @@ export function normalize(input: Mode, changed: Toggle | "multi" | null): Mode {
   if (changed === "position" && !m.position) {
     m.multi = 1;
   }
-  // Whatever is left over from an older state, settled without a preference.
+};
+
+/** Whatever is left over from an older state, settled without a preference. */
+const settleLeftovers = (m: Mode) => {
   if (m.combination && (!m.sound || m.shape || m.arithmetic)) {
     m.combination = false;
   }
@@ -163,14 +155,52 @@ export function normalize(input: Mode, changed: Toggle | "multi" | null): Mode {
   if (m.multi > 1 && m.color && m.shape) {
     m.shape = false;
   }
+};
+
+/**
+ * Makes a Mode playable, keeping the toggle the player just changed the way
+ * they set it: Combination needs Sound and excludes Shape and Arithmetic;
+ * Arithmetic speaks its operations, so it excludes Sound and Shape;
+ * Multi-stimulus needs Position, and not
+ * both Color and Shape, Combination, or Arithmetic.
+ */
+export const normalize = (
+  input: Mode,
+  changed: Toggle | "multi" | null
+): Mode => {
+  const m = { ...input };
+  applyChange(m, changed);
+  settleLeftovers(m);
   if (!m.position && !m.color && !m.shape && !m.sound && !m.arithmetic) {
     return { ...DUAL };
   }
   return m;
-}
+};
+
+/** The Mode a key names, or null when the key is not one `normalize` would produce. */
+export const parseModeKey = (key: string): Mode | null => {
+  const groups =
+    /^(?<base>[pcsaxm]+)(?:-(?<multi>[234]?)(?<crab>r?)(?<variable>v?)(?<selfPaced>t?))?$/u.exec(
+      key
+    )?.groups;
+  if (!groups) {
+    return null;
+  }
+  const { base, multi, crab, variable, selfPaced } = groups;
+  const m: Mode = { ...DUAL };
+  for (const [k, l] of BASE_LETTERS) {
+    m[k] = base.includes(l);
+  }
+  m.multi = (Number(multi) || 1) as Mode["multi"];
+  m.crab = Boolean(crab);
+  m.variable = Boolean(variable);
+  m.selfPaced = Boolean(selfPaced);
+  // Only the key `modeKey` writes for the Mode it settles to: no stray `-`, no letters out of order, nothing it would change.
+  return modeKey(normalize(m, null)) === key ? m : null;
+};
 
 /** The Modalities of a Mode, in the order their buttons are laid out. */
-export function modalities(m: Mode): Modality[] {
+export const modalities = (m: Mode): Modality[] => {
   const out: Modality[] = [];
   if (m.position) {
     for (let i = 1; i <= m.multi; i += 1) {
@@ -199,48 +229,58 @@ export function modalities(m: Mode): Modality[] {
     out.push("sound");
   }
   return out;
-}
+};
 
 const COUNT_NAMES = ["", "", "Dual", "Triple", "Quad"];
-const SINGLE_NAMES: Record<string, string> = {
-  position: "Position",
+const SINGLE_NAMES: Record<"position" | "color" | "shape" | "sound", string> = {
   color: "Color",
+  position: "Position",
   shape: "Shape",
   sound: "Sound",
 };
+const ARITHMETIC_NAMES = ["Arithmetic", "Dual Arithmetic", "Triple Arithmetic"];
+const MULTI_NAMES = ["", "", "Double-stim", "Triple-stim", "Quad-stim"];
+
+const combinationName = (m: Mode): string => {
+  if (m.position && m.color) {
+    return "Quad Combination";
+  }
+  if (m.position || m.color) {
+    return "Tri Combination";
+  }
+  return "Dual Combination";
+};
+
+/** The name from the Modalities alone, before any Variant. */
+const baseName = (m: Mode): string => {
+  if (m.combination) {
+    return combinationName(m);
+  }
+  if (m.arithmetic) {
+    return itemAt(ARITHMETIC_NAMES, Number(m.position) + Number(m.color));
+  }
+  const on = (["position", "color", "shape", "sound"] as const).filter(
+    (k) => m[k]
+  );
+  const [only] = on;
+  return on.length === 1 && only
+    ? SINGLE_NAMES[only]
+    : itemAt(COUNT_NAMES, on.length);
+};
 
 /** The Mode's name without N: "Dual", "Crab Triple", "Double-stim Dual", "Variable Arithmetic". */
-export function modeName(m: Mode): string {
-  let base: string;
-  if (m.combination) {
-    base =
-      m.position && m.color
-        ? "Quad Combination"
-        : m.position || m.color
-          ? "Tri Combination"
-          : "Dual Combination";
-  } else if (m.arithmetic) {
-    const extra = Number(m.position) + Number(m.color);
-    base = ["Arithmetic", "Dual Arithmetic", "Triple Arithmetic"][extra]!;
-  } else {
-    const on = (["position", "color", "shape", "sound"] as const).filter(
-      (k) => m[k]
-    );
-    base = on.length === 1 ? SINGLE_NAMES[on[0]!]! : COUNT_NAMES[on.length]!;
-  }
+export const modeName = (m: Mode): string => {
   const prefix = [
     m.selfPaced ? "Self-paced" : "",
     m.variable ? "Variable" : "",
     m.crab ? "Crab" : "",
-    m.multi > 1
-      ? ["", "", "Double-stim", "Triple-stim", "Quad-stim"][m.multi]
-      : "",
+    m.multi > 1 ? MULTI_NAMES[m.multi] : "",
   ].filter(Boolean);
-  return [...prefix, base].join(" ");
-}
+  return [...prefix, baseName(m)].join(" ");
+};
 
 /** The Modalities' initials, for the narrow places a name does not fit: "P·A", "P·C·S·A". */
-export function modeCode(m: Mode): string {
+export const modeCode = (m: Mode): string => {
   const parts: string[] = [];
   if (m.position) {
     parts.push(m.multi > 1 ? `${m.multi}P` : "P");
@@ -261,36 +301,41 @@ export function modeCode(m: Mode): string {
     parts.push("A");
   }
   return parts.join("·");
-}
+};
 
 /** The N a Mode starts at with no History: 1 where every trial is harder (Combination, Arithmetic), 2 otherwise. */
-export function startingN(m: Mode): number {
-  return m.combination || m.arithmetic ? 1 : 2;
-}
+export const startingN = (m: Mode): number =>
+  m.combination || m.arithmetic ? 1 : 2;
+
+/** Seconds per trial for one object. */
+const baseTrialSeconds = (m: Mode): number => {
+  if (m.arithmetic) {
+    return 4;
+  }
+  if (m.combination) {
+    return 3.5;
+  }
+  return 3;
+};
 
 /** Seconds per trial when the player has not set one: more where there is more to take in. */
-export function defaultTrialSeconds(m: Mode): number {
-  const base = m.arithmetic ? 4 : m.combination ? 3.5 : 3;
-  return base + (m.multi - 1) * 0.5;
-}
+export const defaultTrialSeconds = (m: Mode): number =>
+  baseTrialSeconds(m) + (m.multi - 1) * 0.5;
 
 /** How long the visual stimulus stays up, in seconds: a tenth longer per extra object. */
-export function stimulusSeconds(m: Mode): number {
-  return 0.5 + (m.multi - 1) * 0.1;
-}
+export const stimulusSeconds = (m: Mode): number => 0.5 + (m.multi - 1) * 0.1;
 
-export function trialCount(n: number, base: number, jaeggi: boolean): number {
-  return base + (jaeggi ? n : n * n);
-}
+export const trialCount = (n: number, base: number, jaeggi: boolean): number =>
+  base + (jaeggi ? n : n * n);
 
 /* ---------------- Trials ---------------- */
 
 export type Op = "add" | "subtract" | "multiply" | "divide";
 export const OP_SYMBOL: Record<Op, string> = {
   add: "+",
-  subtract: "−",
-  multiply: "×",
   divide: "÷",
+  multiply: "×",
+  subtract: "−",
 };
 
 /** Everything one trial shows and plays. Stimulus values are 0..7; positions index the eight outer cells. */
@@ -333,26 +378,23 @@ export interface GenerateOptions {
 
 const int = (rand: Rand, n: number) => Math.floor(rand() * n);
 
-function shuffle<T>(a: T[], rand: Rand): T[] {
+const shuffle = <T>(a: T[], rand: Rand): T[] => {
   for (let i = a.length - 1; i > 0; i -= 1) {
     const j = int(rand, i + 1);
-    [a[i], a[j]] = [a[j]!, a[i]!];
+    [a[i], a[j]] = [itemAt(a, j), itemAt(a, i)];
   }
   return a;
-}
+};
 
 /** Variable N-Back's backs: from Beta(N/2, 1), so 1..N leaning towards N. */
-function variableBacks(n: number, count: number, rand: Rand): number[] {
+const variableBacks = (n: number, count: number, rand: Rand): number[] =>
   // Beta(a, 1) is U^(1/a).
-  return Array.from({ length: count }, () =>
+  Array.from({ length: count }, () =>
     Math.min(n, Math.floor(rand() ** (2 / n) * n) + 1)
   );
-}
 
 /** The back of trial `t` (0-based) under Crab-Back: 1, 3, 5, ... within each block of N, so a block is matched against the previous one reversed. */
-export function crabBack(t: number, n: number): number {
-  return 1 + 2 * (t % n);
-}
+export const crabBack = (t: number, n: number): number => 1 + 2 * (t % n);
 
 /** Decimals division may come out at: one place, the eighths, and the odd twentieths. */
 const DECIMALS = [
@@ -360,7 +402,7 @@ const DECIMALS = [
   0.875, 0.15, 0.35, 0.45, 0.55, 0.65, 0.85, 0.95,
 ];
 
-export function compute(a: number, op: Op, b: number): number {
+export const compute = (a: number, op: Op, b: number): number => {
   switch (op) {
     case "add": {
       return a + b;
@@ -374,10 +416,14 @@ export function compute(a: number, op: Op, b: number): number {
     case "divide": {
       return a / b;
     }
+    default: {
+      const unknown: never = op;
+      throw new Error(`Unknown operation: ${String(unknown)}`);
+    }
   }
-}
+};
 
-function acceptableDivisor(a: number, b: number): boolean {
+const acceptableDivisor = (a: number, b: number): boolean => {
   if (b === 0) {
     return false;
   }
@@ -386,7 +432,7 @@ function acceptableDivisor(a: number, b: number): boolean {
   }
   const frac = Math.abs(a / b) % 1;
   return DECIMALS.some((d) => Math.abs(frac - d) < 1e-9);
-}
+};
 
 /** Where a Modality reads its value now, and where it reads the value it is compared with. */
 type Stream =
@@ -404,35 +450,44 @@ type Stream =
   | "sound";
 
 const STREAMS: Partial<Record<Modality, [now: Stream, back: Stream]>> = {
+  audiovis: ["sound", "letter"],
+  color: ["color", "color"],
   position1: ["pos1", "pos1"],
   position2: ["pos2", "pos2"],
   position3: ["pos3", "pos3"],
   position4: ["pos4", "pos4"],
+  shape: ["shape", "shape"],
+  sound: ["sound", "sound"],
   vis1: ["vis1", "vis1"],
   vis2: ["vis2", "vis2"],
   vis3: ["vis3", "vis3"],
   vis4: ["vis4", "vis4"],
-  color: ["color", "color"],
-  shape: ["shape", "shape"],
-  visvis: ["letter", "letter"],
   visaudio: ["letter", "sound"],
-  audiovis: ["sound", "letter"],
-  sound: ["sound", "sound"],
+  visvis: ["letter", "letter"],
+};
+
+/** The streams a Modality compares. Every Modality but Arithmetic has them. */
+const streamsOf = (mod: Modality): [now: Stream, back: Stream] => {
+  const streams = STREAMS[mod];
+  if (!streams) {
+    throw new Error(`${mod} has no streams to compare`);
+  }
+  return streams;
 };
 
 type Values = Record<Stream, number>;
 
-function read(trial: Trial, s: Stream): number {
+const read = (trial: Trial, s: Stream): number => {
   if (s.startsWith("pos")) {
-    return trial.positions[Number(s[3]) - 1]!;
+    return itemAt(trial.positions, Number(s[3]) - 1);
   }
   if (s.startsWith("vis")) {
-    return trial.vis[Number(s[3]) - 1]!;
+    return itemAt(trial.vis, Number(s[3]) - 1);
   }
   return trial[s as "color" | "shape" | "letter" | "sound"];
-}
+};
 
-function toValues(trial: Trial): Values {
+const toValues = (trial: Trial): Values => {
   const v = {} as Values;
   for (const s of [
     "pos1",
@@ -451,146 +506,52 @@ function toValues(trial: Trial): Values {
     v[s] = read(trial, s);
   }
   return v;
-}
+};
 
-function fromValues(v: Values, back: number): Trial {
-  return {
-    back,
-    positions: [v.pos1, v.pos2, v.pos3, v.pos4],
-    vis: [v.vis1, v.vis2, v.vis3, v.vis4],
-    color: v.color,
-    shape: v.shape,
-    letter: v.letter,
-    sound: v.sound,
-    number: 0,
-    op: null,
-    answer: null,
-  };
-}
+const fromValues = (v: Values, back: number): Trial => ({
+  answer: null,
+  back,
+  color: v.color,
+  letter: v.letter,
+  number: 0,
+  op: null,
+  positions: [v.pos1, v.pos2, v.pos3, v.pos4],
+  shape: v.shape,
+  sound: v.sound,
+  vis: [v.vis1, v.vis2, v.vis3, v.vis4],
+});
 
 /** Whether trial `t` (0-based) is a Match for `mod`. The first N trials never are: nothing is N back of them. */
-export function isMatch(
+export const isMatch = (
   trials: Trial[],
   t: number,
   mod: Modality,
   n: number
-): boolean {
+): boolean => {
   if (t < n || mod === "arithmetic") {
     return false;
   }
-  const [now, back] = STREAMS[mod]!;
-  const b = trials[t]!.back;
-  return read(trials[t]!, now) === read(trials[t - b]!, back);
-}
+  const [now, back] = streamsOf(mod);
+  const trial = itemAt(trials, t);
+  return read(trial, now) === read(itemAt(trials, t - trial.back), back);
+};
 
-/** A Session's trials. */
-export function generate(o: GenerateOptions): Trial[] {
-  if (o.jaeggi) {
-    return generateJaeggi(o);
-  }
-  const { mode, n, rand } = o;
-  const mods = modalities(mode).filter((m) => m !== "arithmetic");
-  const backs = mode.variable ? variableBacks(n, o.trials, rand) : [];
-  const trials: Trial[] = [];
-  for (let t = 0; t < o.trials; t += 1) {
-    const back =
-      t < n
-        ? n
-        : mode.crab
-          ? crabBack(t, n)
-          : mode.variable
-            ? backs[t - n]!
-            : n;
-    const positions = shuffle([0, 1, 2, 3, 4, 5, 6, 7], rand).slice(0, 4);
-    const v: Values = {
-      pos1: positions[0]!,
-      pos2: positions[1]!,
-      pos3: positions[2]!,
-      pos4: positions[3]!,
-      vis1: int(rand, 8),
-      vis2: int(rand, 8),
-      vis3: int(rand, 8),
-      vis4: int(rand, 8),
-      color: int(rand, 8),
-      shape: int(rand, 8),
-      letter: int(rand, 8),
-      sound: int(rand, 8),
-    };
-    if (t >= n) {
-      const past = (k: number) => toValues(trials[t - k]!);
-      for (const mod of mods) {
-        const [now, from] = STREAMS[mod]!;
-        const r1 = rand();
-        const r2 = rand() * (mode.multi > 1 ? 1.5 : 1);
-        let value: number | null = null;
-        if (r1 < o.matchChance) {
-          value = past(back)[from];
-        } else if (r2 < o.lureChance && n > 1) {
-          // A Lure: the value from one before or one after the right trial, or from 2N back.
-          const offsets = shuffle(
-            [back - 1, back + 1, back + n].filter(
-              (k) => k >= 1 && k <= t && !(k === back - 1 && back < 3)
-            ),
-            rand
-          );
-          const target = past(back)[from];
-          for (const k of offsets) {
-            if (past(k)[from] !== target) {
-              value = past(k)[from];
-              break;
-            }
-          }
-        }
-        if (value === null) {
-          continue;
-        }
-        if (now.startsWith("pos")) {
-          // Objects never share a cell: whoever has the value takes this one's.
-          const other = (["pos1", "pos2", "pos3", "pos4"] as const).find(
-            (p) => p !== now && v[p] === value
-          );
-          if (other) {
-            v[other] = v[now];
-          }
-        }
-        v[now] = value;
-      }
-      // Multi-stimulus Lure: the right positions (or visuals), handed to the wrong objects.
-      if (mode.multi > 1 && rand() < o.lureChance / 3) {
-        const visual = (mode.color || mode.shape) && rand() < 0.5;
-        const prefix = visual ? "vis" : "pos";
-        const offset = 1 + int(rand, mode.multi - 1);
-        const before = past(back);
-        for (let i = 0; i < mode.multi; i += 1) {
-          v[(prefix + (i + 1)) as Stream] =
-            before[(prefix + (((i + offset) % mode.multi) + 1)) as Stream];
-        }
-      }
-    }
-    trials.push(fromValues(v, back));
-  }
-  if (mode.arithmetic) {
-    addArithmetic(trials, n, o.arithmetic, rand);
-  }
-  return trials;
-}
-
-function addArithmetic(
+const addArithmetic = (
   trials: Trial[],
   n: number,
   a: ArithmeticOptions,
   rand: Rand
-) {
+) => {
   const ops = a.ops.length ? a.ops : (["add"] as Op[]);
   const draw = () =>
     a.negatives ? int(rand, 2 * a.max + 1) - a.max : int(rand, a.max + 1);
-  trials.forEach((trial, t) => {
+  for (const [t, trial] of trials.entries()) {
     if (t < n) {
       trial.number = draw();
-      return;
+      continue;
     }
-    const op = ops[int(rand, ops.length)]!;
-    const prev = trials[t - trial.back]!.number;
+    const op = itemAt(ops, int(rand, ops.length));
+    const prev = itemAt(trials, t - trial.back).number;
     let b = draw();
     if (op === "divide") {
       const candidates: number[] = [];
@@ -599,15 +560,15 @@ function addArithmetic(
           candidates.push(x);
         }
       }
-      b = candidates[int(rand, candidates.length)]!;
+      b = itemAt(candidates, int(rand, candidates.length));
     }
     trial.number = b;
     trial.op = op;
     trial.answer = compute(prev, op, b);
-  });
-}
+  }
+};
 
-function generateJaeggi(o: GenerateOptions): Trial[] {
+const generateJaeggi = (o: GenerateOptions): Trial[] => {
   const { n, rand } = o;
   const scored = shuffle(
     Array.from({ length: o.trials - n }, (_, i) => i + n),
@@ -619,22 +580,25 @@ function generateJaeggi(o: GenerateOptions): Trial[] {
   const other = (avoid: number) => (avoid + 1 + int(rand, 7)) % 8;
   const trials: Trial[] = [];
   for (let t = 0; t < o.trials; t += 1) {
+    // Drawn in this order so a seed replays the same Session.
+    const pos1 = int(rand, 8);
+    const sound = int(rand, 8);
     const v: Values = {
-      pos1: int(rand, 8),
+      color: 0,
+      letter: 0,
+      pos1,
       pos2: 0,
       pos3: 0,
       pos4: 0,
+      shape: 0,
+      sound,
       vis1: 0,
       vis2: 0,
       vis3: 0,
       vis4: 0,
-      color: 0,
-      shape: 0,
-      letter: 0,
-      sound: int(rand, 8),
     };
     if (t >= n) {
-      const before = toValues(trials[t - n]!);
+      const before = toValues(itemAt(trials, t - n));
       v.pos1 = both.has(t) || posOnly.has(t) ? before.pos1 : other(before.pos1);
       v.sound =
         both.has(t) || soundOnly.has(t) ? before.sound : other(before.sound);
@@ -642,7 +606,141 @@ function generateJaeggi(o: GenerateOptions): Trial[] {
     trials.push(fromValues(v, n));
   }
   return trials;
-}
+};
+
+/** How far back trial `t` is compared. */
+const trialBack = (
+  t: number,
+  n: number,
+  mode: Mode,
+  backs: number[]
+): number => {
+  if (t < n) {
+    return n;
+  }
+  if (mode.crab) {
+    return crabBack(t, n);
+  }
+  if (mode.variable) {
+    return itemAt(backs, t - n);
+  }
+  return n;
+};
+
+/** A trial's values before any Match or Lure: distinct positions, everything else at random. */
+const randomValues = (rand: Rand): Values => {
+  const positions = shuffle([0, 1, 2, 3, 4, 5, 6, 7], rand);
+  // Drawn in this order so a seed replays the same Session.
+  const [vis1, vis2, vis3, vis4, color, shape, letter, sound] = Array.from(
+    { length: 8 },
+    () => int(rand, 8)
+  );
+  return {
+    color,
+    letter,
+    pos1: itemAt(positions, 0),
+    pos2: itemAt(positions, 1),
+    pos3: itemAt(positions, 2),
+    pos4: itemAt(positions, 3),
+    shape,
+    sound,
+    vis1,
+    vis2,
+    vis3,
+    vis4,
+  };
+};
+
+/** The value a Modality is forced to: the one `back` trials ago for a Match, a near miss for a Lure, or null to leave it random. */
+const forcedValue = (
+  o: GenerateOptions,
+  past: (k: number) => Values,
+  t: number,
+  back: number,
+  from: Stream
+): number | null => {
+  const { mode, n, rand } = o;
+  const r1 = rand();
+  const r2 = rand() * (mode.multi > 1 ? 1.5 : 1);
+  if (r1 < o.matchChance) {
+    return past(back)[from];
+  }
+  if (r2 < o.lureChance && n > 1) {
+    // A Lure: the value from one before or one after the right trial, or from 2N back.
+    const offsets = shuffle(
+      [back - 1, back + 1, back + n].filter(
+        (k) => k >= 1 && k <= t && !(k === back - 1 && back < 3)
+      ),
+      rand
+    );
+    const target = past(back)[from];
+    for (const k of offsets) {
+      if (past(k)[from] !== target) {
+        return past(k)[from];
+      }
+    }
+  }
+  return null;
+};
+
+/** Sets a stream's value. Objects never share a cell: whoever has the value takes this one's. */
+const place = (v: Values, now: Stream, value: number) => {
+  if (now.startsWith("pos")) {
+    const other = (["pos1", "pos2", "pos3", "pos4"] as const).find(
+      (p) => p !== now && v[p] === value
+    );
+    if (other) {
+      v[other] = v[now];
+    }
+  }
+  v[now] = value;
+};
+
+/** Multi-stimulus Lure: the right positions (or visuals), handed to the wrong objects. */
+const multiLure = (o: GenerateOptions, v: Values, before: () => Values) => {
+  const { mode, rand } = o;
+  if (mode.multi > 1 && rand() < o.lureChance / 3) {
+    const visual = (mode.color || mode.shape) && rand() < 0.5;
+    const prefix = visual ? "vis" : "pos";
+    const offset = 1 + int(rand, mode.multi - 1);
+    const values = before();
+    for (let i = 0; i < mode.multi; i += 1) {
+      v[(prefix + (i + 1)) as Stream] =
+        values[(prefix + (((i + offset) % mode.multi) + 1)) as Stream];
+    }
+  }
+};
+
+/** A Session's trials. */
+export const generate = (o: GenerateOptions): Trial[] => {
+  if (o.jaeggi) {
+    return generateJaeggi(o);
+  }
+  const { mode, n, rand } = o;
+  const mods = modalities(mode).filter((m) => m !== "arithmetic");
+  const backs = mode.variable ? variableBacks(n, o.trials, rand) : [];
+  const trials: Trial[] = [];
+  for (let t = 0; t < o.trials; t += 1) {
+    const back = trialBack(t, n, mode, backs);
+    const v = randomValues(rand);
+    if (t >= n) {
+      const past = (k: number) => toValues(itemAt(trials, t - k));
+      for (const mod of mods) {
+        const [now, from] = streamsOf(mod);
+        const value = forcedValue(o, past, t, back, from);
+        if (value !== null) {
+          place(v, now, value);
+        }
+      }
+      multiLure(o, v, () => past(back));
+    }
+    trials.push(fromValues(v, back));
+  }
+  if (mode.arithmetic) {
+    addArithmetic(trials, n, o.arithmetic, rand);
+  }
+  return trials;
+};
 
 /* ---------------- Scores ---------------- */
 
@@ -668,26 +766,26 @@ export interface Scoring {
   jaeggi: boolean;
 }
 
-export function answerRight(trial: Trial, typed: string): boolean {
+export const answerRight = (trial: Trial, typed: string): boolean => {
   const value = typed === "" || typed === "-" ? 0 : Number(typed);
   return (
     trial.answer !== null &&
     Number.isFinite(value) &&
     Math.abs(value - trial.answer) < 1e-9
   );
-}
+};
 
-export function tally(
+export const tally = (
   trials: Trial[],
   responses: Response[],
   mod: Modality,
   n: number
-): Tally {
+): Tally => {
   const out: Tally = {
+    correctRejections: 0,
+    falseAlarms: 0,
     hits: 0,
     misses: 0,
-    falseAlarms: 0,
-    correctRejections: 0,
     rt: null,
   };
   let rtSum = 0;
@@ -695,7 +793,7 @@ export function tally(
   for (let t = n; t < trials.length; t += 1) {
     const r = responses[t];
     if (mod === "arithmetic") {
-      if (answerRight(trials[t]!, r?.answer ?? "")) {
+      if (answerRight(itemAt(trials, t), r?.answer ?? "")) {
         out.hits += 1;
       } else {
         out.misses += 1;
@@ -719,24 +817,21 @@ export function tally(
   }
   out.rt = rtCount ? Math.round(rtSum / rtCount) : null;
   return out;
-}
+};
 
-function rights(t: Tally, s: Scoring) {
-  return t.hits + (s.jaeggi ? t.correctRejections : 0);
-}
-function wrongs(t: Tally) {
-  return t.misses + t.falseAlarms;
-}
+const rights = (t: Tally, s: Scoring) =>
+  t.hits + (s.jaeggi ? t.correctRejections : 0);
+const wrongs = (t: Tally) => t.misses + t.falseAlarms;
 
 /** A Modality's percentage, truncated: rights over rights and wrongs, 0 when there was nothing to get right or wrong. */
-export function percent(t: Tally, s: Scoring): number {
+export const percent = (t: Tally, s: Scoring): number => {
   const r = rights(t, s);
   const w = wrongs(t);
   return r + w === 0 ? 0 : Math.floor((r * 100) / (r + w));
-}
+};
 
 /** The Session's Score: rights over rights and wrongs pooled across Modalities, or the lowest Modality's under Jaeggi scoring. */
-export function sessionScore(tallies: Tally[], s: Scoring): number {
+export const sessionScore = (tallies: Tally[], s: Scoring): number => {
   if (s.jaeggi) {
     return Math.min(...tallies.map((t) => percent(t, s)));
   }
@@ -747,7 +842,7 @@ export function sessionScore(tallies: Tally[], s: Scoring): number {
     w += wrongs(t);
   }
   return r + w === 0 ? 0 : Math.floor((r * 100) / (r + w));
-}
+};
 
 /* ---------------- Levels ---------------- */
 
@@ -769,7 +864,11 @@ export interface Level {
 }
 
 /** The Level after a Session at `level` scoring `score`. Scores between the thresholds keep the Strikes. */
-export function nextLevel(level: Level, score: number, th: Thresholds): Level {
+export const nextLevel = (
+  level: Level,
+  score: number,
+  th: Thresholds
+): Level => {
   if (score >= th.advance) {
     return { n: level.n + 1, strikes: 0 };
   }
@@ -780,10 +879,10 @@ export function nextLevel(level: Level, score: number, th: Thresholds): Level {
       : { n: level.n, strikes };
   }
   return level;
-}
+};
 
 /** The line under a finished Session's Score. */
-export function verdict(score: number, th: Thresholds): string {
+export const verdict = (score: number, th: Thresholds): string => {
   if (score >= 100) {
     return "Perfect score!";
   }
@@ -797,9 +896,8 @@ export function verdict(score: number, th: Thresholds): string {
     return "Not bad!";
   }
   return "Keep trying. You're getting there!";
-}
+};
 
 /** A Session's Score on the chart's level scale: N at the lower threshold, N + 1 at the upper. */
-export function levelScore(n: number, score: number, th: Thresholds): number {
-  return n + (score - th.fallback) / (th.advance - th.fallback);
-}
+export const levelScore = (n: number, score: number, th: Thresholds): number =>
+  n + (score - th.fallback) / (th.advance - th.fallback);

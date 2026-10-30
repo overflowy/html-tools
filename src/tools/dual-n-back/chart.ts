@@ -1,6 +1,6 @@
 // The History's chart: one Mode's daily mean and daily best, by calendar day.
 
-import { levelScore } from "./engine";
+import { itemAt, levelScore } from "./engine";
 import type { Thresholds } from "./engine";
 import { dayKey } from "./history";
 import type { Session } from "./history";
@@ -17,19 +17,17 @@ export interface DayPoint {
 }
 
 /** A Session's value on the chart: its N plus how far it got from the lower threshold to the upper, or its Score. */
-function value(
+const value = (
   s: Session,
   metric: Metric,
   th: (s: Session) => Thresholds
-): number {
-  return metric === "score" ? s.score : levelScore(s.n, s.score, th(s));
-}
+): number => (metric === "score" ? s.score : levelScore(s.n, s.score, th(s)));
 
-export function daily(
+export const daily = (
   sessions: Session[],
   metric: Metric,
   th: (s: Session) => Thresholds
-): DayPoint[] {
+): DayPoint[] => {
   const days = new Map<string, number[]>();
   for (const s of sessions) {
     const k = dayKey(s.at);
@@ -41,41 +39,108 @@ export function daily(
     .map(([day, vs]) => {
       const [y, m, d] = day.split("-").map(Number) as [number, number, number];
       return {
-        day,
         at: new Date(y, m - 1, d, 12).getTime(),
-        mean: vs.reduce((a, b) => a + b, 0) / vs.length,
         best: Math.max(...vs),
         count: vs.length,
+        day,
+        mean: vs.reduce((a, b) => a + b, 0) / vs.length,
       };
     })
     .toSorted((a, b) => a.at - b.at);
-}
+};
 
 const H = 240;
-const PAD = { top: 14, right: 46, bottom: 26, left: 36 };
+const PAD = { bottom: 26, left: 36, right: 46, top: 14 };
 const SERIES = [
-  { key: "mean", label: "mean", color: "#c96442" },
-  { key: "best", label: "best", color: "#5f8ee0" },
+  { color: "#c96442", key: "mean", label: "mean" },
+  { color: "#5f8ee0", key: "best", label: "best" },
 ] as const;
 
 const dateFmt = new Intl.DateTimeFormat(undefined, {
-  month: "short",
   day: "numeric",
+  month: "short",
 });
 const longDateFmt = new Intl.DateTimeFormat(undefined, {
-  weekday: "short",
-  month: "short",
   day: "numeric",
+  month: "short",
+  weekday: "short",
   year: "numeric",
 });
 
-function fmt(v: number, metric: Metric) {
-  return metric === "score" ? `${Math.round(v)}%` : v.toFixed(2);
-}
+const fmt = (v: number, metric: Metric) =>
+  metric === "score" ? `${Math.round(v)}%` : v.toFixed(2);
+
+/** The value axis: Scores always run 0 to 100; Levels span the whole Ns around the values, with finer ticks over a short span. */
+const valueAxis = (
+  points: DayPoint[],
+  metric: Metric
+): { lo: number; hi: number; step: number } => {
+  if (metric === "score") {
+    return { hi: 100, lo: 0, step: 25 };
+  }
+  const values = points.flatMap((p) => [p.mean, p.best]);
+  const lo = Math.floor(Math.min(...values));
+  const hi = Math.max(Math.ceil(Math.max(...values)), lo + 1);
+  if (hi - lo <= 2) {
+    return { hi, lo, step: 0.25 };
+  }
+  return { hi, lo, step: hi - lo <= 4 ? 0.5 : 1 };
+};
+
+/** Which days get a date: left to right, each at least `gap` from the one before; the last day always gets one, at the cost of its neighbour. */
+const datedDays = (
+  points: DayPoint[],
+  x: (at: number) => number,
+  gap: number
+): number[] => {
+  const shown: number[] = [];
+  const lastShownAt = () => itemAt(points, itemAt(shown, shown.length - 1)).at;
+  for (const [i, p] of points.entries()) {
+    if (!shown.length || x(p.at) - x(lastShownAt()) >= gap) {
+      shown.push(i);
+    }
+  }
+  const lastIndex = points.length - 1;
+  if (shown.at(-1) !== lastIndex) {
+    const lastAt = itemAt(points, lastIndex).at;
+    while (shown.length > 1 && x(lastAt) - x(lastShownAt()) < gap) {
+      shown.pop();
+    }
+    shown.push(lastIndex);
+  }
+  return shown;
+};
+
+/** Where a date sits against its day: the first and last day's dates stay inside the chart. */
+const dateAnchor = (i: number, count: number): string => {
+  if (count === 1) {
+    return "middle";
+  }
+  if (i === 0) {
+    return "start";
+  }
+  return i === count - 1 ? "end" : "middle";
+};
+
+/** The heights of the direct labels at the lines' right ends, nudged apart when the two lines end close together. */
+const labelHeights = (last: DayPoint, y: (v: number) => number): number[] => {
+  const mean = y(last.mean);
+  const best = y(last.best);
+  if (Math.abs(mean - best) < 13) {
+    const mid = (mean + best) / 2;
+    return last.mean <= last.best ? [mid + 7, mid - 7] : [mid - 7, mid + 7];
+  }
+  return [mean, best];
+};
 
 /** Draws the chart into `host` at its current width, with a crosshair and tooltip that follow the pointer. */
-export function draw(host: HTMLElement, points: DayPoint[], metric: Metric) {
+export const draw = (host: HTMLElement, points: DayPoint[], metric: Metric) => {
   host.replaceChildren();
+  const [first] = points;
+  const last = points.at(-1);
+  if (!first || !last) {
+    throw new Error("The chart needs at least one day to draw");
+  }
   const W = Math.max(280, host.clientWidth);
   const ns = "http://www.w3.org/2000/svg";
   const svg = document.createElementNS(ns, "svg");
@@ -90,22 +155,9 @@ export function draw(host: HTMLElement, points: DayPoint[], metric: Metric) {
       : "Daily mean and best Level"
   );
 
-  const values = points.flatMap((p) => [p.mean, p.best]);
-  let lo: number;
-  let hi: number;
-  let step: number;
-  if (metric === "score") {
-    [lo, hi, step] = [0, 100, 25];
-  } else {
-    lo = Math.floor(Math.min(...values));
-    hi = Math.ceil(Math.max(...values));
-    if (hi - lo < 1) {
-      hi = lo + 1;
-    }
-    step = hi - lo <= 2 ? 0.25 : hi - lo <= 4 ? 0.5 : 1;
-  }
-  const t0 = points[0]!.at;
-  const t1 = points.at(-1)!.at;
+  const { lo, hi, step } = valueAxis(points, metric);
+  const t0 = first.at;
+  const t1 = last.at;
   const x = (at: number) =>
     t1 === t0
       ? (PAD.left + W - PAD.right) / 2
@@ -121,35 +173,10 @@ export function draw(host: HTMLElement, points: DayPoint[], metric: Metric) {
       body += `<text class="tick" x="${PAD.left - 8}" y="${y(v) + 4}" text-anchor="end">${metric === "score" ? `${v}%` : v}</text>`;
     }
   }
-  // Dates under the days, left to right, each at least a label's width from the one before; the last day always gets one, at the cost of its neighbour.
-  const GAP = 64;
-  const shown: number[] = [];
-  points.forEach((p, i) => {
-    if (!shown.length || x(p.at) - x(points[shown.at(-1)!]!.at) >= GAP) {
-      shown.push(i);
-    }
-  });
-  const lastIndex = points.length - 1;
-  if (shown.at(-1) !== lastIndex) {
-    while (
-      shown.length > 1 &&
-      x(points[lastIndex]!.at) - x(points[shown.at(-1)!]!.at) < GAP
-    ) {
-      shown.pop();
-    }
-    shown.push(lastIndex);
-  }
-  for (const i of shown) {
-    const p = points[i]!;
-    const anchor =
-      points.length === 1
-        ? "middle"
-        : i === 0
-          ? "start"
-          : i === points.length - 1
-            ? "end"
-            : "middle";
-    body += `<text class="tick" x="${x(p.at)}" y="${H - 6}" text-anchor="${anchor}">${dateFmt.format(p.at)}</text>`;
+  // Dates under the days, each at least a label's width from the one before.
+  for (const i of datedDays(points, x, 64)) {
+    const p = itemAt(points, i);
+    body += `<text class="tick" x="${x(p.at)}" y="${H - 6}" text-anchor="${dateAnchor(i, points.length)}">${dateFmt.format(p.at)}</text>`;
   }
   const markers = points.length <= 60;
   for (const s of SERIES) {
@@ -166,16 +193,10 @@ export function draw(host: HTMLElement, points: DayPoint[], metric: Metric) {
       }
     }
   }
-  // Direct labels at the right end, nudged apart when the two lines end close together.
-  const last = points.at(-1)!;
-  let ly = SERIES.map((s) => y(last[s.key]));
-  if (Math.abs(ly[0]! - ly[1]!) < 13) {
-    const mid = (ly[0]! + ly[1]!) / 2;
-    ly = last.mean <= last.best ? [mid + 7, mid - 7] : [mid - 7, mid + 7];
+  const heights = labelHeights(last, y);
+  for (const [i, s] of SERIES.entries()) {
+    body += `<text class="series-label" x="${x(last.at) + 8}" y="${itemAt(heights, i) + 4}">${s.label}</text>`;
   }
-  SERIES.forEach((s, i) => {
-    body += `<text class="series-label" x="${x(last.at) + 8}" y="${ly[i]! + 4}">${s.label}</text>`;
-  });
   body += `<line class="crosshair" y1="${PAD.top}" y2="${H - PAD.bottom}" visibility="hidden"/>`;
   svg.innerHTML = body;
   host.append(svg);
@@ -190,7 +211,7 @@ export function draw(host: HTMLElement, points: DayPoint[], metric: Metric) {
   svg.addEventListener("pointermove", (e) => {
     const box = svg.getBoundingClientRect();
     const px = ((e.clientX - box.left) / box.width) * W;
-    let best = points[0]!;
+    let best = first;
     for (const p of points) {
       if (Math.abs(x(p.at) - px) < Math.abs(x(best.at) - px)) {
         best = p;
@@ -221,4 +242,4 @@ export function draw(host: HTMLElement, points: DayPoint[], metric: Metric) {
     cross.setAttribute("visibility", "hidden");
     tip.hidden = true;
   });
-}
+};

@@ -16,6 +16,7 @@ import {
   defaultTrialSeconds,
   generate,
   isMatch,
+  itemAt,
   modalities,
   modeKey,
   modeName,
@@ -84,39 +85,39 @@ const MISSED_MS = 250;
 const ADVANCE_GAP_MS = 300;
 
 const KEYS: Record<Modality, string> = {
+  arithmetic: "",
+  audiovis: "j",
+  color: "f",
   position1: "a",
   position2: "s",
   position3: "d",
   position4: "f",
+  shape: "j",
+  sound: "l",
   vis1: "g",
   vis2: "h",
   vis3: "j",
   vis4: "k",
-  color: "f",
-  shape: "j",
-  visvis: "s",
   visaudio: "d",
-  audiovis: "j",
-  arithmetic: "",
-  sound: "l",
+  visvis: "s",
 };
 
 const LABELS: Record<Modality, string> = {
+  arithmetic: "Answer",
+  audiovis: "Heard = seen",
+  color: "Color",
   position1: "Position",
   position2: "Position",
   position3: "Position",
   position4: "Position",
+  shape: "Shape",
+  sound: "Sound",
   vis1: "",
   vis2: "",
   vis3: "",
   vis4: "",
-  color: "Color",
-  shape: "Shape",
-  visvis: "Letter seen",
   visaudio: "Seen = heard",
-  audiovis: "Heard = seen",
-  arithmetic: "Answer",
-  sound: "Sound",
+  visvis: "Letter seen",
 };
 
 const TOGGLES: [Toggle, string, string][] = [
@@ -136,8 +137,8 @@ const TOGGLES: [Toggle, string, string][] = [
   ],
 ];
 
-const durationFmt = (s: number) => {
-  s = Math.round(s);
+const durationFmt = (seconds: number) => {
+  const s = Math.round(seconds);
   if (s < 60) {
     return `${s} s`;
   }
@@ -148,36 +149,77 @@ const durationFmt = (s: number) => {
 const clockFmt = (s: number) =>
   `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, "0")}`;
 const whenFmt = new Intl.DateTimeFormat(undefined, {
-  month: "short",
   day: "numeric",
   hour: "2-digit",
   minute: "2-digit",
+  month: "short",
 });
 
-function download(text: string, name: string, type: string) {
+const download = (text: string, name: string, type: string) => {
   const url = URL.createObjectURL(new Blob([text], { type }));
   const a = document.createElement("a");
   a.href = url;
   a.download = name;
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
+};
 
-function escapeHtml(s: string) {
-  return s.replaceAll(
-    /[&<>"]/g,
-    (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!
-  );
-}
+const ESCAPES: Record<string, string> = {
+  '"': "&quot;",
+  "&": "&amp;",
+  "<": "&lt;",
+  ">": "&gt;",
+};
 
-function loadSettings(): Settings {
+const escapeHtml = (s: string) =>
+  s.replaceAll(/[&<>"]/gu, (c) => ESCAPES[c] ?? c);
+
+const loadSettings = (): Settings => {
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
     return raw === null ? clone(DEFAULTS) : decode(raw);
   } catch {
     return clone(DEFAULTS);
   }
-}
+};
+
+/** The Mode of a key the History or the Settings hold: both keep only keys that parse. */
+const modeOf = (key: string): Mode => {
+  const mode = parseModeKey(key);
+  if (!mode) {
+    throw new Error(`Not a Mode key: ${key}`);
+  }
+  return mode;
+};
+
+/** How a finished Session moved its Level: "up" at the upper threshold, "down" for a Strike, "" otherwise and for Manual ones. */
+const trend = (s: Session, th: Thresholds): "up" | "down" | "" => {
+  if (s.manual) {
+    return "";
+  }
+  if (s.score >= th.advance) {
+    return "up";
+  }
+  return s.score < th.fallback ? "down" : "";
+};
+
+const TREND_NOTES = {
+  "": "",
+  down: " · a strike",
+  up: " · raised the level",
+};
+
+/** A span with a class and text. */
+const span = (className: string, text: string) => {
+  const e = document.createElement("span");
+  e.className = className;
+  e.textContent = text;
+  return e;
+};
+
+/** Either Shape Set, for a Session that may use either. */
+const pickShapeSet = (rand: () => number): ShapeSetId =>
+  rand() < 0.5 ? "shapes" : "pentominoes";
 
 /** One Session as it is played. */
 interface Run {
@@ -211,9 +253,6 @@ interface Run {
 
 const tool: Tool = {
   id: "dual-n-back",
-  name: "Dual N-Back",
-  subtitle:
-    "Train working memory: say when what you see or hear matches what came N steps back.",
   keywords: [
     "n-back",
     "nback",
@@ -349,7 +388,7 @@ const tool: Tool = {
             <label>Largest number <input type="number" class="s-max" min="${LIMITS.max[0]}" max="${LIMITS.max[1]}" step="1"></label>
             <label class="check"><input type="checkbox" class="s-neg">Negative numbers</label>
             <div class="ops">
-              ${(["add", "subtract", "multiply", "divide"] as const).map((op) => `<label class="check"><input type="checkbox" class="s-op" value="${op}">${OP_SYMBOL[op]} ${op[0]!.toUpperCase() + op.slice(1)}</label>`).join("")}
+              ${(["add", "subtract", "multiply", "divide"] as const).map((op) => `<label class="check"><input type="checkbox" class="s-op" value="${op}">${OP_SYMBOL[op]} ${op.charAt(0).toUpperCase() + op.slice(1)}</label>`).join("")}
             </div>
           </fieldset>
           <fieldset>
@@ -389,6 +428,8 @@ const tool: Tool = {
     const nInput = $<HTMLInputElement>(".n-input");
     const settingsDialog = $<HTMLDialogElement>(".settings-dialog");
     const confirmDialog = $<HTMLDialogElement>(".confirm-dialog");
+    const historySelect = $<HTMLSelectElement>(".history-mode");
+    const historyNote = $(".history-note");
 
     let settings = loadSettings();
     let sessions = load();
@@ -408,7 +449,7 @@ const tool: Tool = {
 
     /* ---------------- State ---------------- */
 
-    function publish() {
+    const publish = () => {
       const payload = encode(settings);
       try {
         localStorage.setItem(SETTINGS_KEY, payload);
@@ -416,59 +457,422 @@ const tool: Tool = {
         /* storage off: the Deep Link still carries it */
       }
       ctx.setState(payload);
-    }
-
-    let restored = false;
-    ctx.onRestore((payload) => {
-      restored = true;
-      if (run) {
-        stopRun();
-      }
-      settings = decode(payload);
-      result = null;
-      publish();
-      refresh();
-    });
-    // The Shell restores a Deep Link right after mount; only without one do the remembered Settings go in the URL.
-    queueMicrotask(() => {
-      if (!restored) {
-        publish();
-      }
-    });
-
-    function change(fn: (s: Settings) => void) {
-      fn(settings);
-      result = null;
-      publish();
-      refresh();
-    }
+    };
 
     /* ---------------- what the next Session will be ---------------- */
 
-    function plan() {
+    const plan = () => {
       const e = effective(settings);
       const key = modeKey(e.mode);
       const level = levelFor(sessions, key);
       const n = e.manual ? e.manualN : level.n;
       const trials = trialCount(n, e.baseTrials, e.jaeggi);
       const secs = e.trialSeconds ?? defaultTrialSeconds(e.mode);
-      return { e, key, level, n, trials, secs };
-    }
+      return { e, key, level, n, secs, trials };
+    };
 
-    function sessionTitle(
+    const sessionTitle = (
       mode: Mode,
       n: number,
       manual: boolean,
       jaeggi: boolean
-    ) {
-      return `${(jaeggi ? "Jaeggi " : "") + modeName(mode)} ${n}-Back${
+    ) =>
+      `${(jaeggi ? "Jaeggi " : "") + modeName(mode)} ${n}-Back${
         manual ? " · Manual" : ""
       }`;
-    }
 
     /* ---------------- rendering: setup ---------------- */
 
-    function refresh() {
+    const renderToday = () => {
+      const now = Date.now();
+      const t = today(sessions, now);
+      const d = lastDay(sessions, now);
+      $(".today-time").textContent = t.length
+        ? `${durationFmt(totalSeconds(t))} in ${t.length} session${t.length === 1 ? "" : "s"}${
+            d.length > t.length
+              ? ` · ${durationFmt(totalSeconds(d))} in the last 24 hours`
+              : ""
+          }`
+        : "No sessions yet today.";
+      const list = $(".today-list");
+      list.replaceChildren();
+      for (const [i, s] of t.slice(-20).toReversed().entries()) {
+        const li = document.createElement("li");
+        const mode = modeOf(s.mode);
+        const moved = trend(s, s.jaeggi ? JAEGGI : settings.thresholds);
+        li.className = moved;
+        li.append(
+          span("num", String(t.length - i)),
+          span("name", `${(s.manual ? "M · " : "") + modeName(mode)} ${s.n}`),
+          span("pct", `${s.score}%`)
+        );
+        li.title = whenFmt.format(s.at) + TREND_NOTES[moved];
+        list.append(li);
+      }
+    };
+
+    /** One button per Modality, with its key; Arithmetic has the answer field instead. */
+    const renderResponses = (mode: Mode, r: Run | null) => {
+      const mods = modalities(mode);
+      responsesEl.replaceChildren();
+      for (const mod of mods) {
+        if (mod === "arithmetic") {
+          continue;
+        }
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "resp";
+        b.dataset.mod = mod;
+        const key = KEYS[mod];
+        const kbd = document.createElement("kbd");
+        kbd.textContent = key.toUpperCase();
+        const label = span("resp-label", "");
+        b.append(kbd, label);
+        const index = /\d$/u.test(mod) ? Number(mod.slice(-1)) - 1 : -1;
+        let text = LABELS[mod];
+        // A multi-stimulus object's visual stream is whichever of Color and Shape is on.
+        if (/^vis\d$/u.test(mod)) {
+          text = mode.color ? "Color" : "Shape";
+        }
+        if (mode.multi > 1 && index >= 0) {
+          // Which object: a swatch in its color, or its shape.
+          const mark = document.createElement("span");
+          mark.className = "ident";
+          if (mode.color) {
+            mark.innerHTML = shapeSvg(
+              "shapes",
+              itemAt(IDENTITY_SHAPES, index),
+              "currentColor"
+            );
+          } else {
+            mark.style.background = itemAt(
+              COLORS,
+              itemAt(IDENTITY_COLORS, index)
+            ).hex;
+          }
+          label.before(mark);
+        }
+        label.textContent = text;
+        b.title = `${text}: press ${key.toUpperCase()} when it matches`;
+        responsesEl.append(b);
+      }
+      if (mode.selfPaced) {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "resp next";
+        b.innerHTML = `<kbd>↵</kbd><span class="resp-label">Next</span>`;
+        b.title = "Show the next trial (Enter)";
+        responsesEl.append(b);
+      }
+      answerRow.hidden = !mode.arithmetic;
+      keypad.hidden = !mode.arithmetic;
+      if (!r) {
+        answerValue.textContent = "";
+      }
+    };
+
+    /* ---------------- rendering: the board ---------------- */
+
+    const clearBoard = () => {
+      for (const c of cells) {
+        c.replaceChildren();
+      }
+      board.classList.remove("crosshair");
+    };
+
+    const showOverlay = (html: string, kind: string) => {
+      overlay.innerHTML = html;
+      overlay.className = `overlay ${kind}`;
+      overlay.hidden = false;
+    };
+
+    /** A Modality's name in the Score's table; with several objects, which one. */
+    const buttonLabel = (mod: Modality): string => {
+      if (mod === "arithmetic") {
+        return "Arithmetic";
+      }
+      const b = responsesEl.querySelector(`[data-mod="${mod}"] .resp-label`);
+      const object =
+        /^(?:position|vis)\d$/u.test(mod) && responsesEl.querySelector(".ident")
+          ? ` ${mod.slice(-1)}`
+          : "";
+      return (b?.textContent ?? LABELS[mod]) + object;
+    };
+
+    const showResult = () => {
+      if (!result) {
+        return;
+      }
+      const { session: s, tallies, before, th } = result;
+      let moved = "";
+      if (!s.manual && s.level) {
+        if (s.level.n > before.n) {
+          moved = `N-Back raised to ${s.level.n}.`;
+        } else if (s.level.n < before.n) {
+          moved = `N-Back lowered to ${s.level.n}.`;
+        } else if (s.level.strikes > before.strikes) {
+          moved = `Strike ${s.level.strikes} of ${th.strikes} at ${s.n}-back.`;
+        }
+      }
+      const rows = tallies
+        .map(([mod, t]) => {
+          const right = t.hits + (s.jaeggi ? t.correctRejections : 0);
+          const wrong = t.misses + t.falseAlarms;
+          return `<tr><td>${escapeHtml(buttonLabel(mod))}</td><td class="num">${right}–${wrong}</td><td class="num">${percent(t, { jaeggi: s.jaeggi })}%</td></tr>`;
+        })
+        .join("");
+      showOverlay(
+        `
+        <div class="score">${s.score}%</div>
+        <div class="score-label">${s.jaeggi ? "Lowest score" : "Score"}${s.manual ? "" : ` · ${escapeHtml(verdict(s.score, th))}`}</div>
+        ${moved ? `<div class="change">${moved}</div>` : ""}
+        <table class="tallies"><thead><tr><th></th><th class="num" title="Right and wrong">Right–wrong</th><th class="num"></th></tr></thead><tbody>${rows}</tbody></table>
+        <p class="again">Press <kbd>Space</kbd> to play again</p>`,
+        "result"
+      );
+    };
+
+    const idleBoard = () => {
+      clearBoard();
+      if (result) {
+        showResult();
+        return;
+      }
+      const p = plan();
+      const mods = modalities(p.e.mode);
+      const keys = mods
+        .filter((m) => m !== "arithmetic")
+        .map((m) => KEYS[m].toUpperCase());
+      const lines: string[] = [];
+      if (p.e.mode.arithmetic) {
+        lines.push(
+          `Type the number from ${p.n} back, ${["plus", "minus", "times", "divided by"].join(", ")} this one, as the voice says.`
+        );
+      }
+      if (keys.length) {
+        lines.push(
+          `Press ${keys.map((k) => `<kbd>${k}</kbd>`).join(" ")} when what you see or hear matches ${p.n} back.`
+        );
+      }
+      if (p.e.mode.variable) {
+        lines.push("The number in the grid says how far back to compare.");
+      }
+      if (p.e.mode.crab) {
+        lines.push(`Crab: look back 1, 3, 5… within each block of ${p.n}.`);
+      }
+      if (p.e.mode.selfPaced) {
+        lines.push("Each trial waits for <kbd>Enter</kbd>.");
+      }
+      showOverlay(
+        `<div class="overlay-title">Press <kbd>Space</kbd> to start</div>${lines.map((l) => `<p>${l}</p>`).join("")}`,
+        "idle"
+      );
+    };
+
+    /** What stays up between stimuli: the crosshair, or Variable's back. */
+    const drawBack = (r: Run, t: Trial | null) => {
+      if (r.mode.variable && t && r.index >= r.n) {
+        const b = document.createElement("div");
+        b.className = "back-number";
+        b.textContent = String(t.back);
+        itemAt(cells, r.mode.position ? CENTER : 7).append(b);
+      } else if (r.mode.position && !r.mode.variable) {
+        board.classList.add("crosshair");
+      }
+    };
+
+    const drawTrial = (r: Run, t: Trial) => {
+      clearBoard();
+      const m = r.mode;
+      const objects = m.position ? m.multi : 1;
+      for (let i = 0; i < objects; i += 1) {
+        const cell = m.position
+          ? itemAt(OUTER, itemAt(t.positions, i))
+          : CENTER;
+        const stim = document.createElement("div");
+        stim.className = "stim";
+        if (m.arithmetic) {
+          stim.classList.add("text");
+          stim.textContent = String(t.number);
+          if (m.color) {
+            stim.style.color = COLORS[t.color].hex;
+          }
+        } else if (m.combination) {
+          stim.classList.add("text");
+          stim.textContent = itemAt(r.sounds, t.letter).label;
+          if (m.color) {
+            stim.style.color = COLORS[t.color].hex;
+          }
+        } else if (m.multi > 1) {
+          if (m.color) {
+            stim.innerHTML = shapeSvg(
+              "shapes",
+              itemAt(IDENTITY_SHAPES, i),
+              itemAt(COLORS, itemAt(t.vis, i)).hex
+            );
+          } else if (m.shape) {
+            stim.innerHTML = shapeSvg(
+              r.shapeSet,
+              itemAt(t.vis, i),
+              itemAt(COLORS, itemAt(IDENTITY_COLORS, i)).hex
+            );
+          } else {
+            stim.innerHTML = `<div class="square" style="background:${itemAt(COLORS, itemAt(IDENTITY_COLORS, i)).hex}"></div>`;
+          }
+        } else {
+          const fill = m.color ? COLORS[t.color].hex : "var(--accent)";
+          stim.innerHTML = m.shape
+            ? shapeSvg(r.shapeSet, t.shape, fill)
+            : `<div class="square" style="background:${fill}"></div>`;
+        }
+        itemAt(cells, cell).append(stim);
+      }
+      drawBack(r, t);
+    };
+
+    const hideStimulus = (r: Run) => {
+      clearBoard();
+      drawBack(r, r.trials[r.index] ?? null);
+    };
+
+    /* ---------------- rendering: History ---------------- */
+
+    const thresholdsOf = (s: Session): Thresholds =>
+      s.jaeggi ? JAEGGI : settings.thresholds;
+
+    const shortLabel = (m: Modality): string => {
+      const short: Partial<Record<Modality, string>> = {
+        arithmetic: "M",
+        audiovis: "HS",
+        color: "C",
+        shape: "S",
+        sound: "A",
+        visaudio: "SH",
+        visvis: "LS",
+      };
+      if (m.startsWith("position")) {
+        return `P${m.endsWith("1") ? "" : m.slice(-1)}`;
+      }
+      if (m.startsWith("vis") && /\d$/u.test(m)) {
+        return `V${m.slice(-1)}`;
+      }
+      return short[m] ?? m;
+    };
+
+    const renderHistory = () => {
+      const keys = [...new Set(sessions.map((s) => s.mode))];
+      const current = plan().key;
+      if (!historyMode) {
+        historyMode = keys.includes(current)
+          ? current
+          : (sessions.at(-1)?.mode ?? current);
+      }
+      if (!keys.includes(historyMode)) {
+        keys.push(historyMode);
+      }
+      const counts = new Map<string, number>();
+      for (const s of sessions) {
+        counts.set(s.mode, (counts.get(s.mode) ?? 0) + 1);
+      }
+      historySelect.innerHTML = keys
+        .toSorted((a, b) => (counts.get(b) ?? 0) - (counts.get(a) ?? 0))
+        .map(
+          (k) =>
+            `<option value="${k}">${escapeHtml(modeName(modeOf(k)))} (${counts.get(k) ?? 0})</option>`
+        )
+        .join("");
+      historySelect.value = historyMode;
+      for (const b of $$<HTMLButtonElement>(".metric-seg button")) {
+        const on = b.dataset.metric === metric;
+        b.classList.toggle("active", on);
+        b.setAttribute("aria-checked", String(on));
+      }
+      $<HTMLButtonElement>(".export-btn").disabled = sessions.length === 0;
+      $<HTMLButtonElement>(".clear-btn").disabled = sessions.length === 0;
+
+      const now = Date.now();
+      const t = today(sessions, now);
+      const d = lastDay(sessions, now);
+      const ofMode = sessions.filter((s) => s.mode === historyMode);
+      const todayMode = today(ofMode, now).slice(-20);
+      const tile = (label: string, value: string, sub: string) =>
+        `<div class="tile"><div class="tile-label">${label}</div><div class="tile-value">${value}</div><div class="tile-sub">${sub}</div></div>`;
+      const plural = (n: number) => `${n} session${n === 1 ? "" : "s"}`;
+      $(".tiles").innerHTML =
+        tile("Today", durationFmt(totalSeconds(t)), plural(t.length)) +
+        tile("Last 24 hours", durationFmt(totalSeconds(d)), plural(d.length)) +
+        tile(
+          "All time",
+          durationFmt(totalSeconds(sessions)),
+          plural(sessions.length)
+        ) +
+        tile(
+          "Average N today",
+          todayMode.length
+            ? (
+                todayMode.reduce((a, s) => a + s.n, 0) / todayMode.length
+              ).toFixed(2)
+            : "–",
+          "this mode, last 20"
+        );
+
+      // The chart leaves Manual Sessions out: their N is the player's choice, not the level reached.
+      const charted = ofMode.filter((s) => !s.manual);
+      const chart = $(".chart");
+      if (charted.length) {
+        draw(chart, daily(charted, metric, thresholdsOf), metric);
+      } else {
+        chart.innerHTML = `<p class="empty">No automatic sessions of this mode yet. The chart shows each day's mean and best ${metric === "score" ? "score" : "level"}.</p>`;
+      }
+      $(".legend").hidden = !charted.length;
+      $(".chart-title").textContent =
+        metric === "score" ? "Daily score" : "Daily level";
+
+      // Each Modality's mean over the last 50 Sessions of this Mode.
+      const recent = ofMode.slice(-50);
+      const mods = modalities(modeOf(historyMode));
+      $(".averages").textContent = recent.length
+        ? `Last ${recent.length}: ${mods
+            .map((m) => {
+              const vs = recent
+                .map((s) => s.pct[m])
+                .filter((v): v is number => typeof v === "number");
+              return `${shortLabel(m)} ${
+                vs.length
+                  ? `${Math.round(vs.reduce((a, b) => a + b, 0) / vs.length)}%`
+                  : "–"
+              }`;
+            })
+            .join(" · ")}`
+        : "";
+
+      const rows = ofMode.toReversed();
+      const tbody = $("tbody");
+      tbody.innerHTML =
+        rows
+          .slice(0, shownRows)
+          .map((s) => {
+            const mode = modeOf(s.mode);
+            const cls = trend(s, thresholdsOf(s));
+            const tags =
+              (s.manual ? ' <span class="tag">Manual</span>' : "") +
+              (s.jaeggi ? ' <span class="tag">Jaeggi</span>' : "");
+            const pcts = modalities(mode)
+              .map((m) =>
+                s.pct[m] === undefined ? "" : `${shortLabel(m)} ${s.pct[m]}`
+              )
+              .filter(Boolean)
+              .join(" · ");
+            return `<tr class="${cls}"><td>${whenFmt.format(s.at)}</td><td>${escapeHtml(modeName(mode))}${tags}</td><td class="num">${s.n}</td><td class="num score-cell">${s.score}%</td><td class="mods">${pcts}</td><td class="num">${clockFmt(s.seconds)}</td></tr>`;
+          })
+          .join("") ||
+        `<tr><td colspan="6" class="empty">No sessions of this mode yet.</td></tr>`;
+      $(".more-btn").hidden = rows.length <= shownRows;
+    };
+
+    /* ---------------- refreshing after a change ---------------- */
+
+    const refresh = () => {
       const p = plan();
       const m = settings.mode;
       const locked = settings.jaeggi;
@@ -525,262 +929,20 @@ const tool: Tool = {
       if (view === "history") {
         renderHistory();
       }
-    }
+    };
 
-    function renderToday() {
-      const now = Date.now();
-      const t = today(sessions, now);
-      const d = lastDay(sessions, now);
-      $(".today-time").textContent = t.length
-        ? `${durationFmt(totalSeconds(t))} in ${t.length} session${t.length === 1 ? "" : "s"}${
-            d.length > t.length
-              ? ` · ${durationFmt(totalSeconds(d))} in the last 24 hours`
-              : ""
-          }`
-        : "No sessions yet today.";
-      const list = $(".today-list");
-      list.replaceChildren();
-      t.slice(-20)
-        .toReversed()
-        .forEach((s, i) => {
-          const li = document.createElement("li");
-          const mode = parseModeKey(s.mode)!;
-          const th = s.jaeggi ? JAEGGI : settings.thresholds;
-          const up = !s.manual && s.score >= th.advance;
-          const down = !s.manual && s.score < th.fallback;
-          li.className = s.manual ? "" : up ? "up" : down ? "down" : "";
-          li.innerHTML = `<span class="num">${t.length - i}</span><span class="name"></span><span class="pct">${s.score}%</span>`;
-          li.querySelector(".name")!.textContent =
-            `${(s.manual ? "M · " : "") + modeName(mode)} ${s.n}`;
-          li.title =
-            whenFmt.format(s.at) +
-            (up ? " · raised the level" : down ? " · a strike" : "");
-          list.append(li);
-        });
-    }
-
-    /** One button per Modality, with its key; Arithmetic has the answer field instead. */
-    function renderResponses(mode: Mode, r: Run | null) {
-      const mods = modalities(mode);
-      responsesEl.replaceChildren();
-      for (const mod of mods) {
-        if (mod === "arithmetic") {
-          continue;
-        }
-        const b = document.createElement("button");
-        b.type = "button";
-        b.className = "resp";
-        b.dataset.mod = mod;
-        const key = KEYS[mod];
-        b.innerHTML = `<kbd>${key.toUpperCase()}</kbd><span class="resp-label"></span>`;
-        const label = b.querySelector(".resp-label")!;
-        const index = /\d$/.test(mod) ? Number(mod.slice(-1)) - 1 : -1;
-        let text = LABELS[mod];
-        // A multi-stimulus object's visual stream is whichever of Color and Shape is on.
-        if (/^vis\d$/.test(mod)) {
-          text = mode.color ? "Color" : "Shape";
-        }
-        if (mode.multi > 1 && index >= 0) {
-          // Which object: a swatch in its color, or its shape.
-          const mark = document.createElement("span");
-          mark.className = "ident";
-          if (mode.color) {
-            mark.innerHTML = shapeSvg(
-              "shapes",
-              IDENTITY_SHAPES[index]!,
-              "currentColor"
-            );
-          } else {
-            mark.style.background = COLORS[IDENTITY_COLORS[index]!].hex;
-          }
-          label.before(mark);
-        }
-        label.textContent = text;
-        b.title = `${text}: press ${key.toUpperCase()} when it matches`;
-        responsesEl.append(b);
-      }
-      if (mode.selfPaced) {
-        const b = document.createElement("button");
-        b.type = "button";
-        b.className = "resp next";
-        b.innerHTML = `<kbd>↵</kbd><span class="resp-label">Next</span>`;
-        b.title = "Show the next trial (Enter)";
-        responsesEl.append(b);
-      }
-      answerRow.hidden = !mode.arithmetic;
-      keypad.hidden = !mode.arithmetic;
-      if (!r) {
-        answerValue.textContent = "";
-      }
-    }
-
-    /* ---------------- rendering: the board ---------------- */
-
-    function clearBoard() {
-      for (const c of cells) {
-        c.replaceChildren();
-      }
-      board.classList.remove("crosshair");
-    }
-
-    function showOverlay(html: string, kind: string) {
-      overlay.innerHTML = html;
-      overlay.className = `overlay ${kind}`;
-      overlay.hidden = false;
-    }
-
-    function idleBoard() {
-      clearBoard();
-      if (result) {
-        showResult();
-        return;
-      }
-      const p = plan();
-      const mods = modalities(p.e.mode);
-      const keys = mods
-        .filter((m) => m !== "arithmetic")
-        .map((m) => KEYS[m].toUpperCase());
-      const lines: string[] = [];
-      if (p.e.mode.arithmetic) {
-        lines.push(
-          `Type the number from ${p.n} back, ${["plus", "minus", "times", "divided by"].join(", ")} this one, as the voice says.`
-        );
-      }
-      if (keys.length) {
-        lines.push(
-          `Press ${keys.map((k) => `<kbd>${k}</kbd>`).join(" ")} when what you see or hear matches ${p.n} back.`
-        );
-      }
-      if (p.e.mode.variable) {
-        lines.push("The number in the grid says how far back to compare.");
-      }
-      if (p.e.mode.crab) {
-        lines.push(`Crab: look back 1, 3, 5… within each block of ${p.n}.`);
-      }
-      if (p.e.mode.selfPaced) {
-        lines.push("Each trial waits for <kbd>Enter</kbd>.");
-      }
-      showOverlay(
-        `<div class="overlay-title">Press <kbd>Space</kbd> to start</div>${lines.map((l) => `<p>${l}</p>`).join("")}`,
-        "idle"
-      );
-    }
-
-    function showResult() {
-      if (!result) {
-        return;
-      }
-      const { session: s, tallies, before, th } = result;
-      let moved = "";
-      if (!s.manual && s.level) {
-        if (s.level.n > before.n) {
-          moved = `N-Back raised to ${s.level.n}.`;
-        } else if (s.level.n < before.n) {
-          moved = `N-Back lowered to ${s.level.n}.`;
-        } else if (s.level.strikes > before.strikes) {
-          moved = `Strike ${s.level.strikes} of ${th.strikes} at ${s.n}-back.`;
-        }
-      }
-      const rows = tallies
-        .map(([mod, t]) => {
-          const right = t.hits + (s.jaeggi ? t.correctRejections : 0);
-          const wrong = t.misses + t.falseAlarms;
-          return `<tr><td>${escapeHtml(buttonLabel(mod))}</td><td class="num">${right}–${wrong}</td><td class="num">${percent(t, { jaeggi: s.jaeggi })}%</td></tr>`;
-        })
-        .join("");
-      showOverlay(
-        `
-        <div class="score">${s.score}%</div>
-        <div class="score-label">${s.jaeggi ? "Lowest score" : "Score"}${s.manual ? "" : ` · ${escapeHtml(verdict(s.score, th))}`}</div>
-        ${moved ? `<div class="change">${moved}</div>` : ""}
-        <table class="tallies"><thead><tr><th></th><th class="num" title="Right and wrong">Right–wrong</th><th class="num"></th></tr></thead><tbody>${rows}</tbody></table>
-        <p class="again">Press <kbd>Space</kbd> to play again</p>`,
-        "result"
-      );
-    }
-
-    /** A Modality's name in the Score's table; with several objects, which one. */
-    function buttonLabel(mod: Modality): string {
-      if (mod === "arithmetic") {
-        return "Arithmetic";
-      }
-      const b = responsesEl.querySelector(`[data-mod="${mod}"] .resp-label`);
-      const object =
-        /^(position|vis)\d$/.test(mod) && responsesEl.querySelector(".ident")
-          ? ` ${mod.slice(-1)}`
-          : "";
-      return (b?.textContent ?? LABELS[mod]) + object;
-    }
-
-    function drawTrial(r: Run, t: Trial) {
-      clearBoard();
-      const m = r.mode;
-      const objects = m.position ? m.multi : 1;
-      for (let i = 0; i < objects; i += 1) {
-        const cell = m.position ? OUTER[t.positions[i]!]! : CENTER;
-        const stim = document.createElement("div");
-        stim.className = "stim";
-        if (m.arithmetic) {
-          stim.classList.add("text");
-          stim.textContent = String(t.number);
-          if (m.color) {
-            stim.style.color = COLORS[t.color].hex;
-          }
-        } else if (m.combination) {
-          stim.classList.add("text");
-          stim.textContent = r.sounds[t.letter]!.label;
-          if (m.color) {
-            stim.style.color = COLORS[t.color].hex;
-          }
-        } else if (m.multi > 1) {
-          if (m.color) {
-            stim.innerHTML = shapeSvg(
-              "shapes",
-              IDENTITY_SHAPES[i]!,
-              COLORS[t.vis[i]!].hex
-            );
-          } else if (m.shape) {
-            stim.innerHTML = shapeSvg(
-              r.shapeSet,
-              t.vis[i]!,
-              COLORS[IDENTITY_COLORS[i]!].hex
-            );
-          } else {
-            stim.innerHTML = `<div class="square" style="background:${COLORS[IDENTITY_COLORS[i]!].hex}"></div>`;
-          }
-        } else {
-          const fill = m.color ? COLORS[t.color].hex : "var(--accent)";
-          stim.innerHTML = m.shape
-            ? shapeSvg(r.shapeSet, t.shape, fill)
-            : `<div class="square" style="background:${fill}"></div>`;
-        }
-        cells[cell]!.append(stim);
-      }
-      drawBack(r, t);
-    }
-
-    /** What stays up between stimuli: the crosshair, or Variable's back. */
-    function drawBack(r: Run, t: Trial | null) {
-      if (r.mode.variable && t && r.index >= r.n) {
-        const b = document.createElement("div");
-        b.className = "back-number";
-        b.textContent = String(t.back);
-        cells[r.mode.position ? CENTER : 7]!.append(b);
-      } else if (r.mode.position && !r.mode.variable) {
-        board.classList.add("crosshair");
-      }
-    }
-
-    function hideStimulus(r: Run) {
-      clearBoard();
-      drawBack(r, r.trials[r.index] ?? null);
-    }
+    const change = (fn: (s: Settings) => void) => {
+      fn(settings);
+      result = null;
+      publish();
+      refresh();
+    };
 
     /* ---------------- the Session ---------------- */
 
     const vnow = (r: Run) => performance.now() - r.pausedTotal;
 
-    function arm(r: Run, at: number, fn: () => void) {
+    const arm = (r: Run, at: number, fn: () => void) => {
       r.pending = { at, fn };
       clearTimeout(r.timer);
       if (r.pausedAt !== null) {
@@ -796,9 +958,200 @@ const tool: Tool = {
         },
         Math.max(0, at - vnow(r))
       );
-    }
+    };
 
-    function start() {
+    const setPauseLabel = (paused: boolean) => {
+      pauseBtn.innerHTML = paused
+        ? `${ICON_PLAY}<span>Resume</span>`
+        : `${ICON_PAUSE}<span>Pause</span>`;
+      pauseBtn.title = paused ? "Resume (P)" : "Pause (P)";
+    };
+
+    const updateRemaining = (r: Run) => {
+      const left = r.trials.length - Math.max(0, r.index);
+      stageMeta.textContent =
+        r.index < 0 ? `${r.trials.length} trials` : `${left} left`;
+    };
+
+    const endRun = () => {
+      if (run) {
+        clearTimeout(run.timer);
+      }
+      run = null;
+      player.stop();
+      el.classList.remove("running");
+      setup.inert = false;
+      startBtn.hidden = false;
+      pauseBtn.hidden = true;
+      stopBtn.hidden = true;
+      // The focus was on the board; Start is where a keyboard user carries on.
+      if (
+        el.contains(document.activeElement) ||
+        document.activeElement === document.body
+      ) {
+        startBtn.focus({ preventScroll: true });
+      }
+    };
+
+    /** Stops without keeping anything: a Session cut short has no Score. */
+    const stopRun = () => {
+      endRun();
+      refresh();
+    };
+
+    const finish = (r: Run) => {
+      const e = r.settings;
+      const scoring = { jaeggi: e.jaeggi };
+      const tallies = r.mods.map(
+        (mod) =>
+          [mod, tally(r.trials, r.responses, mod, r.n)] as [Modality, Tally]
+      );
+      const score = sessionScore(
+        tallies.map(([, t]) => t),
+        scoring
+      );
+      const th = e.thresholdsInForce;
+      const before = levelFor(sessions, r.key);
+      const pct: Session["pct"] = {};
+      const t: Session["tallies"] = {};
+      for (const [mod, tl] of tallies) {
+        pct[mod] = percent(tl, scoring);
+        t[mod] = tl;
+      }
+      // The History writes a Session's fields in their own order, whatever order they are built in.
+      const session: Session = {
+        at: Date.now(),
+        jaeggi: e.jaeggi,
+        manual: e.manual,
+        mode: r.key,
+        n: r.n,
+        pct,
+        score,
+        seconds: Math.round((r.trials.length * r.trialMs) / 1000),
+        tallies: t,
+        trialMs: r.trialMs,
+        trials: r.trials.length,
+      };
+      // Strikes belong to one N: a Manual detour to another N, or a Deep Link, starts them afresh.
+      const at: Level = {
+        n: r.n,
+        strikes: before.n === r.n ? before.strikes : 0,
+      };
+      if (!e.manual) {
+        session.level = nextLevel(at, score, th);
+      }
+      sessions.push(session);
+      const stored = save(sessions);
+      result = { before: at, session, tallies, th };
+      endRun();
+      refresh();
+      if (!stored) {
+        overlay.insertAdjacentHTML(
+          "beforeend",
+          `<p class="warn">The browser refused to store this session: its storage is full or turned off.</p>`
+        );
+      }
+    };
+
+    /** Shows what was missed, and how the typed answer fared; presses still count until the next trial. */
+    const closeTrial = (r: Run) => {
+      r.closed = true;
+      if (!r.settings.feedback) {
+        return;
+      }
+      const i = r.index;
+      for (const mod of r.mods) {
+        if (mod === "arithmetic") {
+          if (i >= r.n) {
+            answerValue.className = `answer-value ${
+              answerRight(itemAt(r.trials, i), itemAt(r.responses, i).answer)
+                ? "hit"
+                : "wrong"
+            }`;
+          }
+          continue;
+        }
+        if (
+          isMatch(r.trials, i, mod, r.n) &&
+          itemAt(r.responses, i).pressed[mod] === undefined
+        ) {
+          responsesEl
+            .querySelector(`[data-mod="${mod}"]`)
+            ?.classList.add("missed");
+        }
+      }
+    };
+
+    /** Shows trial `i`, or finishes the Session when the last one is done. */
+    const showTrial = (r: Run, i: number) => {
+      if (i >= r.trials.length) {
+        finish(r);
+        return;
+      }
+      r.index = i;
+      r.closed = false;
+      r.trialStart = vnow(r);
+      const t = itemAt(r.trials, i);
+      for (const b of $$(".resp")) {
+        b.classList.remove("hit", "wrong", "missed", "early", "pressed");
+      }
+      answerValue.textContent = "";
+      answerValue.className = "answer-value";
+      drawTrial(r, t);
+      if (r.mode.sound) {
+        void player.play(itemAt(r.sounds, t.sound).url);
+      } else if (r.mode.arithmetic && t.op) {
+        void player.play(OPERATIONS[t.op]);
+      }
+      updateRemaining(r);
+      if (r.mode.selfPaced) {
+        r.waiting = true;
+        return;
+      }
+      const begins = r.origin + i * r.trialMs;
+      arm(r, begins + r.stimMs, () => {
+        hideStimulus(r);
+        arm(r, begins + r.trialMs - MISSED_MS, () => {
+          closeTrial(r);
+          arm(r, begins + r.trialMs, () => showTrial(r, r.index + 1));
+        });
+      });
+    };
+
+    const next = (r: Run) => showTrial(r, r.index + 1);
+
+    const advance = (r: Run) => {
+      if (!r.waiting || r.pausedAt !== null) {
+        return;
+      }
+      r.waiting = false;
+      closeTrial(r);
+      hideStimulus(r);
+      arm(r, vnow(r) + ADVANCE_GAP_MS, () => next(r));
+    };
+
+    /** Starts the first Trial once the recordings are decoded and the lead-in is over, or gives up if they cannot be. */
+    const begin = async (r: Run, decoded: Promise<unknown>, lead: number) => {
+      try {
+        await decoded;
+      } catch {
+        if (run === r) {
+          stopRun();
+          overlay.insertAdjacentHTML(
+            "beforeend",
+            `<p class="warn">This browser could not decode the sounds, so the session did not start.</p>`
+          );
+        }
+        return;
+      }
+      if (run !== r) {
+        return;
+      }
+      r.origin = Math.max(lead, vnow(r));
+      arm(r, r.origin, () => showTrial(r, 0));
+    };
+
+    const start = () => {
       if (run) {
         return;
       }
@@ -807,45 +1160,44 @@ const tool: Tool = {
       player.unlock();
       const rand = Math.random;
       const shapeSet: ShapeSetId =
-        e.shapes === "either"
-          ? rand() < 0.5
-            ? "shapes"
-            : "pentominoes"
-          : e.shapes;
+        e.shapes === "either" ? pickShapeSet(rand) : e.shapes;
       const trialMs = Math.round(p.secs * 1000);
-      const r: Run = {
-        settings: e,
+      // The random draws in the order they have always been made: the trials, then the letters.
+      const trials = generate({
+        arithmetic: e.arithmetic,
+        jaeggi: e.jaeggi,
+        lureChance: e.lureEighths / 8,
+        matchChance: 0.125,
         mode: e.mode,
-        key: p.key,
         n: p.n,
-        level: p.level,
-        mods: modalities(e.mode),
-        trials: generate({
-          mode: e.mode,
-          n: p.n,
-          trials: p.trials,
-          matchChance: 0.125,
-          lureChance: e.lureEighths / 8,
-          arithmetic: e.arithmetic,
-          jaeggi: e.jaeggi,
-          rand,
-        }),
-        responses: [],
-        trialMs,
-        stimMs: Math.min(stimulusSeconds(e.mode) * 1000, trialMs * 0.6),
-        sounds: sample(rand),
-        shapeSet,
+        rand,
+        trials: p.trials,
+      });
+      const sounds = sample(rand);
+      const r: Run = {
+        closed: false,
         index: -1,
-        trialStart: 0,
+        key: p.key,
+        level: p.level,
+        mode: e.mode,
+        mods: modalities(e.mode),
+        n: p.n,
         origin: 0,
         pausedAt: null,
         pausedTotal: 0,
-        timer: 0,
         pending: null,
+        responses: [],
+        settings: e,
+        shapeSet,
+        sounds,
+        stimMs: Math.min(stimulusSeconds(e.mode) * 1000, trialMs * 0.6),
+        timer: 0,
+        trialMs,
+        trialStart: 0,
+        trials,
         waiting: false,
-        closed: false,
       };
-      r.responses = r.trials.map(() => ({ pressed: {}, answer: "" }));
+      r.responses = r.trials.map(() => ({ answer: "", pressed: {} }));
       run = r;
       result = null;
       el.classList.add("running");
@@ -867,117 +1219,15 @@ const tool: Tool = {
         ...(r.mode.arithmetic ? Object.values(OPERATIONS) : []),
       ];
       const lead = vnow(r) + LEAD_MS;
-      player.prepare(urls).then(
-        () => {
-          if (run !== r) {
-            return;
-          }
-          r.origin = Math.max(lead, vnow(r));
-          arm(r, r.origin, () => showTrial(r, 0));
-        },
-        () => {
-          if (run !== r) {
-            return;
-          }
-          stopRun();
-          overlay.insertAdjacentHTML(
-            "beforeend",
-            `<p class="warn">This browser could not decode the sounds, so the session did not start.</p>`
-          );
-        }
-      );
-    }
+      void begin(r, player.prepare(urls), lead);
+    };
 
-    function updateRemaining(r: Run) {
-      const left = r.trials.length - Math.max(0, r.index);
-      stageMeta.textContent =
-        r.index < 0 ? `${r.trials.length} trials` : `${left} left`;
-    }
-
-    function showTrial(r: Run, i: number) {
-      r.index = i;
-      r.closed = false;
-      r.trialStart = vnow(r);
-      const t = r.trials[i]!;
-      for (const b of $$(".resp")) {
-        b.classList.remove("hit", "wrong", "missed", "early", "pressed");
-      }
-      answerValue.textContent = "";
-      answerValue.className = "answer-value";
-      drawTrial(r, t);
-      if (r.mode.sound) {
-        void player.play(r.sounds[t.sound]!.url);
-      } else if (r.mode.arithmetic && t.op) {
-        void player.play(OPERATIONS[t.op]);
-      }
-      updateRemaining(r);
-      if (r.mode.selfPaced) {
-        r.waiting = true;
-        return;
-      }
-      const begins = r.origin + i * r.trialMs;
-      arm(r, begins + r.stimMs, () => {
-        hideStimulus(r);
-        arm(r, begins + r.trialMs - MISSED_MS, () => {
-          closeTrial(r);
-          arm(r, begins + r.trialMs, () => next(r));
-        });
-      });
-    }
-
-    /** Shows what was missed, and how the typed answer fared; presses still count until the next trial. */
-    function closeTrial(r: Run) {
-      r.closed = true;
-      if (!r.settings.feedback) {
-        return;
-      }
-      const i = r.index;
-      for (const mod of r.mods) {
-        if (mod === "arithmetic") {
-          if (i >= r.n) {
-            answerValue.className = `answer-value ${
-              answerRight(r.trials[i]!, r.responses[i]!.answer)
-                ? "hit"
-                : "wrong"
-            }`;
-          }
-          continue;
-        }
-        if (
-          isMatch(r.trials, i, mod, r.n) &&
-          r.responses[i]!.pressed[mod] === undefined
-        ) {
-          responsesEl
-            .querySelector(`[data-mod="${mod}"]`)
-            ?.classList.add("missed");
-        }
-      }
-    }
-
-    function next(r: Run) {
-      if (r.index + 1 < r.trials.length) {
-        showTrial(r, r.index + 1);
-      } else {
-        finish(r);
-      }
-    }
-
-    function advance(r: Run) {
-      if (!r.waiting || r.pausedAt !== null) {
-        return;
-      }
-      r.waiting = false;
-      closeTrial(r);
-      hideStimulus(r);
-      arm(r, vnow(r) + ADVANCE_GAP_MS, () => next(r));
-    }
-
-    function respond(mod: Modality) {
+    const respond = (mod: Modality) => {
       const r = run;
       if (!r || r.index < 0 || r.pausedAt !== null || !r.mods.includes(mod)) {
         return;
       }
-      const resp = r.responses[r.index]!;
+      const resp = itemAt(r.responses, r.index);
       if (resp.pressed[mod] !== undefined) {
         return;
       }
@@ -994,14 +1244,14 @@ const tool: Tool = {
       } else {
         b.classList.add(isMatch(r.trials, r.index, mod, r.n) ? "hit" : "wrong");
       }
-    }
+    };
 
-    function typeAnswer(key: string) {
+    const typeAnswer = (key: string) => {
       const r = run;
       if (!r || !r.mode.arithmetic || r.index < 0 || r.pausedAt !== null) {
         return;
       }
-      const resp = r.responses[r.index]!;
+      const resp = itemAt(r.responses, r.index);
       let a = resp.answer;
       if (key === "Backspace" || key === "Delete") {
         a = "";
@@ -1009,7 +1259,7 @@ const tool: Tool = {
         a = a.startsWith("-") ? a.slice(1) : `-${a}`;
       } else if (key === ".") {
         a = a.includes(".") ? a : a + (a === "" || a === "-" ? "0." : ".");
-      } else if (/^\d$/.test(key) && a.replaceAll(/[-.]/g, "").length < 6) {
+      } else if (/^\d$/u.test(key) && a.replaceAll(/[-.]/gu, "").length < 6) {
         a += key;
       } else {
         return;
@@ -1019,19 +1269,12 @@ const tool: Tool = {
       // A change after the trial closed is judged again.
       if (r.closed && r.settings.feedback && r.index >= r.n) {
         answerValue.className = `answer-value ${
-          answerRight(r.trials[r.index]!, a) ? "hit" : "wrong"
+          answerRight(itemAt(r.trials, r.index), a) ? "hit" : "wrong"
         }`;
       }
-    }
+    };
 
-    function setPauseLabel(paused: boolean) {
-      pauseBtn.innerHTML = paused
-        ? `${ICON_PLAY}<span>Resume</span>`
-        : `${ICON_PAUSE}<span>Pause</span>`;
-      pauseBtn.title = paused ? "Resume (P)" : "Pause (P)";
-    }
-
-    function pause() {
+    const pause = () => {
       const r = run;
       if (!r || r.pausedAt !== null) {
         return;
@@ -1044,9 +1287,9 @@ const tool: Tool = {
         `<div class="overlay-title">Paused</div><p>Press <kbd>P</kbd> to resume, <kbd>Esc</kbd> to stop.</p>`,
         "paused"
       );
-    }
+    };
 
-    function resume() {
+    const resume = () => {
       const r = run;
       if (!r || r.pausedAt === null) {
         return;
@@ -1059,127 +1302,54 @@ const tool: Tool = {
       if (r.pending) {
         arm(r, r.pending.at, r.pending.fn);
       }
-    }
+    };
 
-    function endRun() {
+    /* ---------------- restoring a Deep Link ---------------- */
+
+    let restored = false;
+    ctx.onRestore((payload) => {
+      restored = true;
       if (run) {
-        clearTimeout(run.timer);
+        stopRun();
       }
-      run = null;
-      player.stop();
-      el.classList.remove("running");
-      setup.inert = false;
-      startBtn.hidden = false;
-      pauseBtn.hidden = true;
-      stopBtn.hidden = true;
-      // The focus was on the board; Start is where a keyboard user carries on.
-      if (
-        el.contains(document.activeElement) ||
-        document.activeElement === document.body
-      ) {
-        startBtn.focus({ preventScroll: true });
-      }
-    }
-
-    /** Stops without keeping anything: a Session cut short has no Score. */
-    function stopRun() {
-      endRun();
+      settings = decode(payload);
+      result = null;
+      publish();
       refresh();
-    }
-
-    function finish(r: Run) {
-      const e = r.settings;
-      const scoring = { jaeggi: e.jaeggi };
-      const tallies = r.mods.map(
-        (mod) =>
-          [mod, tally(r.trials, r.responses, mod, r.n)] as [Modality, Tally]
-      );
-      const score = sessionScore(
-        tallies.map(([, t]) => t),
-        scoring
-      );
-      const th = e.thresholdsInForce;
-      const before = levelFor(sessions, r.key);
-      const pct: Session["pct"] = {};
-      const t: Session["tallies"] = {};
-      for (const [mod, tl] of tallies) {
-        pct[mod] = percent(tl, scoring);
-        t[mod] = tl;
+    });
+    // The Shell restores a Deep Link right after mount; only without one do the remembered Settings go in the URL.
+    queueMicrotask(() => {
+      if (!restored) {
+        publish();
       }
-      const session: Session = {
-        at: Date.now(),
-        mode: r.key,
-        n: r.n,
-        manual: e.manual,
-        jaeggi: e.jaeggi,
-        trials: r.trials.length,
-        trialMs: r.trialMs,
-        seconds: Math.round((r.trials.length * r.trialMs) / 1000),
-        score,
-        pct,
-        tallies: t,
-      };
-      // Strikes belong to one N: a Manual detour to another N, or a Deep Link, starts them afresh.
-      const at: Level = {
-        n: r.n,
-        strikes: before.n === r.n ? before.strikes : 0,
-      };
-      if (!e.manual) {
-        session.level = nextLevel(at, score, th);
-      }
-      sessions.push(session);
-      const stored = save(sessions);
-      result = { session, tallies, before: at, th };
-      endRun();
-      refresh();
-      if (!stored) {
-        overlay.insertAdjacentHTML(
-          "beforeend",
-          `<p class="warn">The browser refused to store this session: its storage is full or turned off.</p>`
-        );
-      }
-    }
+    });
 
     /* ---------------- input ---------------- */
 
-    function keyFor(key: string): Modality | null {
+    const keyFor = (key: string): Modality | null => {
       const r = run;
       if (!r) {
         return null;
       }
       return r.mods.find((m) => KEYS[m] === key) ?? null;
-    }
+    };
 
-    document.addEventListener("keydown", (e) => {
-      if (
-        el.hidden ||
-        view !== "train" ||
-        settingsDialog.open ||
-        confirmDialog.open
-      ) {
-        return;
-      }
-      if (e.metaKey || e.ctrlKey || e.altKey) {
-        return;
-      }
+    /** A key with no Session running: Space starts, unless a keyboard user is on a button, which Space presses. (A clicked button gives its focus up; see below.) */
+    const idleKeydown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
       const typing =
         target instanceof HTMLInputElement ||
         target instanceof HTMLTextAreaElement ||
         target instanceof HTMLSelectElement ||
         target.isContentEditable;
-      if (!run) {
-        // Space starts, unless a keyboard user is on a button, which Space presses. (A clicked button gives its focus up; see below.)
-        if (
-          e.key === " " &&
-          !typing &&
-          !(target instanceof HTMLButtonElement)
-        ) {
-          e.preventDefault();
-          start();
-        }
-        return;
+      if (e.key === " " && !typing && !(target instanceof HTMLButtonElement)) {
+        e.preventDefault();
+        start();
       }
+    };
+
+    /** A key during a Session: stop, pause, advance, a response, or a digit of the answer. */
+    const runKeydown = (e: KeyboardEvent, r: Run) => {
       if (e.repeat) {
         return;
       }
@@ -1191,16 +1361,16 @@ const tool: Tool = {
       }
       if (key === "p") {
         e.preventDefault();
-        if (run.pausedAt === null) {
+        if (r.pausedAt === null) {
           pause();
         } else {
           resume();
         }
         return;
       }
-      if (e.key === "Enter" || (e.key === " " && run.mode.selfPaced)) {
+      if (e.key === "Enter" || (e.key === " " && r.mode.selfPaced)) {
         e.preventDefault();
-        advance(run);
+        advance(r);
         return;
       }
       if (e.key === " ") {
@@ -1214,9 +1384,28 @@ const tool: Tool = {
         respond(mod);
         return;
       }
-      if (run.mode.arithmetic && /^(\d|-|\.|Backspace|Delete)$/.test(e.key)) {
+      if (r.mode.arithmetic && /^(?:\d|-|\.|Backspace|Delete)$/u.test(e.key)) {
         e.preventDefault();
         typeAnswer(e.key);
+      }
+    };
+
+    document.addEventListener("keydown", (e) => {
+      if (
+        el.hidden ||
+        view !== "train" ||
+        settingsDialog.open ||
+        confirmDialog.open
+      ) {
+        return;
+      }
+      if (e.metaKey || e.ctrlKey || e.altKey) {
+        return;
+      }
+      if (run) {
+        runKeydown(e, run);
+      } else {
+        idleKeydown(e);
       }
     });
 
@@ -1251,7 +1440,7 @@ const tool: Tool = {
         return;
       }
       e.preventDefault();
-      typeAnswer(b.dataset.key!);
+      typeAnswer(b.dataset.key ?? "");
     });
 
     // A button clicked with the mouse lets go of the focus, so the Space that follows starts a Session instead of pressing it again.
@@ -1273,7 +1462,7 @@ const tool: Tool = {
       if (el.hidden) {
         pause();
       }
-    }).observe(el, { attributes: true, attributeFilter: ["hidden"] });
+    }).observe(el, { attributeFilter: ["hidden"], attributes: true });
     document.addEventListener("visibilitychange", () => {
       if (document.hidden) {
         pause();
@@ -1343,7 +1532,7 @@ const tool: Tool = {
 
     /* ---------------- views ---------------- */
 
-    function setView(v: "train" | "history") {
+    const setView = (v: "train" | "history") => {
       if (v === "history" && run) {
         pause();
       }
@@ -1360,7 +1549,7 @@ const tool: Tool = {
         shownRows = 50;
         renderHistory();
       }
-    }
+    };
     for (const b of $$<HTMLButtonElement>(".view-seg button")) {
       b.addEventListener("click", () =>
         setView(b.dataset.view as "train" | "history")
@@ -1369,160 +1558,19 @@ const tool: Tool = {
 
     /* ---------------- History ---------------- */
 
-    const historySelect = $<HTMLSelectElement>(".history-mode");
-    const historyNote = $(".history-note");
-
-    function thresholdsOf(s: Session): Thresholds {
-      return s.jaeggi ? JAEGGI : settings.thresholds;
-    }
-
-    function renderHistory() {
-      const keys = [...new Set(sessions.map((s) => s.mode))];
-      const current = plan().key;
-      if (!historyMode) {
-        historyMode = keys.includes(current)
-          ? current
-          : (sessions.at(-1)?.mode ?? current);
-      }
-      if (!keys.includes(historyMode)) {
-        keys.push(historyMode);
-      }
-      const counts = new Map<string, number>();
-      for (const s of sessions) {
-        counts.set(s.mode, (counts.get(s.mode) ?? 0) + 1);
-      }
-      historySelect.innerHTML = keys
-        .toSorted((a, b) => (counts.get(b) ?? 0) - (counts.get(a) ?? 0))
-        .map(
-          (k) =>
-            `<option value="${k}">${escapeHtml(modeName(parseModeKey(k)!))} (${counts.get(k) ?? 0})</option>`
-        )
-        .join("");
-      historySelect.value = historyMode;
-      for (const b of $$<HTMLButtonElement>(".metric-seg button")) {
-        const on = b.dataset.metric === metric;
-        b.classList.toggle("active", on);
-        b.setAttribute("aria-checked", String(on));
-      }
-      $<HTMLButtonElement>(".export-btn").disabled = sessions.length === 0;
-      $<HTMLButtonElement>(".clear-btn").disabled = sessions.length === 0;
-
-      const now = Date.now();
-      const t = today(sessions, now);
-      const d = lastDay(sessions, now);
-      const ofMode = sessions.filter((s) => s.mode === historyMode);
-      const todayMode = today(ofMode, now).slice(-20);
-      const tile = (label: string, value: string, sub: string) =>
-        `<div class="tile"><div class="tile-label">${label}</div><div class="tile-value">${value}</div><div class="tile-sub">${sub}</div></div>`;
-      const plural = (n: number) => `${n} session${n === 1 ? "" : "s"}`;
-      $(".tiles").innerHTML =
-        tile("Today", durationFmt(totalSeconds(t)), plural(t.length)) +
-        tile("Last 24 hours", durationFmt(totalSeconds(d)), plural(d.length)) +
-        tile(
-          "All time",
-          durationFmt(totalSeconds(sessions)),
-          plural(sessions.length)
-        ) +
-        tile(
-          "Average N today",
-          todayMode.length
-            ? (
-                todayMode.reduce((a, s) => a + s.n, 0) / todayMode.length
-              ).toFixed(2)
-            : "–",
-          "this mode, last 20"
-        );
-
-      // The chart leaves Manual Sessions out: their N is the player's choice, not the level reached.
-      const charted = ofMode.filter((s) => !s.manual);
-      const chart = $(".chart");
-      if (charted.length) {
-        draw(chart, daily(charted, metric, thresholdsOf), metric);
-      } else {
-        chart.innerHTML = `<p class="empty">No automatic sessions of this mode yet. The chart shows each day's mean and best ${metric === "score" ? "score" : "level"}.</p>`;
-      }
-      $(".legend").hidden = !charted.length;
-      $(".chart-title").textContent =
-        metric === "score" ? "Daily score" : "Daily level";
-
-      // Each Modality's mean over the last 50 Sessions of this Mode.
-      const recent = ofMode.slice(-50);
-      const mods = modalities(parseModeKey(historyMode)!);
-      $(".averages").textContent = recent.length
-        ? `Last ${recent.length}: ${mods
-            .map((m) => {
-              const vs = recent
-                .map((s) => s.pct[m])
-                .filter((v): v is number => typeof v === "number");
-              return `${shortLabel(m)} ${
-                vs.length
-                  ? `${Math.round(vs.reduce((a, b) => a + b, 0) / vs.length)}%`
-                  : "–"
-              }`;
-            })
-            .join(" · ")}`
-        : "";
-
-      const rows = ofMode.toReversed();
-      const tbody = $("tbody");
-      tbody.innerHTML =
-        rows
-          .slice(0, shownRows)
-          .map((s) => {
-            const mode = parseModeKey(s.mode)!;
-            const th = thresholdsOf(s);
-            const cls = s.manual
-              ? ""
-              : s.score >= th.advance
-                ? "up"
-                : s.score < th.fallback
-                  ? "down"
-                  : "";
-            const tags =
-              (s.manual ? ' <span class="tag">Manual</span>' : "") +
-              (s.jaeggi ? ' <span class="tag">Jaeggi</span>' : "");
-            const pcts = modalities(mode)
-              .map((m) =>
-                s.pct[m] === undefined ? "" : `${shortLabel(m)} ${s.pct[m]}`
-              )
-              .filter(Boolean)
-              .join(" · ");
-            return `<tr class="${cls}"><td>${whenFmt.format(s.at)}</td><td>${escapeHtml(modeName(mode))}${tags}</td><td class="num">${s.n}</td><td class="num score-cell">${s.score}%</td><td class="mods">${pcts}</td><td class="num">${clockFmt(s.seconds)}</td></tr>`;
-          })
-          .join("") ||
-        `<tr><td colspan="6" class="empty">No sessions of this mode yet.</td></tr>`;
-      $(".more-btn").hidden = rows.length <= shownRows;
-    }
-
-    function shortLabel(m: Modality): string {
-      const short: Partial<Record<Modality, string>> = {
-        color: "C",
-        shape: "S",
-        visvis: "LS",
-        visaudio: "SH",
-        audiovis: "HS",
-        arithmetic: "M",
-        sound: "A",
-      };
-      if (m.startsWith("position")) {
-        return `P${m.endsWith("1") ? "" : m.slice(-1)}`;
-      }
-      if (m.startsWith("vis") && /\d$/.test(m)) {
-        return `V${m.slice(-1)}`;
-      }
-      return short[m] ?? m;
-    }
-
     historySelect.addEventListener("change", () => {
       historyMode = historySelect.value;
       shownRows = 50;
       renderHistory();
     });
+    const chooseMetric = (m: Metric) => {
+      metric = m;
+      renderHistory();
+    };
     for (const b of $$<HTMLButtonElement>(".metric-seg button")) {
-      b.addEventListener("click", () => {
-        metric = b.dataset.metric as Metric;
-        renderHistory();
-      });
+      b.addEventListener("click", () =>
+        chooseMetric(b.dataset.metric as Metric)
+      );
     }
     $(".more-btn").addEventListener("click", () => {
       shownRows += 100;
@@ -1540,12 +1588,12 @@ const tool: Tool = {
     }).observe($(".chart"));
 
     let noteTimer = 0;
-    function note(text: string, kind = "") {
+    const note = (text: string, kind = "") => {
       clearTimeout(noteTimer);
       historyNote.textContent = text;
       historyNote.className = `history-note ${kind}`;
       noteTimer = window.setTimeout(() => (historyNote.textContent = ""), 6000);
-    }
+    };
 
     $(".export-btn").addEventListener("click", () => {
       const stamp = new Date().toISOString().slice(0, 10);
@@ -1573,7 +1621,7 @@ const tool: Tool = {
         return;
       }
       const merged = merge(sessions, incoming);
-      sessions = merged.sessions;
+      ({ sessions } = merged);
       if (save(sessions)) {
         note(
           `${merged.added} session${merged.added === 1 ? "" : "s"} added from ${file.name}${
@@ -1615,7 +1663,7 @@ const tool: Tool = {
     const field = <T extends HTMLElement = HTMLInputElement>(cls: string) =>
       settingsDialog.querySelector(`.${cls}`) as T;
 
-    function fillSettings() {
+    const fillSettings = () => {
       const s = settings;
       field("s-trials").value = String(s.baseTrials);
       field("s-trials-note").textContent = s.jaeggi
@@ -1639,21 +1687,21 @@ const tool: Tool = {
       field("s-raise").value = String(s.thresholds.advance);
       field("s-lower").value = String(s.thresholds.fallback);
       field("s-strikes").value = String(s.thresholds.strikes);
-    }
+    };
 
-    function readNumber(
+    const readNumber = (
       cls: string,
       limits: readonly [number, number],
       fallback: number,
       tenths = false
-    ): number {
+    ): number => {
       const raw = field(cls).value.trim();
       const v = Number(raw);
       if (!raw || !Number.isFinite(v)) {
         return fallback;
       }
       return clamp(tenths ? Math.round(v * 10) / 10 : Math.round(v), limits);
-    }
+    };
 
     settingsDialog.addEventListener("change", () => {
       change((s) => {
@@ -1720,10 +1768,10 @@ const tool: Tool = {
         const d = clone(DEFAULTS);
         Object.assign(s, {
           ...d,
-          mode: s.mode,
+          jaeggi: s.jaeggi,
           manual: s.manual,
           manualN: s.manualN,
-          jaeggi: s.jaeggi,
+          mode: s.mode,
         });
       });
       fillSettings();
@@ -1739,6 +1787,9 @@ const tool: Tool = {
 
     refresh();
   },
+  name: "Dual N-Back",
+  subtitle:
+    "Train working memory: say when what you see or hear matches what came N steps back.",
 };
 
 export default tool;
