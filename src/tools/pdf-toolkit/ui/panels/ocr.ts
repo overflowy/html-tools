@@ -204,9 +204,15 @@ const ocr: PanelDef = {
         check();
         const layers: TextLayer[] = [];
         const scale = Number(values.dpi) / 72;
+        // Every page in order: the page is its place in the run, said once.
+        const everyPage =
+          targets.length === doc.pages.length &&
+          targets.every((page, k) => page === k);
         for (const [k, page] of targets.entries()) {
           api.progress(
-            `Reading page ${page + 1} (${k + 1} of ${targets.length})`,
+            everyPage
+              ? `Reading page ${page + 1} of ${targets.length}`
+              : `Reading page ${page + 1} (${k + 1} of ${targets.length})`,
             k / targets.length
           );
           const png = await w.call("png", [doc.id, page, scale]);
