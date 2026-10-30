@@ -4946,14 +4946,10 @@ const ptkCancel = () =>
   page
     .locator(`${ptk}.cancel-btn`)
     .evaluate((b) => (b as HTMLButtonElement).click());
-/** Drag across a page in the Pages view, from and to points given in page points. */
-const ptkDrag = async (
-  pageIndex: number,
-  from: [number, number],
-  to: [number, number]
-) => {
+/** Where points of a page in the Pages view are on screen, its top scrolled into view. */
+const ptkOnScreen = async (pageIndex: number) => {
   const overlay = page.locator(`${ptk}.page .overlay`).nth(pageIndex);
-  // Its top in view, where the points dragged across are.
+  // Its top in view, where the points used are.
   await overlay.evaluate((svg) => svg.scrollIntoView({ block: "start" }));
   const box = await overlay.boundingBox();
   const size = await overlay.evaluate((svg) =>
@@ -4962,10 +4958,18 @@ const ptkDrag = async (
   if (!box || !size) {
     throw new Error("The page has no overlay to draw on");
   }
-  const at = ([x, y]: [number, number]) => [
+  return ([x, y]: [number, number]) => [
     box.x + (x / (size[2] ?? 1)) * box.width,
     box.y + (y / (size[3] ?? 1)) * box.height,
   ];
+};
+/** Drag across a page in the Pages view, from and to points given in page points. */
+const ptkDrag = async (
+  pageIndex: number,
+  from: [number, number],
+  to: [number, number]
+) => {
+  const at = await ptkOnScreen(pageIndex);
   const [x0 = 0, y0 = 0] = at(from);
   const [x1 = 0, y1 = 0] = at(to);
   await page.mouse.move(x0, y0);
@@ -5149,6 +5153,167 @@ check(
     .getAnnotations()
     .map((a) => a.getType())
     .join(",") === "Highlight"
+);
+// The tools are a toolbar above the pages. Text: click on the page and type
+// there; what is typed becomes a text box that fits it, where it was typed.
+await page
+  .locator(`${ptk}.viewer-tools [role=toolbar] button[aria-label=Text]`)
+  .click();
+{
+  const at = await ptkOnScreen(1);
+  const [cx = 0, cy = 0] = at([300, 400]);
+  await page.mouse.click(cx, cy);
+  const typing = page.locator(`${ptk}.sheet textarea.writing`);
+  await typing.waitFor();
+  await page.keyboard.type("Typed on the page");
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("and a second line");
+  await page.keyboard.press("Escape");
+  await page.waitForFunction(() =>
+    (
+      document.querySelector(".tool-pdf-toolkit .foot-status")?.textContent ??
+      ""
+    ).startsWith("2 new")
+  );
+  const shown = await page
+    .locator(`${ptk}.page .overlay`)
+    .nth(1)
+    .locator(".mark-written text")
+    .textContent();
+  const written = await ptkDownload(() =>
+    page.locator(`${ptk}.panel-foot button`, { hasText: "Download" }).click()
+  );
+  const box = openTest(written.bytes)
+    .loadPage(1)
+    .getAnnotations()
+    .find((a) => a.getType() === "FreeText");
+  const [x0 = 0, y0 = 0] = box?.getBounds() ?? [];
+  check(
+    "pdf: Text is typed on the page and becomes a text box there, as typed",
+    (await typing.count()) === 0 &&
+      shown === "Typed on the pageand a second line" &&
+      box?.getContents() === "Typed on the page\nand a second line" &&
+      // Firefox gives the pointer in whole pixels: up to a pixel off, in points.
+      Math.abs(x0 - 300) < 2 &&
+      Math.abs(y0 - 400) < 2,
+    `${shown} / ${JSON.stringify(box?.getContents())} at ${x0},${y0}`
+  );
+}
+// Each tool previews what it makes: a line under, through, or squiggling
+// under the text (a highlight is multiplied onto the page from its own
+// layer), an ellipse as an ellipse, with no names over them; their colour,
+// opacity and width are set in the toolbar, and the panel says nothing of how.
+{
+  const ptkTool = (label: string) =>
+    page
+      .locator(
+        `${ptk}.viewer-tools [role=toolbar] button[aria-label="${label}"]`
+      )
+      .click();
+  const ptkNew = (n: number) =>
+    page.waitForFunction(
+      (want) =>
+        (
+          document.querySelector(".tool-pdf-toolkit .foot-status")
+            ?.textContent ?? ""
+        ).startsWith(`${want} new`),
+      n
+    );
+  const sheet = page.locator(`${ptk}.page .sheet`).nth(1);
+  for (const label of ["Underline", "Strike out", "Squiggle"]) {
+    await ptkTool(label);
+    await ptkDrag(1, [60, 60], [200, 80]);
+  }
+  await ptkNew(5);
+  await ptkTool("Ellipse");
+  await ptkDrag(1, [300, 120], [450, 220]);
+  await ptkNew(6);
+  const lines = await sheet.evaluate((s) =>
+    ["underline", "strikeout", "squiggly"].map((k) => {
+      const drawing = s.querySelector(`.overlay .mark-${k} path`);
+      return `${k}:${drawing?.getAttribute("fill")}/${drawing?.getAttribute("stroke") ? "stroked" : "none"}`;
+    })
+  );
+  check(
+    "pdf: Underline, Strike out and Squiggle preview as lines, not as highlights",
+    lines.join(" ") ===
+      "underline:none/stroked strikeout:none/stroked squiggly:none/stroked",
+    lines.join(" ")
+  );
+  const drawn = [
+    await sheet.locator(".blend .mark-highlight path").count(),
+    await sheet.locator(".overlay .mark-ellipse ellipse").count(),
+    await sheet.locator(".mark:not(.mark-written) text").count(),
+  ];
+  check(
+    "pdf: a highlight previews multiplied onto the page, an ellipse as an ellipse, neither labelled",
+    drawn.join(",") === "1,1,0",
+    `highlights, ellipses, labels: ${drawn.join(",")}`
+  );
+  check(
+    "pdf: Annotate's colour, opacity and width are in the toolbar, with no how-to line",
+    (await page
+      .locator(`${ptk}.viewer-tools input[type=color]:visible`)
+      .count()) === 1 &&
+      (await page
+        .locator(`${ptk}.viewer-tools input[type=range]:visible`)
+        .count()) === 1 &&
+      (await page
+        .locator(`${ptk}.viewer-tools input[type=number]:visible`)
+        .count()) === 1 &&
+      (await page
+        .locator(`${ptk}.panel-body input, ${ptk}.panel-body textarea`)
+        .count()) === 0 &&
+      (await page.locator(`${ptk}.tool-how`).count()) === 0
+  );
+  // Note: click, then write it beside its icon; click its icon again to rewrite it.
+  await ptkTool("Note");
+  const at = await ptkOnScreen(1);
+  const [nx = 0, ny = 0] = at([100, 300]);
+  await page.mouse.click(nx, ny);
+  const noteBox = page.locator(`${ptk}.sheet textarea.note-writing`);
+  await noteBox.waitFor();
+  await page.keyboard.type("Check this");
+  await page.keyboard.press("Escape");
+  await ptkNew(7);
+  const [ix = 0, iy = 0] = at([108, 308]);
+  await page.mouse.click(ix, iy);
+  await noteBox.waitFor();
+  const before = await noteBox.inputValue();
+  await page.keyboard.type(" twice");
+  await page.keyboard.press("Escape");
+  await page.waitForFunction(() =>
+    (
+      document.querySelector(".tool-pdf-toolkit .annots")?.textContent ?? ""
+    ).includes("Check this twice")
+  );
+  const markedUp = await ptkDownload(() =>
+    page.locator(`${ptk}.panel-foot button`, { hasText: "Download" }).click()
+  );
+  const annots = openTest(markedUp.bytes).loadPage(1).getAnnotations();
+  const footNow = await ptkFoot();
+  const note = annots.find((a) => a.getType() === "Text");
+  check(
+    "pdf: a note is written where it was put, and rewritten from its icon",
+    before === "Check this" &&
+      footNow.startsWith("7 new") &&
+      note?.getContents() === "Check this twice" &&
+      Math.abs((note?.getBounds()[0] ?? 0) - 100) < 2,
+    `${before} / ${note?.getContents()} at ${note?.getBounds()}`
+  );
+  check(
+    "pdf: the markup and the ellipse download as their own annotation types",
+    annots
+      .map((a) => a.getType())
+      .filter((t) => t !== "FreeText" && t !== "Text")
+      .join(",") === "Highlight,Underline,StrikeOut,Squiggly,Circle",
+    annots.map((a) => a.getType()).join(",")
+  );
+}
+await ptkPanel("organize");
+check(
+  "pdf: the annotation tools leave with the Annotate panel",
+  await page.locator(`${ptk}.viewer-tools`).isHidden()
 );
 
 // Protect with a password, then open what came out.

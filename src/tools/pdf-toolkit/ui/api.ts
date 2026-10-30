@@ -5,6 +5,7 @@
 
 import type { OpName, OpOptions, OpReport } from "../ops";
 import type { OutFile } from "../pdf/doc";
+import type { Point } from "../pdf/geometry";
 import type { PageSize, RunResult } from "../worker";
 import type { PdfWorker } from "../worker-client";
 import type { Field, Values } from "./form";
@@ -73,6 +74,20 @@ export interface Api {
   /** Long work outside the worker (OCR): shows the shared progress, and Cancel stops it; no text ends it. */
   progress: (text: string, fraction: number | null) => void;
   setTool: (tool: DrawTool | null, onGesture?: (g: Gesture) => void) => void;
+  /** Put the panel's tools in a row above the pages (null to take them away); they go when the panel closes. */
+  toolbar: (row: HTMLElement | null) => void;
+  /** Let the user type on a page from `at`: resolves with what they typed, "" for nothing. */
+  write: (
+    page: number,
+    at: Point,
+    style: { color: string; size: number; opacity: number }
+  ) => Promise<string>;
+  /** Let the user write a note whose icon is at `at`, starting from `text`: resolves with what it says. */
+  writeNote: (
+    page: number,
+    at: Point,
+    style: { color: string; text: string }
+  ) => Promise<string>;
   setMarks: (fn: ((page: number) => Mark[]) | null) => void;
   redrawMarks: (page?: number) => void;
   view: (mode: "grid" | "pages") => void;

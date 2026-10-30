@@ -72,6 +72,7 @@ export const MARKUP = `
           <span class="search-nav"></span>
         </span>
       </div>
+      <div class="pane-head viewer-tools" hidden></div>
       <div class="viewer-slot"></div>
     </section>
     <aside class="side" aria-label="Operation">
@@ -132,6 +133,7 @@ export const grab = (root: HTMLElement) => {
     unlockBtn: $<HTMLButtonElement>(".unlock-btn"),
     unlockPw: $<HTMLInputElement>(".unlock-pw"),
     viewerSlot: $(".viewer-slot"),
+    viewerTools: $(".viewer-tools"),
     workspace: $(".workspace"),
     zoomIn: $(".zoom-in-slot"),
     zoomOut: $(".zoom-out-slot"),

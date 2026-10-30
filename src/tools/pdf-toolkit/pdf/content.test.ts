@@ -3,7 +3,13 @@ import { expect, test } from "bun:test";
 import * as mupdf from "mupdf";
 
 import { makePdf, openTest, pageTexts, testEnv } from "../test-env";
-import { annotate, listAnnots, selectText } from "./annotate";
+import {
+  TEXT_BASELINE,
+  TEXT_LINE,
+  annotate,
+  listAnnots,
+  selectText,
+} from "./annotate";
 import { PAGE_TEXT_FIXTURE } from "./fixtures";
 import { addFields, fillFields, flatten, readFields } from "./forms";
 import { isCardNumber, isIban, isPhone, luhn, scanPii } from "./pii";
@@ -131,12 +137,12 @@ test("annotations are added in display space, listed, and removed", async () => 
         width: 2,
       },
       {
+        at: [100, 500],
         color: "#000000",
         fontSize: 14,
         kind: "text",
         opacity: 1,
         page: 0,
-        rect: [100, 500, 300, 530],
         text: "Boxed",
       },
       {
@@ -172,6 +178,59 @@ test("annotations are added in display space, listed, and removed", async () => 
     "FreeText",
     "Line",
   ]);
+});
+
+test("a text box fits what was typed: each line whole, where it was started, upright on a turned page", async () => {
+  const env = await testEnv();
+  const typed = "A longer first line, typed in place\nshort\n\nafter a gap";
+  const size = 18;
+  for (const rotate of [0, 90] as const) {
+    const out = annotate(env, makePdf(1, { rotate }), {
+      add: [
+        {
+          at: [60, 80],
+          color: "#202020",
+          fontSize: size,
+          kind: "text",
+          opacity: 1,
+          page: 0,
+          text: typed,
+          // What the panel sends with every annotation: the shapes' line width, no border for text.
+          width: 2,
+        },
+      ],
+      remove: [],
+    });
+    const [annot] = openTest(out).loadPage(0).getAnnotations();
+    expect(annot?.getType()).toBe("FreeText");
+    expect(annot?.getContents()).toBe(typed);
+    const box = annot?.getBounds() ?? [0, 0, 0, 0];
+    expect(box[0]).toBe(60);
+    expect(box[1]).toBe(80);
+    interface Line {
+      text: string;
+      x: number;
+      y: number;
+      bbox: { w: number; h: number };
+    }
+    const lines: Line[] = JSON.parse(
+      annot?.toDisplayList().toStructuredText("preserve-whitespace").asJSON() ??
+        "{}"
+    ).blocks.flatMap((b: { lines?: Line[] }) => b.lines ?? []);
+    // Laid out as typed: no line wrapped, none cut off, all from the left edge, left to right.
+    expect(lines.map((l) => l.text.trimEnd())).toEqual(
+      typed.split("\n").filter(Boolean)
+    );
+    for (const l of lines) {
+      expect(l.x).toBeCloseTo(60, 0);
+      // Upright: a line is wider than it is tall, not turned with the page.
+      expect(l.bbox.w).toBeGreaterThan(l.bbox.h);
+    }
+    // The first baseline where the Viewer's preview puts it.
+    const [first] = lines;
+    expect(first?.y).toBeCloseTo(80 + TEXT_BASELINE * size, 0);
+    expect(box[3] - box[1]).toBeCloseTo(4 * TEXT_LINE * size, 3);
+  }
 });
 
 test("new fields are fillable, filled values read back, and flattening fixes them", async () => {

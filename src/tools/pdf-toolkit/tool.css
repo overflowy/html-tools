@@ -281,6 +281,110 @@
   flex: 1;
 }
 
+.tool-pdf-toolkit .viewer-tools[hidden] {
+  display: none;
+}
+
+/* A panel's tools above the pages: Annotate's, grouped, then how what they draw looks. */
+.tool-pdf-toolkit .annot-tools-row {
+  display: flex;
+  align-items: center;
+  gap: 6px 14px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.tool-pdf-toolkit .annot-tools-row .form {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px 14px;
+  flex-wrap: wrap;
+}
+.tool-pdf-toolkit .annot-tools-row .field {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+}
+.tool-pdf-toolkit .annot-tools-row .with-output,
+.tool-pdf-toolkit .annot-tools-row .with-unit {
+  gap: 4px;
+}
+.tool-pdf-toolkit .annot-tools-row input[type="range"] {
+  flex: none;
+  width: 76px;
+  min-width: 0;
+}
+.tool-pdf-toolkit .annot-tools-row output {
+  min-width: 4ch;
+}
+.tool-pdf-toolkit .annot-tools-row input[type="number"] {
+  width: 56px;
+  height: 26px;
+}
+/* The swatch says what it is; its name is for screen readers. */
+.tool-pdf-toolkit .annot-tools-row .field-color > label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.tool-pdf-toolkit .annot-tools-row input[type="color"] {
+  width: 30px;
+  height: 26px;
+  padding: 3px;
+}
+.tool-pdf-toolkit
+  .annot-tools-row
+  input[type="color"]::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+.tool-pdf-toolkit .annot-tools-row input[type="color"]::-webkit-color-swatch {
+  border: 0.5px solid rgb(0 0 0 / 0.25);
+  border-radius: 3px;
+}
+.tool-pdf-toolkit .annot-tools-row input[type="color"]::-moz-color-swatch {
+  border: 0.5px solid rgb(0 0 0 / 0.25);
+  border-radius: 3px;
+}
+.tool-pdf-toolkit .annot-tools {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  background: var(--surface);
+  border: 0.5px solid var(--border-strong);
+  border-radius: calc(var(--radius-sm) + 2px);
+}
+.tool-pdf-toolkit .annot-tools button.icon {
+  width: 28px;
+  min-height: 0;
+  height: 26px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  border-radius: var(--radius-sm);
+}
+@media (hover: hover) {
+  .tool-pdf-toolkit .annot-tools button.icon:hover {
+    color: var(--text);
+  }
+}
+.tool-pdf-toolkit .annot-tools button.icon.active {
+  background: var(--surface-3);
+  color: var(--text);
+}
+.tool-pdf-toolkit .annot-tools button.icon svg {
+  width: 16px;
+  height: 16px;
+}
+.tool-pdf-toolkit .annot-tools .sep {
+  width: 1px;
+  height: 16px;
+  margin: 0 3px;
+  background: var(--border);
+}
+
 .tool-pdf-toolkit .result-seg {
   display: none;
 }
@@ -501,12 +605,79 @@
   cursor: crosshair;
   touch-action: none;
 }
-.tool-pdf-toolkit .viewer-body[data-tool="text"] .overlay {
+.tool-pdf-toolkit .viewer-body[data-tool="text"] .overlay,
+.tool-pdf-toolkit .viewer-body[data-tool="write"] .overlay {
   cursor: text;
 }
+
+/* Typing on a page: no box, only the text, where the text box will set it. */
+.tool-pdf-toolkit .writing {
+  position: absolute;
+  margin: 0;
+  padding: 0;
+  min-width: 1px;
+  min-height: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  resize: none;
+  overflow: hidden;
+  white-space: pre;
+  caret-color: currentColor;
+  outline: 1px dashed rgb(201 100 66 / 0.55);
+  outline-offset: 2px;
+}
+/* A note being written: a slip of paper in a tint of the note's colour, beside its icon. */
+.tool-pdf-toolkit .note-writing {
+  position: absolute;
+  z-index: 1;
+  margin: 0;
+  padding: 7px 9px;
+  min-height: 0;
+  border: 0.5px solid rgb(0 0 0 / 0.18);
+  border-radius: 6px;
+  box-shadow:
+    0 1px 2px rgb(0 0 0 / 0.12),
+    0 6px 20px rgb(0 0 0 / 0.22);
+  color: #1c1c1c;
+  font: 13px/1.45 var(--sans);
+  resize: none;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+.tool-pdf-toolkit .note-writing::placeholder {
+  color: rgb(0 0 0 / 0.45);
+}
+.tool-pdf-toolkit .note-writing:focus-visible {
+  outline: 2px solid rgb(201 100 66 / 0.6);
+  outline-offset: 1px;
+}
+.tool-pdf-toolkit .mark-written text {
+  white-space: pre;
+}
+/* Marks of the overlay's own keep a hairline at any zoom; annotations scale, as they will on the page. */
 .tool-pdf-toolkit .mark rect,
 .tool-pdf-toolkit .mark polygon {
   vector-effect: non-scaling-stroke;
+}
+.tool-pdf-toolkit .mark-shape *,
+.tool-pdf-toolkit .mark-note * {
+  vector-effect: none;
+}
+/*
+ * MuPDF multiplies a highlight onto the page: the text under it stays dark.
+ * The layer blends as a whole; blending inside an SVG reaches only the SVG
+ * in Firefox, not the page rendered under it.
+ */
+.tool-pdf-toolkit .blend {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+  mix-blend-mode: multiply;
 }
 .tool-pdf-toolkit .mark-hit polygon {
   fill: rgb(255 214 0 / 0.38);
@@ -518,10 +689,6 @@
 }
 .tool-pdf-toolkit .mark-select polygon {
   fill: rgb(201 100 66 / 0.35);
-}
-.tool-pdf-toolkit .mark-markup polygon {
-  fill: #ffd400;
-  opacity: 0.45;
 }
 .tool-pdf-toolkit .mark-redact rect {
   fill: rgb(0 0 0 / 0.55);
@@ -539,7 +706,6 @@
   stroke: #3d7ab8;
   stroke-width: 1.5px;
 }
-.tool-pdf-toolkit .mark-box rect,
 .tool-pdf-toolkit .mark-stamp rect {
   fill: rgb(201 100 66 / 0.12);
   stroke: #c96442;
@@ -548,10 +714,6 @@
 .tool-pdf-toolkit .mark text {
   font: 500 9px var(--sans);
   fill: #c96442;
-}
-.tool-pdf-toolkit .mark-note rect {
-  stroke: rgb(0 0 0 / 0.5);
-  stroke-width: 1px;
 }
 
 /* ---- the panel ---- */
@@ -649,6 +811,9 @@
   flex-direction: column;
   gap: 4px;
 }
+.tool-pdf-toolkit .field[hidden] {
+  display: none;
+}
 .tool-pdf-toolkit .field > label {
   font-size: 12px;
   color: var(--text-muted);
@@ -729,10 +894,6 @@
 }
 .tool-pdf-toolkit .positions button.active span {
   background: var(--accent);
-}
-
-.tool-pdf-toolkit .tools {
-  flex-wrap: wrap;
 }
 
 .tool-pdf-toolkit .files,

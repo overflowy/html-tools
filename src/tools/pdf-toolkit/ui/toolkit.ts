@@ -1102,8 +1102,11 @@ export class Toolkit {
           .filter((s) => s.name !== "blank")
           .map((s) => ({ key: s.key, name: s.name, pages: s.pages })),
       takeOver: (view) => this.takeOver(view),
+      toolbar: (row) => this.setToolbar(row),
       view: (mode) => this.setView(mode),
       worker: () => this.ensureWorker(),
+      write: (page, at, style) => this.viewer.write(page, at, style),
+      writeNote: (page, at, style) => this.viewer.note(page, at, style),
     };
   }
 
@@ -1131,6 +1134,12 @@ export class Toolkit {
       this.showing = "workspace";
       this.refreshView();
     }
+  }
+
+  private setToolbar(row: HTMLElement | null) {
+    const { viewerTools } = this.ui;
+    viewerTools.replaceChildren(...(row ? [row] : []));
+    viewerTools.hidden = row === null;
   }
 
   private takeOver(view: HTMLElement | null) {
@@ -1165,6 +1174,7 @@ export class Toolkit {
     this.panel = null;
     this.pagesHooks.clear();
     this.takeOver(null);
+    this.setToolbar(null);
     this.runSeq += 1;
     this.viewer.setTool(null);
     this.onGesture = null;

@@ -3,7 +3,7 @@
 // annotations, editable in any PDF reader; Flatten makes them page content.
 // Coordinates are display space, which is what MuPDF's annotation API takes.
 
-import type { PDFAnnotation, PDFDocument, PDFPage } from "mupdf";
+import type { Font, PDFAnnotation, PDFDocument, PDFPage } from "mupdf";
 
 import { parseColor } from "./compose";
 import { openPdf, savePdf } from "./doc";
@@ -23,8 +23,10 @@ export interface NewAnnot {
   opacity: number;
   /** Text markup: the quads of the text it covers. */
   quads?: Quad[];
-  /** Notes (top left corner), text boxes, rectangles, ellipses. */
+  /** Notes (top left corner), rectangles, ellipses. */
   rect?: Rect;
+  /** A text box: where its text starts, top left. Its box is made to fit the text. */
+  at?: Point;
   /** Freehand strokes. */
   ink?: Point[][];
   /** Lines and arrows. */
@@ -98,10 +100,73 @@ const MUPDF_TYPE = {
   underline: "Underline",
 } as const;
 
-/** A note's icon is drawn this many points square. */
+/** A note's box is this many points square, from where it was put. */
 const NOTE_SIZE = 20;
+/** MuPDF draws a note's icon this many points square, in the top left of its box. */
+export const NOTE_ICON = 16;
 
-const create = (page: PDFPage, a: NewAnnot) => {
+/** MuPDF sets a text box's lines this many font sizes apart, the first baseline 0.8 of one below its top, with no inset. */
+export const TEXT_LINE = 1.2;
+export const TEXT_BASELINE = 0.8;
+
+/**
+ * The box a text box's text fills from `at`: as wide as its longest line
+ * (`advance` measures a line at a size of 1), a line high per line, so MuPDF
+ * neither wraps nor clips it. A point to spare for rounding.
+ */
+export const textBoxRect = (
+  advance: (line: string) => number,
+  at: Point,
+  text: string,
+  size: number
+): Rect => {
+  const lines = text.split("\n");
+  const widest = Math.max(...lines.map(advance));
+  return [
+    at[0],
+    at[1],
+    at[0] + widest * size + 1,
+    at[1] + lines.length * TEXT_LINE * size,
+  ];
+};
+
+/** How wide a line is in Helvetica (what a text box is set in) at a size of 1. */
+const helveticaAdvance =
+  (font: Font) =>
+  (line: string): number => {
+    let w = 0;
+    for (const c of line) {
+      w += font.advanceGlyph(font.encodeCharacter(c.codePointAt(0) ?? 32));
+    }
+    return w;
+  };
+
+/** Where an annotation goes: a note's corner, a text box made to fit its text, a box. */
+const place = (annot: PDFAnnotation, a: NewAnnot, font: Font) => {
+  if (a.kind === "note" && a.rect) {
+    const [x, y] = a.rect;
+    annot.setRect([x, y, x + NOTE_SIZE, y + NOTE_SIZE]);
+    annot.setIcon("Comment");
+  } else if (a.kind === "text" && a.at) {
+    annot.setRect(
+      textBoxRect(helveticaAdvance(font), a.at, a.text ?? "", a.fontSize ?? 12)
+    );
+  } else if (a.rect && annot.hasRect()) {
+    annot.setRect(a.rect);
+  }
+};
+
+/** A shape's or a stroke's line width; none around a text box. */
+const border = (annot: PDFAnnotation, a: NewAnnot) => {
+  if (a.kind === "text") {
+    // Text written on the page, no box around it: a border would also inset the text and wrap it.
+    annot.setBorderWidth(0);
+  } else if (a.width !== undefined && annot.hasBorder()) {
+    annot.setBorderWidth(a.width);
+  }
+};
+
+const create = (page: PDFPage, a: NewAnnot, font: Font) => {
   const annot = page.createAnnotation(MUPDF_TYPE[a.kind]);
   const color = parseColor(a.color);
   if (a.kind === "text") {
@@ -114,13 +179,7 @@ const create = (page: PDFPage, a: NewAnnot) => {
   if (a.quads?.length) {
     annot.setQuadPoints(a.quads);
   }
-  if (a.kind === "note" && a.rect) {
-    const [x, y] = a.rect;
-    annot.setRect([x, y, x + NOTE_SIZE, y + NOTE_SIZE]);
-    annot.setIcon("Comment");
-  } else if (a.rect && annot.hasRect()) {
-    annot.setRect(a.rect);
-  }
+  place(annot, a, font);
   if (a.ink?.length) {
     annot.setInkList(a.ink);
   }
@@ -130,9 +189,7 @@ const create = (page: PDFPage, a: NewAnnot) => {
       annot.setLineEndingStyles("None", "OpenArrow");
     }
   }
-  if (a.width !== undefined && annot.hasBorder()) {
-    annot.setBorderWidth(a.width);
-  }
+  border(annot, a);
   if (a.text) {
     annot.setContents(a.text);
   }
@@ -150,6 +207,7 @@ export const annotate = (
   o: AnnotateOptions
 ): Uint8Array => {
   const doc = openPdf(env, bytes);
+  const font = new env.mupdf.Font("Helvetica");
   try {
     // Highest index first, so removing one does not move the next.
     const removals = o.remove.toSorted(
@@ -164,7 +222,7 @@ export const annotate = (
     }
     for (const a of o.add) {
       if (a.page >= 0 && a.page < doc.countPages()) {
-        create(doc.loadPage(a.page), a);
+        create(doc.loadPage(a.page), a, font);
       }
     }
     return savePdf(doc);
