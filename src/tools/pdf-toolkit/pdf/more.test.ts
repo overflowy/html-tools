@@ -275,6 +275,34 @@ test("images go into pages, come back out, and shrink when recompressed", async 
   expect(report.after).toBeLessThan(report.before / 2);
 });
 
+test("malformed EXIF reads as no orientation, not an error", () => {
+  const header = [0xff, 0xd8, 0xff, 0xe1];
+  const exif = [0x45, 0x78, 0x69, 0x66, 0x00, 0x00];
+  // The IFD offset points far past the end of the file.
+  const farIfd = new Uint8Array([
+    ...header,
+    0x00,
+    0x10,
+    ...exif,
+    0x4d,
+    0x4d,
+    0x00,
+    0x2a,
+    0x7f,
+    0xff,
+    0xff,
+    0xff,
+  ]);
+  expect(exifOrientation(farIfd)).toBe(1);
+  // The file ends inside the TIFF header.
+  const truncated = new Uint8Array([...header, 0x00, 0x22, ...exif, 0x4d]);
+  expect(exifOrientation(truncated)).toBe(1);
+  // The file ends right after the APP1 marker.
+  expect(exifOrientation(new Uint8Array([...header, 0x00, 0x22, 0x45]))).toBe(
+    1
+  );
+});
+
 test("EXIF orientation is read and turns the page", async () => {
   const env = await testEnv();
   const jpeg = new Uint8Array(noise(300, 200).asJPEG(80, false));

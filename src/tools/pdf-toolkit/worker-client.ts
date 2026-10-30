@@ -46,8 +46,9 @@ export class PdfWorker {
         p.reject(new Error(msg.message));
       }
     };
+    // A crashed worker is done with: the Tool starts a fresh one on the next call.
     this.worker.onerror = (ev) => {
-      this.failAll(
+      this.stop(
         new Error(`The PDF worker crashed: ${ev.message || "unknown error"}`)
       );
     };
@@ -98,8 +99,12 @@ export class PdfWorker {
   }
 
   terminate() {
+    this.stop(new Error(CANCELLED));
+  }
+
+  private stop(error: Error) {
     this.dead = true;
     this.worker.terminate();
-    this.failAll(new Error(CANCELLED));
+    this.failAll(error);
   }
 }

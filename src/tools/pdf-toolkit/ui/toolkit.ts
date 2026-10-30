@@ -23,7 +23,7 @@ import type { Progress } from "../engines";
 import type { OpName, OpOptions } from "../ops";
 import type { OutFile } from "../pdf/doc";
 import type { Quad } from "../pdf/text";
-import type { OpenResult, PageSize, RunResult } from "../worker";
+import type { OpenResult, Original, PageSize, RunResult } from "../worker";
 import { CANCELLED, PdfWorker } from "../worker-client";
 import type {
   Api,
@@ -80,7 +80,10 @@ interface Source {
   name: string;
   /** What the worker holds: decrypted, converted. Kept to hand a restarted worker. */
   bytes: Uint8Array;
+  /** The file as opened, when it was encrypted: its signatures are checked against it. */
+  original: Original | null;
   pages: PageSize[];
+  /** Its id in the worker; "" when the worker that runs now does not have it. */
   workerId: string;
 }
 
@@ -139,7 +142,15 @@ export class Toolkit {
   private current: { sig: string; doc: Current } | null = null;
   private worker: PdfWorker | null = null;
   private starting: Promise<PdfWorker> | null = null;
+  /** The worker being started, for Cancel to stop. */
+  private spawning: PdfWorker | null = null;
+  /** Workers started: each names its documents apart from the last one's. */
+  private generation = 0;
+  /** Cancels so far: a worker still starting when one comes is not used. */
+  private cancels = 0;
   private busy = false;
+  /** Files being opened (a password prompt lets the user work meanwhile): their Sources are not in the Page List yet. */
+  private opening = 0;
   /** What Cancel stops besides the worker: OCR in the main thread. */
   private readonly cancelHooks = new Set<() => void>();
   private runSeq = 0;
@@ -305,6 +316,7 @@ export class Toolkit {
   }
 
   private async startWorker(): Promise<PdfWorker> {
+    const { cancels } = this;
     const report = this.downloadReporter();
     const [lib, glue, wasm, qGlue, qWasm] = await Promise.all([
       getEngine(ENGINES.mupdfLib, report),
@@ -313,36 +325,63 @@ export class Toolkit {
       getEngine(ENGINES.qpdfGlue, report),
       getEngine(ENGINES.qpdfWasm, report),
     ]);
+    // Cancelled while downloading: the files stay cached, but nothing starts.
+    if (cancels !== this.cancels) {
+      throw new Error(CANCELLED);
+    }
     if (this.busy) {
       this.setPhase({ fraction: null, text: "Starting MuPDF and qpdf" });
     }
+    this.generation += 1;
     const w = new PdfWorker();
+    this.spawning = w;
     const text = (b: ArrayBuffer) => new TextDecoder().decode(b);
     // Copies: the cache's buffers must survive for the next worker.
     const mupdfWasm = structuredClone(wasm);
     const qpdfWasm = structuredClone(qWasm);
-    await w.call(
-      "load",
-      [
-        {
-          mupdfGlue: text(glue),
-          mupdfLib: text(lib),
-          mupdfWasm,
-          qpdfGlue: text(qGlue),
-          qpdfWasm,
-        },
-      ],
-      [mupdfWasm, qpdfWasm]
-    );
-    // A worker started again after Cancel gets every Source back, under new ids.
-    for (const s of this.sources.values()) {
-      const copy = new Uint8Array(s.bytes);
-      const info = await w.call("adopt", [copy, s.name], [copy.buffer]);
-      s.workerId = info.id;
+    try {
+      await w.call(
+        "load",
+        [
+          {
+            mupdfGlue: text(glue),
+            mupdfLib: text(lib),
+            mupdfWasm,
+            qpdfGlue: text(qGlue),
+            qpdfWasm,
+          },
+          this.generation,
+        ],
+        [mupdfWasm, qpdfWasm]
+      );
+      // A worker started again (after Cancel, or a crash) gets every Source back, under new ids.
+      for (const s of this.sources.values()) {
+        const copy = new Uint8Array(s.bytes);
+        const info = await w.call(
+          "adopt",
+          [copy, s.name, s.original],
+          [copy.buffer]
+        );
+        s.workerId = info.id;
+      }
+    } catch (error) {
+      w.terminate();
+      throw error;
+    } finally {
+      if (this.spawning === w) {
+        this.spawning = null;
+      }
     }
     this.current = null;
     this.worker = w;
-    if (this.sources.size > 0) {
+    if (this.generation > 1) {
+      // Whatever named the last worker's documents went with it.
+      this.unapplied.clear();
+      this.viewer.forget();
+      if (this.result) {
+        this.result = null;
+        this.showing = "workspace";
+      }
       // The pages on screen name the old ids: shown again, they render from the new ones.
       queueMicrotask(() => this.refreshView());
     }
@@ -355,20 +394,26 @@ export class Toolkit {
       return this.worker;
     }
     this.starting ??= this.startWorker();
+    const { starting } = this;
     try {
-      return await this.starting;
+      return await starting;
     } finally {
-      this.starting = null;
+      // Cancel may have dropped it and another start begun since.
+      if (this.starting === starting) {
+        this.starting = null;
+      }
     }
   }
 
-  /** Stop whatever runs: the worker is thrown away and a fresh one gets the Sources back. */
+  /** Stop whatever runs: the worker is thrown away (or not started) and a fresh one gets the Sources back. */
   private cancel() {
     for (const hook of this.cancelHooks) {
       hook();
     }
-    this.cancelHooks.clear();
+    this.cancels += 1;
     this.runSeq += 1;
+    this.spawning?.terminate();
+    this.starting = null;
     this.worker?.terminate();
     this.worker = null;
     this.current = null;
@@ -506,7 +551,29 @@ export class Toolkit {
     this.viewer.focusCurrent();
   }
 
+  /** Let go of Sources no step of the Page List, nor of Undo and Redo, still uses. */
+  private releaseSources() {
+    if (this.opening > 0) {
+      return;
+    }
+    const used = new Set<string>();
+    for (const list of [this.pages, ...this.past, ...this.future]) {
+      for (const p of list) {
+        used.add(p.src);
+      }
+    }
+    for (const [key, s] of this.sources) {
+      if (!used.has(key)) {
+        this.sources.delete(key);
+        if (s.workerId) {
+          void quietly(this.worker?.call("close", [s.workerId]));
+        }
+      }
+    }
+  }
+
   private afterPagesChanged() {
+    this.releaseSources();
     this.current = null;
     this.hits = [];
     this.hitAt = -1;
@@ -822,14 +889,20 @@ export class Toolkit {
     if (!r.doc) {
       return;
     }
-    this.unapplied.delete(r.doc.id);
+    // Made by a worker since thrown away (Cancel, a crash): the next one is handed it with the rest.
+    const held = this.unapplied.delete(r.doc.id);
+    if (!held) {
+      this.worker?.terminate();
+      this.worker = null;
+    }
     const key = this.newKey();
     this.sources.set(key, {
       bytes: r.doc.bytes,
       key,
       name: `${this.firstName()}.pdf`,
+      original: null,
       pages: r.doc.pages,
-      workerId: r.doc.id,
+      workerId: held ? r.doc.id : "",
     });
     this.result = null;
     this.showing = "workspace";
@@ -861,6 +934,7 @@ export class Toolkit {
       bytes,
       key,
       name: "blank",
+      original: null,
       pages: info.pages,
       workerId: info.id,
     });
@@ -1064,13 +1138,15 @@ export class Toolkit {
 
   private addSource(
     name: string,
-    r: Extract<OpenResult, { status: "ok" }>
+    r: Extract<OpenResult, { status: "ok" }>,
+    original: Original | null = null
   ): string {
     const key = this.newKey();
     this.sources.set(key, {
       bytes: r.bytes,
       key,
       name,
+      original,
       pages: r.doc.pages,
       workerId: r.doc.id,
     });
@@ -1105,7 +1181,11 @@ export class Toolkit {
         if (r.repaired) {
           notes.push(`${file.name} was damaged; MuPDF repaired what it could.`);
         }
-        return this.addSource(file.name, r);
+        return this.addSource(
+          file.name,
+          r,
+          r.encrypted ? { bytes, password: password ?? "" } : null
+        );
       }
       this.setBusy(false);
       password = await this.askPassword(
@@ -1212,6 +1292,7 @@ export class Toolkit {
     );
     const notes: string[] = [];
     let added: string[] = [];
+    this.opening += 1;
     try {
       added = await this.openEach(files, notes);
     } catch (error) {
@@ -1219,6 +1300,7 @@ export class Toolkit {
         this.showError(message(error));
       }
     } finally {
+      this.opening -= 1;
       this.setBusy(false);
     }
     if (added.length > 0) {
@@ -1236,7 +1318,9 @@ export class Toolkit {
           `Added ${count(entries.length, "page", "pages")}.`
         );
       } else {
-        this.past = this.pages.length ? [...this.past, this.pages] : this.past;
+        this.past = this.pages.length
+          ? [...this.past, this.pages].slice(-HISTORY)
+          : this.past;
         this.future = [];
         this.pages = entries;
         this.afterPagesChanged();

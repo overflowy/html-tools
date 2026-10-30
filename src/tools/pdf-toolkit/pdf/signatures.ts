@@ -547,24 +547,83 @@ const checkTimestamp = async (
 
 /* ---------------- the document ---------------- */
 
-/** The bytes a /ByteRange covers, joined. */
-const coveredBytes = (
+const LESS_THAN = 0x3c;
+const GREATER_THAN = 0x3e;
+
+const isHexDigit = (b: number) =>
+  (b >= 0x30 && b <= 0x39) ||
+  (b >= 0x41 && b <= 0x46) ||
+  (b >= 0x61 && b <= 0x66);
+
+/** The hex string `<…>` that is exactly `file[from, to)`, decoded; null when those bytes are anything else. */
+const hexStringAt = (
   file: Uint8Array,
-  range: number[]
+  from: number,
+  to: number
 ): Uint8Array<ArrayBuffer> | null => {
-  if (range.length < 4 || range.length % 2 !== 0) {
+  if (
+    to - from < 2 ||
+    file[from] !== LESS_THAN ||
+    file[to - 1] !== GREATER_THAN
+  ) {
     return null;
   }
-  const parts: Uint8Array[] = [];
-  for (let i = 0; i < range.length; i += 2) {
-    const start = range[i] ?? 0;
-    const length = range[i + 1] ?? 0;
-    if (start < 0 || length < 0 || start + length > file.length) {
-      return null;
-    }
-    parts.push(file.subarray(start, start + length));
+  const digits = file.subarray(from + 1, to - 1);
+  if (digits.length % 2 !== 0 || !digits.every(isHexDigit)) {
+    return null;
   }
-  return join(parts);
+  const out = new Uint8Array(digits.length / 2);
+  for (let i = 0; i < out.length; i += 1) {
+    out[i] = Number.parseInt(
+      String.fromCodePoint(digits[2 * i] ?? 0, digits[2 * i + 1] ?? 0),
+      16
+    );
+  }
+  return out;
+};
+
+type SignedParts =
+  | { status: "malformed" }
+  /** The ranges leave out more of the file than the signature's own string. */
+  | { status: "gap" }
+  | {
+      status: "ok";
+      /** The bytes signed: everything but the signature. */
+      data: Uint8Array<ArrayBuffer>;
+      /** The signature, read from the file itself: an encrypted file's reader would decrypt it, though it never was encrypted. */
+      contents: Uint8Array<ArrayBuffer>;
+      /** Where the signed bytes end; anything after is a later revision. */
+      end: number;
+    };
+
+/**
+ * What a /ByteRange [0 a b c] signs: the file from its start up to the
+ * signature's `<hex>` string, and from just after that string on. Anything
+ * else left out could be changed without the signature noticing.
+ */
+const signedParts = (file: Uint8Array, range: number[]): SignedParts => {
+  const [start = -1, first = -1, second = -1, length = -1] = range;
+  const valid =
+    range.length === 4 &&
+    range.every((n) => Number.isInteger(n) && n >= 0) &&
+    second >= start + first &&
+    second + length <= file.length;
+  if (!valid) {
+    return { status: "malformed" };
+  }
+  const contents = hexStringAt(file, start + first, second);
+  if (start !== 0 || !contents) {
+    return { status: "gap" };
+  }
+  return {
+    contents,
+    data: join([
+      file.subarray(0, first),
+      file.subarray(second, second + length),
+    ]),
+    end: second + length,
+    status: "ok",
+  };
 };
 
 const emptyReport = (field: string, page: number): SignatureReport => ({
@@ -674,14 +733,20 @@ const verifyOne = async (
   r.contact = textOf(v.get("ContactInfo"));
   r.signer = textOf(v.get("Name"));
   const range = itemsOf(v.get("ByteRange")).map((n) => n.asNumber());
-  const data = coveredBytes(file, range);
-  const contents = v.get("Contents");
-  if (!data || !contents.isString()) {
-    r.notes.push("The signature's byte range or contents are malformed.");
+  const signed = signedParts(file, range);
+  if (signed.status === "malformed") {
+    r.notes.push("The signature's byte range is malformed.");
     return r;
   }
-  const end = (range.at(-2) ?? 0) + (range.at(-1) ?? 0);
-  r.laterBytes = Math.max(0, file.length - end);
+  if (signed.status === "gap") {
+    r.integrity = "failed";
+    r.notes.push(
+      "The signature's byte range leaves out more than the signature itself, so parts of the file it claims to sign could have been changed."
+    );
+    return r;
+  }
+  const { contents, data, end } = signed;
+  r.laterBytes = file.length - end;
   r.coverage = r.laterBytes > 0 ? "partial" : "whole";
   if (r.subFilter === "adbe.x509.rsa_sha1") {
     r.notes.push(
@@ -690,7 +755,7 @@ const verifyOne = async (
     r.digest = "SHA-1";
     return r;
   }
-  const info = parseAsn1(contents.asByteString());
+  const info = parseAsn1(contents);
   await (r.subFilter === "ETSI.RFC3161"
     ? fillTimestamp(r, info, data)
     : fillCms(r, info, data, parsePdfDate(textOf(v.get("M")))));

@@ -177,10 +177,15 @@ const indexOf = (hay: Uint8Array, needle: string, from = 0): number => {
   return -1;
 };
 
-/** `pdf` with one signature field, signed by `signer` over the whole file. */
+/**
+ * `pdf` with one signature field, signed by `signer` over the whole file.
+ * An encrypted `pdf` stays encrypted, opened with `password`, and its
+ * signature is written unencrypted, as the PDF standard has it.
+ */
 export const signPdf = async (
   pdf: Uint8Array,
-  signer: Signer
+  signer: Signer,
+  password = ""
 ): Promise<Uint8Array<ArrayBuffer>> => {
   const doc: mupdf.PDFDocument | null = mupdf.Document.openDocument(
     pdf,
@@ -188,6 +193,9 @@ export const signPdf = async (
   ).asPDF();
   if (!doc) {
     throw new Error("not a PDF");
+  }
+  if (doc.needsPassword() && doc.authenticatePassword(password) === 0) {
+    throw new Error("wrong password");
   }
   const page = doc.loadPage(0);
   const v = doc.addObject(doc.newDictionary());
@@ -233,9 +241,10 @@ export const signPdf = async (
     bytes,
     `${PLACEHOLDER} ${PLACEHOLDER} ${PLACEHOLDER}`
   );
-  const start = indexOf(bytes, "<0000");
+  // MuPDF writes the placeholder encrypted when the file is: it is replaced whole.
+  const start = indexOf(bytes, "/Contents<") + "/Contents".length;
   const end = indexOf(bytes, ">", start) + 1;
-  if (rangeAt < 0 || start < 0) {
+  if (rangeAt < 0 || start < "/Contents".length) {
     throw new Error("The placeholders were not found in the saved PDF.");
   }
   const after = bytes.length - end;

@@ -70,8 +70,16 @@ export interface Rendered {
   pixels: Uint8ClampedArray<ArrayBuffer>;
 }
 
+/** A file as it was opened, encrypted, and the password that opened it. */
+export interface Original {
+  bytes: Uint8Array;
+  password: string;
+}
+
 interface Held {
   bytes: Uint8Array;
+  /** The file as opened, when `bytes` differ from it (it was decrypted): its signatures are over these. */
+  original: Original | null;
   doc: PDFDocument | null;
   /** Where qpdf has it, once it has been written there. */
   path: string | null;
@@ -82,6 +90,8 @@ interface Held {
 let mupdf: MupdfModule | null = null;
 let env: Env | null = null;
 const held = new Map<string, Held>();
+/** Ids name the worker too: one started after Cancel never reuses an id the Tool may still hold. */
+let idPrefix = "d";
 let nextId = 1;
 
 const ready = (): Env => {
@@ -126,11 +136,12 @@ const sizes = (doc: PDFDocument): PageSize[] => {
 const hold = (
   bytes: Uint8Array,
   name: string,
-  doc: PDFDocument | null = null
+  doc: PDFDocument | null = null,
+  original: Original | null = null
 ): DocInfo => {
-  const id = `d${nextId}`;
+  const id = `${idPrefix}${nextId}`;
   nextId += 1;
-  const h: Held = { bytes, doc, name, outline: null, path: null };
+  const h: Held = { bytes, doc, name, original, outline: null, path: null };
   held.set(id, h);
   return { id, pages: sizes(opened(h)), size: bytes.length };
 };
@@ -162,8 +173,8 @@ const PERMISSIONS = [
 
 const methods = {
   /** Take a document the main thread already has (after the worker was restarted). */
-  adopt(bytes: Uint8Array, name: string): DocInfo {
-    const info = hold(bytes, name);
+  adopt(bytes: Uint8Array, name: string, original: Original | null): DocInfo {
+    const info = hold(bytes, name, null, original);
     entry(info.id).outline = readOutline(opened(entry(info.id)));
     return info;
   },
@@ -253,17 +264,21 @@ const methods = {
     return out;
   },
 
-  /** Start both engines from their files. */
-  async load(files: {
-    mupdfLib: string;
-    mupdfGlue: string;
-    mupdfWasm: ArrayBuffer;
-    qpdfGlue: string;
-    qpdfWasm: ArrayBuffer;
-  }) {
+  /** Start both engines from their files; `generation` counts the workers the Tool has started. */
+  async load(
+    files: {
+      mupdfLib: string;
+      mupdfGlue: string;
+      mupdfWasm: ArrayBuffer;
+      qpdfGlue: string;
+      qpdfWasm: ArrayBuffer;
+    },
+    generation: number
+  ) {
     if (env) {
       return;
     }
+    idPrefix = `w${generation}d`;
     mupdf = await loadMupdf(
       files.mupdfLib,
       files.mupdfGlue,
@@ -329,7 +344,12 @@ const methods = {
       }
       keptDoc = plain;
     }
-    const info = hold(kept, name, keptDoc);
+    const info = hold(
+      kept,
+      name,
+      keptDoc,
+      encrypted ? { bytes, password: password ?? "" } : null
+    );
     const h = entry(info.id);
     h.outline = readOutline(keptDoc);
     // A copy: the reply hands its buffers over, and the worker keeps its own.
@@ -411,7 +431,13 @@ const methods = {
       bytes: Uint8Array,
       o: OpOptions<K>
     ) => ReturnType<(typeof OPS)[K]>;
-    const out = (await fn(e, h.bytes, options)) as {
+    // Signatures are over the file as it was signed: an encrypted one as opened, not the decrypted copy kept.
+    const signedFile = op === "verify" ? h.original : null;
+    const out = (await fn(
+      e,
+      signedFile?.bytes ?? h.bytes,
+      signedFile ? { ...options, password: signedFile.password } : options
+    )) as {
       bytes?: Uint8Array;
       files?: OutFile[];
       report?: unknown;
@@ -427,6 +453,17 @@ const methods = {
   /** The text a drag from `from` to `to` selects, as quads. */
   select(id: string, page: number, from: Point, to: Point): Quad[] {
     return selectText(opened(entry(id)).loadPage(page), from, to);
+  },
+
+  /** Whether each page has text to select. */
+  textPages(id: string): boolean[] {
+    const doc = opened(entry(id));
+    const out: boolean[] = [];
+    const n = doc.countPages();
+    for (let i = 0; i < n; i += 1) {
+      out.push(hasText(doc.loadPage(i)));
+    }
+    return out;
   },
 
   /** Each page's plain text. */

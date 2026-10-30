@@ -360,7 +360,33 @@ export interface ImagePagesOptions {
   fit: "contain" | "cover";
 }
 
-/** The EXIF orientation of a JPEG (1 to 8), 1 when it has none. */
+/** The Orientation entry of the TIFF header at `tiff`, read no further than `end`; 1 when it has none or is malformed. */
+const tiffOrientation = (view: DataView, tiff: number, end: number): number => {
+  const fits = (p: number, size: number) => p >= tiff && p + size <= end;
+  if (!fits(tiff, 8)) {
+    return 1;
+  }
+  const little = view.getUint16(tiff) === 0x49_49;
+  const u16 = (p: number) => view.getUint16(p, little);
+  const ifd = tiff + view.getUint32(tiff + 4, little);
+  if (!fits(ifd, 2)) {
+    return 1;
+  }
+  const count = u16(ifd);
+  for (let i = 0; i < count; i += 1) {
+    const entry = ifd + 2 + i * 12;
+    if (!fits(entry, 12)) {
+      break;
+    }
+    if (u16(entry) === 0x01_12) {
+      const v = u16(entry + 8);
+      return v >= 1 && v <= 8 ? v : 1;
+    }
+  }
+  return 1;
+};
+
+/** The EXIF orientation of a JPEG (1 to 8), 1 when it has none or it cannot be read. */
 export const exifOrientation = (bytes: Uint8Array): number => {
   if (bytes[0] !== 0xff || bytes[1] !== 0xd8) {
     return 1;
@@ -371,23 +397,16 @@ export const exifOrientation = (bytes: Uint8Array): number => {
     const marker = bytes[at + 1] ?? 0;
     const length = view.getUint16(at + 2);
     // APP1 holding "Exif\0\0", then a TIFF header.
-    if (marker === 0xe1 && view.getUint32(at + 4) === 0x45_78_69_66) {
-      const tiff = at + 10;
-      const little = view.getUint16(tiff) === 0x49_49;
-      const u16 = (p: number) => view.getUint16(p, little);
-      const ifd = tiff + view.getUint32(tiff + 4, little);
-      const count = u16(ifd);
-      for (let i = 0; i < count; i += 1) {
-        const entry = ifd + 2 + i * 12;
-        if (entry + 12 > bytes.length) {
-          break;
-        }
-        if (u16(entry) === 0x01_12) {
-          const v = u16(entry + 8);
-          return v >= 1 && v <= 8 ? v : 1;
-        }
-      }
-      return 1;
+    if (
+      marker === 0xe1 &&
+      at + 8 <= bytes.length &&
+      view.getUint32(at + 4) === 0x45_78_69_66
+    ) {
+      return tiffOrientation(
+        view,
+        at + 10,
+        Math.min(bytes.length, at + 2 + length)
+      );
     }
     if (marker === 0xda) {
       break;

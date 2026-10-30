@@ -356,6 +356,14 @@ export class Viewer {
     this.root.dispatchEvent(new CustomEvent("zoomchange"));
   }
 
+  /** Drop every rendering kept: the documents they were made from are gone (the worker was restarted). */
+  forget() {
+    for (const bitmap of this.cache.values()) {
+      bitmap.close();
+    }
+    this.cache.clear();
+  }
+
   /** Redraw what is on screen, for new renderings of the same pages (a Result updated in place). */
   invalidate() {
     this.cache.clear();

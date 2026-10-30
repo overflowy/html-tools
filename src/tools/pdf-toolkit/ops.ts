@@ -228,8 +228,9 @@ export const OPS = {
   validate: (env: Env, b: Uint8Array, _o: NoOptions) => ({
     report: validate(env, b),
   }),
-  verify: async (env: Env, b: Uint8Array, _o: NoOptions) => {
-    const doc = openPdf(env, b);
+  /** `password` opens a signed file kept as it was, encrypted: the worker supplies it, not the panel. */
+  verify: async (env: Env, b: Uint8Array, o: { password?: string }) => {
+    const doc = openPdf(env, b, o.password);
     try {
       return { report: await verifySignatures(doc, b) };
     } finally {

@@ -22,13 +22,18 @@ export interface OutFile {
   bytes: Uint8Array;
 }
 
-export const openPdf = (env: Env, bytes: Uint8Array): PDFDocument => {
+export const openPdf = (
+  env: Env,
+  bytes: Uint8Array,
+  password = ""
+): PDFDocument => {
   const doc = env.mupdf.Document.openDocument(bytes, "application/pdf");
   const pdf = doc.asPDF();
   if (!pdf) {
     throw new Error("Not a PDF.");
   }
-  if (pdf.needsPassword()) {
+  if (pdf.needsPassword() && pdf.authenticatePassword(password) === 0) {
+    pdf.destroy();
     throw new Error("The PDF is password protected.");
   }
   return pdf;

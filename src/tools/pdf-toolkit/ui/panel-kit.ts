@@ -215,20 +215,28 @@ export const transformPanel = <K extends OpName>(
         return `${a.name()}${spec.suffix}.${r?.doc ? "pdf" : "zip"}`;
       },
     });
+    /** Why there is no Result, when the options say: shown in the foot. */
+    let why = "";
     const once = (): Promise<Ran<K> | null> => {
       const options = spec.options(values, api);
       if (typeof options === "string") {
-        foot.show(null, options);
-        api.showResult(null);
+        why = options;
         return Promise.resolve(null);
       }
+      why = "";
       foot.status(spec.live ? "Updating the preview…" : "Working…");
       return api.run(spec.op, options, spec.name, { quiet: spec.live });
     };
     const run = runner(once, (r) => {
+      const had = shown;
       shown = r;
       reportArea.replaceChildren();
       if (!r) {
+        // No options, a failed run (its error is shown), or a cleared one: nothing to Apply.
+        foot.show(null, why);
+        if (had) {
+          api.showResult(null);
+        }
         return;
       }
       api.showResult(r.doc ? r : null);
@@ -245,9 +253,8 @@ export const transformPanel = <K extends OpName>(
       if (spec.live) {
         run.schedule();
       } else {
+        why = "";
         run.clear();
-        foot.show(null, "");
-        api.showResult(null);
       }
     });
     api.body.replaceChildren(
@@ -285,8 +292,8 @@ export const transformPanel = <K extends OpName>(
         if (spec.live) {
           void run.run();
         } else {
+          why = "";
           run.clear();
-          foot.show(null, "");
         }
       },
       selectionChanged: ext.selectionChanged,

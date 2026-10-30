@@ -111,8 +111,8 @@ const ocr: PanelDef = {
   group: "Convert",
   id: "ocr",
   mount: (api, values) => {
-    let tess: TessWorker | null = null;
-    let stop = false;
+    /** Ends the run going on: Cancel, a new run, or the panel closing. */
+    let stopRun: (() => void) | null = null;
     const foot = resultFoot(api, {
       applyLabel: "the text layer",
       fileName: (a) => `${a.name()}-ocr.pdf`,
@@ -121,35 +121,41 @@ const ocr: PanelDef = {
       attrs: { "aria-live": "polite" },
       class: "sel-info",
     });
-    const unhook = api.onCancel(() => {
-      stop = true;
-      void quietly(tess?.terminate());
-      tess = null;
-    });
-    const check = () => {
-      if (stop) {
-        throw new Error(CANCELLED);
-      }
-    };
-    const engine = async (asset: Parameters<typeof getEngine>[0]) => {
-      const bytes = await getEngine(asset, (p: Progress) => {
-        if (!p.fromCache) {
-          api.progress(
-            `Downloading ${p.asset.label} (${formatBytes(p.loaded)} of ${formatBytes(p.total)})`,
-            p.total ? p.loaded / p.total : null
-          );
-        }
-      });
-      check();
-      return bytes;
-    };
+    const unhook = api.onCancel(() => stopRun?.());
     const recognize = async () => {
-      stop = false;
       const langs = String(values.langs).split(",").filter(Boolean);
       if (langs.length === 0) {
         api.error("Choose at least one language.");
         return;
       }
+      stopRun?.();
+      // Each run's own: one stopped must not resume, or end Tesseract, when the next starts.
+      let stopped = false;
+      let tess: TessWorker | null = null;
+      const stop = () => {
+        stopped = true;
+        void quietly(tess?.terminate());
+        tess = null;
+      };
+      stopRun = stop;
+      const check = () => {
+        if (stopped) {
+          throw new Error(CANCELLED);
+        }
+      };
+      const engine = async (asset: Parameters<typeof getEngine>[0]) => {
+        const bytes = await getEngine(asset, (p: Progress) => {
+          // A download outlives Cancel; its progress must not bring the bar back.
+          if (!(p.fromCache || stopped)) {
+            api.progress(
+              `Downloading ${p.asset.label} (${formatBytes(p.loaded)} of ${formatBytes(p.total)})`,
+              p.total ? p.loaded / p.total : null
+            );
+          }
+        });
+        check();
+        return bytes;
+      };
       api.clearMessages();
       foot.show(null, "");
       try {
@@ -168,8 +174,8 @@ const ocr: PanelDef = {
         } else if (values.which === "all") {
           targets = doc.pages.map((_, i) => i);
         } else {
-          const scores = await w.call("ink", [doc.id]);
-          targets = scores.flatMap((s, i) => (s.text ? [] : [i]));
+          const withText = await w.call("textPages", [doc.id]);
+          targets = withText.flatMap((has, i) => (has ? [] : [i]));
         }
         check();
         if (targets.length === 0) {
@@ -223,6 +229,7 @@ const ocr: PanelDef = {
           { layers },
           "Adding the text layer"
         );
+        check();
         if (r?.doc) {
           api.showResult(r);
           foot.show(
@@ -233,11 +240,18 @@ const ocr: PanelDef = {
             "The After view looks the same: the text is invisible. Search it, or select it in any reader.";
         }
       } catch (error) {
-        api.progress("", 1);
+        // Stopped, the bar is Cancel's or the next run's.
+        if (!stopped) {
+          api.progress("", 1);
+        }
         await quietly(tess?.terminate());
         tess = null;
-        if (message(error) !== CANCELLED) {
+        if (!stopped && message(error) !== CANCELLED) {
           api.error(message(error));
+        }
+      } finally {
+        if (stopRun === stop) {
+          stopRun = null;
         }
       }
     };
@@ -264,8 +278,10 @@ const ocr: PanelDef = {
     return {
       destroy: () => {
         unhook();
-        stop = true;
-        void quietly(tess?.terminate());
+        if (stopRun) {
+          stopRun();
+          api.progress("", 1);
+        }
       },
       docChanged: () => foot.show(null, ""),
     };

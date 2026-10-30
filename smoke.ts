@@ -4717,23 +4717,32 @@ await page.evaluate(() => {
 // PDF Toolkit: MuPDF and qpdf over the real CDN, from file://. The fixtures
 // are made here with the same engines: two text PDFs (one with a turned
 // page), one encrypted with a password full of commas, one signed with a
-// fresh key, and a scan with no text layer. What this proves: both engines
+// fresh key and one both encrypted and signed, two scans with no text layer
+// (one a page full of lines), and an image and a file posing as one. What
+// this proves: both engines
 // start in a data: URL worker; files merge, and the grid turns, deletes,
 // drags, and undoes; previews come out live and Apply makes them the
 // Workspace; every download is a PDF that says what it should (checked
 // here with MuPDF); redaction removes the text under a box; a password
 // prompt takes a wrong password and then the right one; a fresh signature
-// checks out; OCR gives a scan selectable text; and a Deep Link restores an
-// Operation's options.
+// checks out, and so does one in an encrypted file; OCR gives a scan
+// selectable text; Cancel stops what runs (the engines' start, OCR, every
+// time) and the worker started next shows and keeps the same Workspace; a
+// live preview that fails leaves nothing to Apply; and a Deep Link restores
+// an Operation's options.
 const ptk = ".tool-pdf-toolkit ";
 const ptkDir = mkdtempSync(path.join(tmpdir(), "html-tools-pdf-"));
 const ptkEnv = await testEnv();
 const ptkFiles = {
   alpha: path.join(ptkDir, "alpha.pdf"),
+  badImage: path.join(ptkDir, "bad.png"),
   beta: path.join(ptkDir, "beta.pdf"),
   locked: path.join(ptkDir, "locked.pdf"),
+  logo: path.join(ptkDir, "logo.png"),
   scan: path.join(ptkDir, "scan.pdf"),
+  scanDense: path.join(ptkDir, "scan-dense.pdf"),
   signed: path.join(ptkDir, "signed.pdf"),
+  signedLocked: path.join(ptkDir, "signed-locked.pdf"),
 };
 await Bun.write(ptkFiles.alpha, makePdf(3, { label: "Alpha" }));
 await Bun.write(ptkFiles.beta, makePdf(2, { label: "Beta", rotate: 90 }));
@@ -4760,10 +4769,38 @@ await Bun.write(
     await makeSigner("Smoke Signer")
   )
 );
+await Bun.write(
+  ptkFiles.signedLocked,
+  await signPdf(
+    protect(ptkEnv, makePdf(1, { label: "Signed and locked" }), {
+      accessibility: true,
+      annotate: true,
+      assemble: true,
+      bits: 256,
+      copy: true,
+      forms: true,
+      modify: true,
+      ownerPassword: "",
+      print: "full",
+      userPassword: PTK_PASSWORD,
+    }),
+    await makeSigner("Locked Signer"),
+    PTK_PASSWORD
+  )
+);
 {
-  // A scan: a page of text rendered to a JPEG, made into a page with no text layer.
-  const text = openTest(makePdf(1, { label: "The quick brown fox" }));
-  const pix = text
+  const pix = new ptkEnv.mupdf.Pixmap(
+    ptkEnv.mupdf.ColorSpace.DeviceRGB,
+    [0, 0, 40, 20],
+    false
+  );
+  pix.clear(128);
+  await Bun.write(ptkFiles.logo, pix.asPNG());
+  await Bun.write(ptkFiles.badImage, "not an image at all");
+}
+/** A scan: a page of text rendered to a JPEG, made into a page with no text layer. */
+const ptkScan = (pdf: Uint8Array) => {
+  const pix = openTest(pdf)
     .loadPage(0)
     .toPixmap(
       [3, 0, 0, 3, 0, 0],
@@ -4772,14 +4809,36 @@ await Bun.write(
       true
     );
   pix.setResolution(216, 216);
+  return imagesToPdf(ptkEnv, [new Uint8Array(pix.asJPEG(90, false))], {
+    fit: "contain",
+    margin: 0,
+    orientation: "auto",
+    page: "image",
+  });
+};
+await Bun.write(
+  ptkFiles.scan,
+  ptkScan(makePdf(1, { label: "The quick brown fox" }))
+);
+{
+  // A page full of lines: Tesseract takes a while over it, long enough to cancel.
+  const doc = new ptkEnv.mupdf.PDFDocument();
+  const resources = doc.newDictionary();
+  const fonts = doc.newDictionary();
+  fonts.put("F1", doc.addSimpleFont(new ptkEnv.mupdf.Font("Helvetica")));
+  resources.put("Font", fonts);
+  const lines = Array.from(
+    { length: 50 },
+    (_, i) =>
+      `BT /F1 11 Tf 40 ${800 - i * 15} Td (Line ${i + 1}: the quick brown fox jumps over the lazy dog, again and again.) Tj ET`
+  );
+  doc.insertPage(
+    -1,
+    doc.addPage([0, 0, 595, 842], 0, resources, lines.join("\n"))
+  );
   await Bun.write(
-    ptkFiles.scan,
-    imagesToPdf(ptkEnv, [new Uint8Array(pix.asJPEG(90, false))], {
-      fit: "contain",
-      margin: 0,
-      orientation: "auto",
-      page: "image",
-    })
+    ptkFiles.scanDense,
+    ptkScan(new Uint8Array(doc.saveToBuffer("compress").asUint8Array()))
   );
 }
 
@@ -4827,6 +4886,35 @@ const ptkThumbs = () =>
       ),
     ].map((c) => (c.width > c.height ? "wide" : "tall"))
   );
+/** Every thumbnail as drawn, once all are drawn and none has changed for a moment. */
+const ptkThumbImages = async () => {
+  const grab = () =>
+    page.evaluate(() =>
+      [
+        ...document.querySelectorAll<HTMLCanvasElement>(
+          ".tool-pdf-toolkit .thumb canvas"
+        ),
+      ].map((c) =>
+        // A canvas not drawn yet is the default 300 by 150.
+        c.width === 300 && c.height === 150 ? "" : c.toDataURL()
+      )
+    );
+  let last = await grab();
+  for (let tries = 0; tries < 60; tries += 1) {
+    await page.waitForTimeout(500);
+    const now = await grab();
+    if (!now.includes("") && JSON.stringify(now) === JSON.stringify(last)) {
+      return now;
+    }
+    last = now;
+  }
+  return last;
+};
+/** Press Cancel, shown or not: the worker is thrown away. */
+const ptkCancel = () =>
+  page
+    .locator(`${ptk}.cancel-btn`)
+    .evaluate((b) => (b as HTMLButtonElement).click());
 /** Drag across a page in the Pages view, from and to points given in page points. */
 const ptkDrag = async (
   pageIndex: number,
@@ -4834,7 +4922,8 @@ const ptkDrag = async (
   to: [number, number]
 ) => {
   const overlay = page.locator(`${ptk}.page .overlay`).nth(pageIndex);
-  await overlay.scrollIntoViewIfNeeded();
+  // Its top in view, where the points dragged across are.
+  await overlay.evaluate((svg) => svg.scrollIntoView({ block: "start" }));
   const box = await overlay.boundingBox();
   const size = await overlay.evaluate((svg) =>
     svg.getAttribute("viewBox")?.split(" ").map(Number)
@@ -4857,9 +4946,24 @@ const ptkDrag = async (
 
 await page.goto("about:blank");
 await page.goto(`${url}#pdf-toolkit`);
+// Cancel while the engines download: that file never opens, though the
+// download goes on to be cached for the next start.
+await page.setInputFiles(`${ptk}.open-input`, [ptkFiles.beta]);
+await page.waitForFunction(() =>
+  (
+    document.querySelector(".tool-pdf-toolkit .phase")?.textContent ?? ""
+  ).startsWith("Downloading")
+);
+await ptkCancel();
 await page.setInputFiles(`${ptk}.open-input`, [ptkFiles.alpha, ptkFiles.beta]);
 await page.waitForSelector(`${ptk}.workspace.on`, { timeout: 180_000 });
 await ptkIdle();
+// Long enough for an open Cancel missed to land after this one.
+await page.waitForTimeout(1000);
+check(
+  "pdf: Cancel during the engines' download opens nothing",
+  await page.locator(`${ptk}.toolbar button[aria-label=Undo]`).isDisabled()
+);
 check(
   "pdf: two files open as one Workspace of five pages",
   (await ptkStatus()) === "alpha + 1 file · 5 pages" &&
@@ -4965,6 +5069,7 @@ check(
     pageTexts(marked.bytes).every((t) => t.includes("SMOKE")),
   `${markedFoot} ${JSON.stringify(pageTexts(marked.bytes))}`
 );
+
 await page.keyboard.press("Meta+z");
 
 // Split into single pages: a zip of five PDFs.
@@ -5081,10 +5186,80 @@ check(
   sigCard
 );
 
-// OCR a scan: the result has text to search.
-await page.setInputFiles(`${ptk}.open-input`, [ptkFiles.scan]);
+// A signed file with a password: its signature is checked against the file
+// as signed, not the decrypted copy worked on, and still is after a restart.
+await ptkPanel("organize");
+await page.setInputFiles(`${ptk}.open-input`, [ptkFiles.signedLocked]);
+await page.waitForSelector(`${ptk}.locked.on`);
+await page.locator(`${ptk}.unlock-pw`).fill(PTK_PASSWORD);
+await page.locator(`${ptk}.unlock-btn`).click();
+await ptkIdle();
+const lockedSigVerdict = async () => {
+  await ptkPanel("signatures");
+  await page.waitForSelector(`${ptk}.sig-card`, { timeout: 30_000 });
+  const line = await textOf(page.locator(`${ptk}.sig-card .verdict-line`));
+  await ptkPanel("organize");
+  return line;
+};
+const lockedFirst = await lockedSigVerdict();
+await ptkCancel();
+const lockedAfterCancel = await lockedSigVerdict();
+check(
+  "pdf: an encrypted file's signature is valid, before and after Cancel",
+  lockedFirst === "Valid, and the document is unchanged since" &&
+    lockedAfterCancel === lockedFirst,
+  `${lockedFirst} / ${lockedAfterCancel}`
+);
+
+// OCR a scan: the result has text to search. First, Cancel stops OCR
+// every time, not only the first.
+await page.setInputFiles(`${ptk}.open-input`, [ptkFiles.scanDense]);
 await ptkIdle();
 await ptkPanel("ocr");
+{
+  const recognizeThenCancel = async () => {
+    // The last run's phase stays written under the hidden bar: not this run's.
+    await page
+      .locator(`${ptk}.phase`)
+      .evaluate((phase) => phase.replaceChildren());
+    await page
+      .locator(`${ptk}.panel-body button`, { hasText: "Recognize" })
+      .click();
+    // Into Tesseract reading the page, in the main thread, where nothing
+    // but its hook can stop it: the page's rendering has come back by then.
+    await page.waitForFunction(
+      () =>
+        (
+          document.querySelector(".tool-pdf-toolkit .phase")?.textContent ?? ""
+        ).startsWith("Reading page"),
+      undefined,
+      { polling: "raf", timeout: 240_000 }
+    );
+    await page.waitForTimeout(500);
+    await ptkCancel();
+  };
+  await recognizeThenCancel();
+  await recognizeThenCancel();
+  // A run Cancel missed goes on downloading, starting Tesseract, and reading
+  // pages, each step bringing the bar back.
+  let barCameBack = true;
+  try {
+    await page.waitForFunction(
+      () => document.querySelector(".tool-pdf-toolkit .progress.on") !== null,
+      undefined,
+      { polling: 50, timeout: 8000 }
+    );
+  } catch {
+    barCameBack = false;
+  }
+  check(
+    "pdf: a second Cancel stops OCR too",
+    !barCameBack &&
+      !(await page.locator(".tool-pdf-toolkit.showing-result").count())
+  );
+}
+await page.setInputFiles(`${ptk}.open-input`, [ptkFiles.scan]);
+await ptkIdle();
 await page
   .locator(`${ptk}.panel-body button`, { hasText: "Recognize" })
   .click();
@@ -5104,6 +5279,81 @@ check(
   /quick brown fox/iu.test(pageTexts(ocred.bytes)[0] ?? ""),
   pageTexts(ocred.bytes)[0]
 );
+
+// Cancel throws the worker away; the next one gets the Sources back under
+// ids of its own. One file, two previews (each a document in the worker),
+// the second applied: the first worker's ids for what the new one holds
+// were those of the previews, so renderings kept from them must not show.
+await page.goto("about:blank");
+await page.goto(`${url}#pdf-toolkit/watermark`);
+await page.setInputFiles(`${ptk}.open-input`, [ptkFiles.alpha]);
+await ptkIdle();
+await ptkPreview();
+await page.locator(`${ptk}.panel-body input[type=text]`).first().fill("AGAIN");
+await page.waitForFunction(
+  () =>
+    (
+      document.querySelector(".tool-pdf-toolkit .foot-status")?.textContent ??
+      ""
+    ).startsWith("Updating"),
+  undefined,
+  { polling: "raf" }
+);
+await ptkPreview();
+await page.locator(`${ptk}.panel-foot button`, { hasText: "Apply" }).click();
+{
+  const before = await ptkThumbImages();
+  await ptkCancel();
+  const again = await ptkDownload(() =>
+    page.locator(`${ptk}.download-btn`).click()
+  );
+  const after = await ptkThumbImages();
+  check(
+    "pdf: after Cancel, a fresh worker shows and downloads the same Workspace",
+    JSON.stringify(after) === JSON.stringify(before) &&
+      pageTexts(again.bytes).every((t) => t.includes("AGAIN")),
+    `${after.filter((u, i) => u !== before[i]).length} of ${before.length} thumbnails differ`
+  );
+}
+
+// A live preview that fails takes the last one off screen: nothing left to Apply.
+await ptkPanel("stamp");
+await page.setInputFiles(`${ptk}.panel-body input[type=file]`, [ptkFiles.logo]);
+await ptkPreview();
+await page.setInputFiles(`${ptk}.panel-body input[type=file]`, [
+  ptkFiles.badImage,
+]);
+await page.waitForSelector(`${ptk}.error-box.on`);
+await page.waitForTimeout(500);
+check(
+  "pdf: a live preview that fails leaves no Result to Apply",
+  !(await page.locator(".tool-pdf-toolkit.showing-result").count()) &&
+    (await page
+      .locator(`${ptk}.panel-foot button`, { hasText: "Apply" })
+      .isDisabled()) &&
+    (await ptkFoot()) === "",
+  await ptkFoot()
+);
+
+// A Result made before Cancel, applied after the next worker started: that
+// worker never had it, so it is handed over before anything reads it.
+await ptkPanel("repair");
+await page.locator(`${ptk}.panel-body button.primary`).last().click();
+await ptkPreview();
+await ptkCancel();
+await ptkDownload(() => page.locator(`${ptk}.download-btn`).click());
+await page.locator(`${ptk}.panel-foot button`, { hasText: "Apply" }).click();
+{
+  const applied = await ptkDownload(() =>
+    page.locator(`${ptk}.download-btn`).click()
+  );
+  check(
+    "pdf: a Result applied after Cancel restarted the worker is the Workspace",
+    pageTexts(applied.bytes).length === 3 &&
+      pageTexts(applied.bytes).every((t) => t.includes("AGAIN")),
+    JSON.stringify(pageTexts(applied.bytes))
+  );
+}
 
 // A Deep Link opens an Operation with its options.
 await page.goto("about:blank");
