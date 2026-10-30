@@ -1,0 +1,455 @@
+.tool-file-hashes {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 0.25rem var(--gutter) 2rem;
+}
+
+.tool-file-hashes .toolbar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
+.tool-file-hashes .toolbar button[hidden] {
+  display: none;
+}
+
+.tool-file-hashes .status {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-left: auto;
+}
+
+/* ---- algorithms ---- */
+
+.tool-file-hashes .algos {
+  flex-shrink: 0;
+}
+
+.tool-file-hashes .algo-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* A chip is a toggle: its pressed state is the accent, not a check mark. */
+.tool-file-hashes .algo {
+  font-weight: 500;
+  color: var(--text-muted);
+  border-color: var(--border);
+}
+.tool-file-hashes .algo.on {
+  color: var(--text);
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+@media (hover: hover) {
+  .tool-file-hashes .algo:hover {
+    color: var(--text);
+  }
+  .tool-file-hashes .algo.on:hover {
+    background: var(--accent-soft);
+  }
+}
+
+.tool-file-hashes .more-algos {
+  margin-top: 8px;
+}
+.tool-file-hashes .more-algos summary {
+  font-size: 12px;
+  color: var(--text-muted);
+  cursor: pointer;
+  width: max-content;
+  margin-bottom: 8px;
+}
+
+/* ---- expected hash ---- */
+
+.tool-file-hashes .verify {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
+.tool-file-hashes .expected {
+  flex: 0 1 560px;
+  min-width: 0;
+  font-family: var(--mono);
+  border-color: var(--border-strong);
+}
+.tool-file-hashes .expected::placeholder {
+  font-family: var(--sans);
+  color: var(--text-muted);
+  opacity: 0.7;
+}
+.tool-file-hashes .verdict {
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+.tool-file-hashes .verdict.ok {
+  color: var(--ok);
+}
+.tool-file-hashes .verdict.bad {
+  color: var(--danger-text);
+}
+.tool-file-hashes .verdict .turn-on {
+  color: var(--text);
+}
+
+/* ---- inputs ---- */
+
+.tool-file-hashes .empty-hint {
+  max-width: 760px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-lg);
+  padding: 40px 20px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 14px;
+  text-wrap: balance;
+}
+.tool-file-hashes .empty-hint strong {
+  color: var(--text);
+  font-weight: 500;
+}
+.tool-file-hashes .empty-hint span {
+  display: block;
+  margin-top: 6px;
+  font-size: 12.5px;
+}
+
+.tool-file-hashes.dragging .empty-hint,
+.tool-file-hashes.dragging .results {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.tool-file-hashes .text-input {
+  display: none;
+  flex-shrink: 0;
+  min-height: 140px;
+  resize: vertical;
+  width: 100%;
+}
+
+/* ---- progress, notes, errors ---- */
+
+.tool-file-hashes .progress {
+  display: none;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+  padding: 10px 14px;
+  background: var(--surface);
+  border: 0.5px solid var(--border);
+  border-radius: var(--radius-md);
+}
+.tool-file-hashes .progress.on {
+  display: flex;
+}
+.tool-file-hashes .phase {
+  font-size: 12.5px;
+  color: var(--text-muted);
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.tool-file-hashes .bar {
+  width: 160px;
+  height: 4px;
+  flex: none;
+  background: var(--surface-3);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.tool-file-hashes .bar .fill {
+  height: 100%;
+  width: 0;
+  background: var(--accent);
+  border-radius: 999px;
+  transition: width 0.15s var(--ease-out);
+}
+.tool-file-hashes .bar.busy .fill {
+  width: 35%;
+  animation: fh-sweep 1.1s var(--ease-out) infinite;
+}
+@keyframes fh-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(300%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tool-file-hashes .bar.busy .fill {
+    width: 100%;
+    opacity: 0.5;
+    animation: none;
+  }
+}
+
+.tool-file-hashes .note {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  padding: 8px 12px;
+  background: var(--surface);
+  border: 0.5px solid var(--border);
+  border-radius: var(--radius-md);
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+.tool-file-hashes .note.on {
+  display: flex;
+}
+.tool-file-hashes .note svg {
+  width: 14px;
+  height: 14px;
+  flex: none;
+}
+.tool-file-hashes .note-text {
+  flex: 1;
+}
+.tool-file-hashes .resume-btn[hidden] {
+  display: none;
+}
+
+.tool-file-hashes .error-box {
+  display: none;
+  flex-shrink: 0;
+}
+.tool-file-hashes .error-box.on {
+  display: block;
+}
+
+/* ---- checksum lists ---- */
+
+.tool-file-hashes .checks {
+  display: none;
+  flex-direction: column;
+  gap: 12px;
+  flex-shrink: 0;
+}
+.tool-file-hashes .checks.on {
+  display: flex;
+}
+
+.tool-file-hashes .check-list,
+.tool-file-hashes .results {
+  background: var(--surface);
+  border: 0.5px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.tool-file-hashes .pane-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--text-muted);
+  flex-wrap: wrap;
+}
+.tool-file-hashes .pane-head > svg {
+  width: 14px;
+  height: 14px;
+  flex: none;
+}
+.tool-file-hashes .pane-head .spacer {
+  flex: 1;
+}
+.tool-file-hashes .pane-head .meta {
+  font-variant-numeric: tabular-nums;
+}
+.tool-file-hashes .meta.ok,
+.tool-file-hashes .check-state.ok {
+  color: var(--ok);
+}
+.tool-file-hashes .meta.bad,
+.tool-file-hashes .check-state.bad,
+.tool-file-hashes .card-meta.bad {
+  color: var(--danger-text);
+}
+.tool-file-hashes .check-title {
+  color: var(--text);
+}
+
+.tool-file-hashes .check-rows {
+  max-height: 260px;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+.tool-file-hashes .check-row {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 3px 12px;
+  font-size: 13px;
+}
+.tool-file-hashes .check-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tool-file-hashes .check-algo,
+.tool-file-hashes .check-state {
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+/* ---- results ---- */
+
+.tool-file-hashes .results {
+  display: none;
+  flex-shrink: 0;
+}
+.tool-file-hashes .results.on {
+  display: block;
+}
+
+.tool-file-hashes .card {
+  padding: 10px 12px;
+  border-bottom: 0.5px solid var(--border);
+}
+.tool-file-hashes .card:last-child {
+  border-bottom: none;
+}
+
+.tool-file-hashes .card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+  font-size: 13px;
+}
+.tool-file-hashes .card-head > svg {
+  width: 15px;
+  height: 15px;
+  flex: none;
+  color: var(--text-muted);
+}
+.tool-file-hashes .card-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+.tool-file-hashes .card-meta {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  margin-right: auto;
+}
+
+.tool-file-hashes button.icon {
+  width: var(--control-h);
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-color: transparent;
+  color: var(--text-muted);
+}
+.tool-file-hashes button.icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.tool-file-hashes .digest-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 26px;
+}
+.tool-file-hashes .algo-name {
+  flex: none;
+  width: 84px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.tool-file-hashes .digest {
+  min-height: 0;
+  height: auto;
+  min-width: 0;
+  padding: 2px 4px;
+  margin-left: -4px;
+  border: none;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  text-align: left;
+  word-break: break-all;
+  user-select: all;
+  border-radius: 4px;
+}
+.tool-file-hashes .digest:disabled {
+  opacity: 1;
+}
+.tool-file-hashes .digest-row.pending .digest::before {
+  content: "…";
+  color: var(--text-muted);
+}
+.tool-file-hashes .digest.copied {
+  background: var(--accent-soft);
+}
+.tool-file-hashes .digest:active {
+  transform: none;
+}
+@media (hover: hover) {
+  .tool-file-hashes .digest:not(:disabled):hover {
+    background: var(--surface-2);
+  }
+}
+
+.tool-file-hashes .digest-row.match .digest {
+  color: var(--ok);
+}
+.tool-file-hashes .digest-row.mismatch .digest {
+  color: var(--danger-text);
+}
+.tool-file-hashes .mark {
+  display: inline-flex;
+  flex: none;
+}
+.tool-file-hashes .mark svg {
+  width: 14px;
+  height: 14px;
+}
+.tool-file-hashes .mark.ok {
+  color: var(--ok);
+}
+.tool-file-hashes .mark.bad {
+  color: var(--danger-text);
+}
+
+@media (max-width: 767px) {
+  .tool-file-hashes .bar {
+    width: 90px;
+  }
+  .tool-file-hashes .digest-row {
+    flex-wrap: wrap;
+    gap: 0 12px;
+  }
+  .tool-file-hashes .expected,
+  .tool-file-hashes .algo,
+  .tool-file-hashes .progress button,
+  .tool-file-hashes .note button {
+    min-height: 36px;
+  }
+}

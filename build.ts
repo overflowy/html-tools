@@ -10,7 +10,12 @@ import { renderToStaticMarkup } from "react-dom/server";
 // as a constant and spawns it from a data: or blob: URL, so the artifact
 // stays one file and the workers still run from file://.
 const WORKERS = [
+  {
+    constant: "ARCHIVE_WORKER_SRC",
+    entry: "src/tools/archive-manager/worker.ts",
+  },
   { constant: "DOC_WORKER_SRC", entry: "src/tools/doc-to-markdown/worker.ts" },
+  { constant: "HASH_WORKER_SRC", entry: "src/tools/file-hashes/worker.ts" },
   {
     constant: "PYIDE_PY_WORKER_SRC",
     entry: "src/tools/python-ide/py-worker.ts",

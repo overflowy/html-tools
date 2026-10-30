@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "dompurify": "3.4.14",
+    "hash-wasm": "4.12.0",
     "highlight.js": "11.12.0",
     "lz-string": "^1.5.0",
     "marked": "18.0.11",

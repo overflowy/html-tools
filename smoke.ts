@@ -1,5 +1,6 @@
 // Browser smoke test for the built dist/index.html. Run: bun run smoke.ts
 // Uses the Playwright headless Chromium already present in ~/Library/Caches/ms-playwright.
+import { createHash } from "node:crypto";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -130,7 +131,7 @@ const present = <T>(v: T | null | undefined, what: string): T => {
 
 await page.goto(url);
 const names = await page.locator(".tool-list button").allTextContents();
-check("sidebar lists all tools", names.length === 15, names.join(", "));
+check("sidebar lists all tools", names.length === 17, names.join(", "));
 
 // base64 tool: paste a tiny valid png via direct input.
 await page.goto(`${url}#base64-to-image`);
@@ -2761,6 +2762,589 @@ await page.waitForFunction(
   secondUuid
 );
 check("uuid value comes back after the flash", true);
+
+// Archive Manager: real 7-Zip over the real CDN (this repository's vendored
+// build, pinned by commit), from file://. The fixtures are made here with
+// the system's zip and tar, so nothing binary is committed. What this proves
+// is that the engine loads in its worker from a data: URL, that names with
+// wildcards and leading dashes reach 7-Zip as names, that a tarball is
+// unwrapped, that passwords are asked for where they are needed and wrong
+// ones said to be wrong, that a split archive opens from its volumes, that
+// a new archive and a conversion come out right and open again, that Extract
+// writes a folder tree without overwriting, and that a second visit fetches
+// nothing.
+const archiveDir = mkdtempSync(path.join(tmpdir(), "html-tools-archive-"));
+const archiveSrc = path.join(archiveDir, "src");
+const README = "hello world\n".repeat(200);
+const archiveFiles: Record<string, string> = {
+  "-dash.txt": "dash",
+  "docs/a b.md": "# Title\n",
+  "docs/code.js": "const x = 1;\n",
+  "docs/we*ird.txt": "star",
+  "readme.txt": README,
+};
+for (const [name, body] of Object.entries(archiveFiles)) {
+  await Bun.write(path.join(archiveSrc, name), body);
+}
+for (const cmd of [
+  ["zip", "-qr", "../plain.zip", "."],
+  ["zip", "-qr", "-P", "secret", "../locked.zip", "readme.txt"],
+  ["tar", "-czf", "../src.tar.gz", "."],
+]) {
+  const run = Bun.spawnSync(cmd, {
+    cwd: archiveSrc,
+    // macOS tar adds AppleDouble files otherwise.
+    env: { ...process.env, COPYFILE_DISABLE: "1" },
+  });
+  if (run.exitCode !== 0) {
+    throw new Error(`${cmd[0]} failed: ${run.stderr.toString()}`);
+  }
+}
+const am = ".tool-archive-manager ";
+const amIdle = () =>
+  page.waitForFunction(
+    () =>
+      !document
+        .querySelector(".tool-archive-manager")
+        ?.classList.contains("busy"),
+    undefined,
+    { timeout: 120_000 }
+  );
+const amOpen = async (files: string[]) => {
+  await page.setInputFiles(
+    `${am}.open-input`,
+    files.map((f) => path.join(archiveDir, f))
+  );
+  await page.waitForFunction(
+    () =>
+      document.querySelector(
+        ".tool-archive-manager .archive.listed, .tool-archive-manager .archive.is-locked, .tool-archive-manager .error-box.on"
+      ),
+    undefined,
+    { timeout: 120_000 }
+  );
+  await amIdle();
+};
+const amRows = async () => {
+  const shown = await page
+    .locator(`${am}tbody tr .open-node span`)
+    .allTextContents();
+  return shown.join(" | ");
+};
+const amText = (sel: string) => textOf(page.locator(`${am}${sel}`));
+const amPreview = async (row: string) => {
+  await page.locator(`${am}tbody tr[data-path="${row}"] .open-node`).click();
+  await page.waitForSelector(`${am}.pv-body pre`, { timeout: 60_000 });
+  await amIdle();
+  return textOf(page.locator(`${am}.pv-body`));
+};
+const amVerdict = async () => {
+  await page.locator(`${am}.test-btn`).click();
+  await page.waitForSelector(`${am}.report.on .verdict`, { timeout: 60_000 });
+  return textOf(page.locator(`${am}.report .verdict`));
+};
+
+await page.goto("about:blank");
+await page.goto(`${url}#archive-manager`);
+await page.evaluate(() =>
+  localStorage.removeItem("html-tools:archive-manager:options")
+);
+await amOpen(["plain.zip"]);
+check(
+  "archive: a zip lists its folders first, then its files",
+  (await amRows()) === "docs | -dash.txt | readme.txt",
+  await amRows()
+);
+check(
+  "archive: the facts count files and folders",
+  /^zip · .* · 5 files · 1 folder · /u.test(
+    await textOf(page.locator(`${am}.facts`))
+  ),
+  await textOf(page.locator(`${am}.facts`))
+);
+await page.locator(`${am}tbody tr[data-path="docs"] .open-node`).click();
+check(
+  "archive: a folder opens, with the way back up",
+  (await amRows()) === "a b.md | code.js | we*ird.txt" &&
+    (await page.locator(`${am}tbody .go-up`).count()) === 1,
+  await amRows()
+);
+check(
+  "archive: a name with a wildcard is extracted as itself",
+  (await amPreview("docs/we*ird.txt")) === "star"
+);
+check(
+  "archive: code is previewed highlighted",
+  (await amPreview("docs/code.js")) === "const x = 1;\n" &&
+    (await page.locator(`${am}.pv-body .hljs-keyword`).count()) > 0
+);
+await page.locator(`${am}.crumbs .crumb`).first().click();
+check(
+  "archive: a name with a leading dash is extracted as itself",
+  (await amPreview("-dash.txt")) === "dash"
+);
+const zipVerdict = await amVerdict();
+check(
+  "archive: test passes on an intact zip",
+  zipVerdict.startsWith("Everything is OK: 5 files"),
+  zipVerdict
+);
+await page.locator(`${am}.filter`).fill("we*");
+check(
+  "archive: the filter finds files in any folder, by path",
+  (await amRows()) === "docs/we*ird.txt",
+  await amRows()
+);
+await page.locator(`${am}.filter`).fill("");
+
+// Extract all: written as a tree into the picked folder, which a person picks
+// in real use; here an in-memory folder stands in for the picker.
+await page.evaluate(() => {
+  interface Fake {
+    kind: "directory" | "file";
+    kids: Map<string, Fake>;
+    size: number;
+  }
+  const make = (kind: Fake["kind"]): Fake => ({
+    kids: new Map(),
+    kind,
+    size: 0,
+  });
+  const child = (
+    parent: Fake,
+    name: string,
+    kind: Fake["kind"],
+    create: boolean
+  ): Fake => {
+    const found = parent.kids.get(name);
+    if (found?.kind === kind) {
+      return found;
+    }
+    if (found || !create) {
+      throw new DOMException(name, "NotFoundError");
+    }
+    const made = make(kind);
+    parent.kids.set(name, made);
+    return made;
+  };
+  const handle = (node: Fake): object => ({
+    createWritable: () => {
+      const parts: Blob[] = [];
+      return Promise.resolve({
+        close: () => {
+          node.size = new Blob(parts).size;
+          return Promise.resolve();
+        },
+        write: (b: Blob) => {
+          parts.push(b);
+          return Promise.resolve();
+        },
+      });
+    },
+    getDirectoryHandle: (n: string, o?: { create?: boolean }) =>
+      handle(child(node, n, "directory", o?.create === true)),
+    getFileHandle: (n: string, o?: { create?: boolean }) =>
+      handle(child(node, n, "file", o?.create === true)),
+    name: "Downloads",
+  });
+  const root = make("directory");
+  const list = (node: Fake, prefix: string): string[] =>
+    [...node.kids].flatMap(([n, k]) =>
+      k.kind === "directory"
+        ? [`${prefix}${n}/`, ...list(k, `${prefix}${n}/`)]
+        : [`${prefix}${n} ${k.size}`]
+    );
+  Object.assign(window, {
+    listPicked: () => list(root, "").toSorted(),
+    showDirectoryPicker: () => Promise.resolve(handle(root)),
+  });
+});
+const amExtract = async () => {
+  await page.locator(`${am}.extract-btn`).click();
+  await page.waitForSelector(`${am}.note.on`, { timeout: 60_000 });
+  await amIdle();
+  return textOf(page.locator(`${am}.note-text`));
+};
+const extracted = await amExtract();
+const picked = await page.evaluate(() =>
+  (window as unknown as { listPicked: () => string[] }).listPicked()
+);
+check(
+  "archive: extract all writes the tree into a new folder",
+  extracted.startsWith("Extracted 5 files into Downloads/plain ") &&
+    picked.join(", ") ===
+      `plain/, plain/-dash.txt 4, plain/docs/, plain/docs/a b.md 8, plain/docs/code.js 13, plain/docs/we*ird.txt 4, plain/readme.txt ${README.length}`,
+  `${extracted} | ${picked.join(", ")}`
+);
+const extractedAgain = await amExtract();
+check(
+  "archive: a second extract never overwrites the first",
+  extractedAgain.includes("Downloads/plain (2) "),
+  extractedAgain
+);
+
+// Encrypted files: listed without the password, extracted only with it.
+await amOpen(["locked.zip"]);
+const lockedFacts = await amText(".facts");
+check(
+  "archive: encrypted files are listed and ask for a password",
+  lockedFacts.endsWith("· encrypted") &&
+    (await page.locator(`${am}.pw`).isVisible()),
+  lockedFacts
+);
+await page.locator(`${am}tbody tr[data-path="readme.txt"] .open-node`).click();
+await page.waitForSelector(`${am}.pv-error`, { timeout: 60_000 });
+await amIdle();
+const noPassword = await amText(".pv-error");
+check(
+  "archive: no password says so, in the preview, with nothing else moving",
+  noPassword.startsWith("Wrong password") &&
+    !(await page.locator(`${am}.error-box`).isVisible()),
+  noPassword
+);
+await page.locator(`${am}.pw`).fill("secret");
+check(
+  "archive: the password opens the file",
+  (await amPreview("readme.txt")) === README
+);
+
+// A tarball shows the tar's contents, not the one tar inside the gzip.
+await amOpen(["src.tar.gz"]);
+const tgzFacts = await amText(".facts");
+check(
+  "archive: a tar.gz is unwrapped",
+  tgzFacts.startsWith("tar in gzip · ") &&
+    (await amRows()) === "docs | -dash.txt | readme.txt",
+  `${tgzFacts} | ${await amRows()}`
+);
+const tgzVerdict = await amVerdict();
+check(
+  "archive: test checks the gzip around the tar",
+  tgzVerdict.startsWith("Everything is OK"),
+  tgzVerdict
+);
+
+// Convert to 7z with a password that hides the names too, then open it again.
+await page.locator(`${am}.convert-btn`).click();
+await page.locator(`${am}.convert-opts .o-format`).selectOption("7z");
+await page.locator(`${am}.convert-opts .o-pw`).fill("pw");
+await page.locator(`${am}.convert-go`).click();
+await page.waitForSelector(`${am}.made.on`, { timeout: 120_000 });
+await amIdle();
+const converted = await amText(".made-text");
+check(
+  "archive: convert makes a 7z",
+  converted.startsWith("src.7z "),
+  converted
+);
+const madeBytes = await page.evaluate(async () => {
+  let blob: Blob | null = null;
+  const real = URL.createObjectURL.bind(URL);
+  URL.createObjectURL = (b: Blob | MediaSource) => {
+    blob = b instanceof Blob ? b : null;
+    return real(b);
+  };
+  (
+    document.querySelector(
+      ".tool-archive-manager .made-download"
+    ) as HTMLElement
+  ).click();
+  URL.createObjectURL = real;
+  const got = blob as Blob | null;
+  return got ? [...new Uint8Array(await got.arrayBuffer())] : [];
+});
+const made7z = path.join(archiveDir, "src.7z");
+await Bun.write(made7z, new Uint8Array(madeBytes));
+await amOpen(["src.7z"]);
+check(
+  "archive: names encrypted by the conversion ask for the password first",
+  await page.locator(`${am}.archive.is-locked`).isVisible()
+);
+await page.locator(`${am}.unlock-pw`).fill("nope");
+await page.locator(`${am}.unlock-btn`).click();
+await page.waitForFunction(
+  () =>
+    document
+      .querySelector(".tool-archive-manager .locked-text")
+      ?.textContent?.startsWith("Wrong password"),
+  undefined,
+  { timeout: 60_000 }
+);
+await amIdle();
+check("archive: a wrong password is said to be wrong", true);
+await page.locator(`${am}.unlock-pw`).fill("pw");
+await page.locator(`${am}.unlock-btn`).click();
+await page.waitForSelector(`${am}.archive.listed`, { timeout: 60_000 });
+await amIdle();
+const convertedFacts = await amText(".facts");
+check(
+  "archive: the converted 7z holds what the tarball held",
+  (await amRows()) === "docs | -dash.txt | readme.txt" &&
+    convertedFacts.includes("solid · encrypted"),
+  convertedFacts
+);
+
+// A split archive opens from all its volumes, and says so when one is missing.
+const splitBytes = await Bun.file(made7z).bytes();
+const third = Math.ceil(splitBytes.length / 3);
+for (const n of [0, 1, 2]) {
+  await Bun.write(
+    path.join(archiveDir, `split.7z.00${n + 1}`),
+    splitBytes.slice(n * third, (n + 1) * third)
+  );
+}
+await page.locator(`${am}.clear-btn`).click();
+await amOpen(["split.7z.003", "split.7z.001", "split.7z.002"]);
+await page.locator(`${am}.unlock-pw`).fill("pw");
+await page.locator(`${am}.unlock-btn`).click();
+await page.waitForSelector(`${am}.archive.listed`, { timeout: 60_000 });
+await amIdle();
+check(
+  "archive: a split archive opens by its first volume",
+  (await textOf(page.locator(`${am}.crumbs-archive`))) === "split.7z.001" &&
+    (await amRows()) === "docs | -dash.txt | readme.txt",
+  await textOf(page.locator(`${am}.crumbs-archive`))
+);
+await page.locator(`${am}.clear-btn`).click();
+await amOpen(["split.7z.001", "split.7z.002"]);
+const missingVolume = await amText(".error-box");
+check(
+  "archive: a missing volume is named as the likely cause",
+  missingVolume.includes("one is missing"),
+  missingVolume
+);
+
+// New archive: files in, tar.gz out, opened again; the format rides in the Deep Link.
+await page.locator(`${am}.clear-btn`).click();
+await page.locator(`${am}.new-btn`).click();
+await page.setInputFiles(`${am}.add-input`, [
+  path.join(archiveSrc, "readme.txt"),
+  path.join(archiveSrc, "-dash.txt"),
+]);
+await page.locator(`${am}.create-opts .o-format`).selectOption("tar.gz");
+await page.locator(`${am}.create-opts .o-level`).selectOption("9");
+check(
+  "archive: the format and level go in the Deep Link",
+  await page.evaluate(() => location.hash === "#archive-manager/tar.gz.9")
+);
+await page.locator(`${am}.create-go`).click();
+await page.waitForSelector(`${am}.made.on`, { timeout: 120_000 });
+await amIdle();
+const madeTgz = await amText(".made-text");
+check(
+  "archive: a new tar.gz is made",
+  madeTgz.startsWith("archive.tar.gz "),
+  madeTgz
+);
+await page.locator(`${am}.made-open`).click();
+await page.waitForSelector(`${am}.archive.listed`, { timeout: 60_000 });
+await amIdle();
+check(
+  "archive: the new tar.gz opens to the files put in",
+  (await amRows()) === "-dash.txt | readme.txt" &&
+    (await amPreview("readme.txt")) === README,
+  await amRows()
+);
+
+// Second visit: the options come back from the Deep Link, the engine from IndexedDB.
+const amRequests: string[] = [];
+const amSpy = (r: { url: () => string }) => {
+  if (r.url().includes("cdn.jsdelivr.net/gh/overflowy/html-tools")) {
+    amRequests.push(r.url());
+  }
+};
+page.on("request", amSpy);
+await page.goto("about:blank");
+await page.goto(`${url}#archive-manager/zip.0`);
+await page.locator(`${am}.new-btn`).click();
+check(
+  "archive: a Deep Link restores the format and level",
+  (await page.locator(`${am}.create-opts .o-format`).inputValue()) === "zip" &&
+    (await page.locator(`${am}.create-opts .o-level`).inputValue()) === "0"
+);
+await amOpen(["plain.zip"]);
+page.off("request", amSpy);
+check(
+  "archive: a second visit loads 7-Zip from the cache",
+  amRequests.length === 0 &&
+    (await amRows()) === "docs | -dash.txt | readme.txt",
+  amRequests.join(", ")
+);
+await page.evaluate(() =>
+  localStorage.removeItem("html-tools:archive-manager:options")
+);
+
+// File Hashes: every Digest checked against node:crypto and Bun's CRC32,
+// a dropped checksum list judged line by line, an expected hash matched,
+// and text hashed as it is typed, its State in the Deep Link.
+const fh = ".tool-file-hashes ";
+const hashDir = mkdtempSync(path.join(tmpdir(), "html-tools-hashes-"));
+const hashBodies: Record<string, Uint8Array> = {
+  "a.txt": new TextEncoder().encode("abc"),
+  "b.bin": new Uint8Array(5_000_000).map((_, i) => (i * 7919) % 251),
+};
+for (const [name, body] of Object.entries(hashBodies)) {
+  await Bun.write(path.join(hashDir, name), body);
+}
+const digestOf = (algo: string, body: Uint8Array) =>
+  createHash(algo).update(body).digest("hex");
+const [aBody, bBody] = [hashBodies["a.txt"], hashBodies["b.bin"]].map((b) =>
+  present(b, "a fixture body")
+);
+await Bun.write(
+  path.join(hashDir, "SHA256SUMS"),
+  `${digestOf("sha256", aBody)}  a.txt\n${"0".repeat(64)}  b.bin\n${"1".repeat(64)}  gone.txt\n`
+);
+const fhIdle = () =>
+  page.waitForFunction(
+    () =>
+      !document.querySelector(".tool-file-hashes .progress.on") &&
+      !document.querySelector(".tool-file-hashes .digest-row.pending"),
+    undefined,
+    { timeout: 60_000 }
+  );
+/** Every card's Digests, `algorithm=digest`, by file. */
+const fhDigests = () =>
+  page.evaluate(() =>
+    Object.fromEntries(
+      [...document.querySelectorAll(".tool-file-hashes .card")].map((c) => [
+        c.querySelector(".card-name")?.textContent ?? "",
+        Object.fromEntries(
+          [...c.querySelectorAll(".digest-row")].map((r) => [
+            r.querySelector(".algo-name")?.textContent ?? "",
+            r.querySelector(".digest")?.textContent ?? "",
+          ])
+        ),
+      ])
+    )
+  );
+await page.goto(`${url}#file-hashes`);
+await page.evaluate(() =>
+  localStorage.removeItem("html-tools:file-hashes:algorithms")
+);
+await page.reload();
+await page.setInputFiles(`${fh}.file-input`, [
+  path.join(hashDir, "a.txt"),
+  path.join(hashDir, "b.bin"),
+]);
+await fhIdle();
+await page.locator(`${fh}.more-algos summary`).click();
+for (const label of ["CRC32", "SHA-512", "SHA3-256", "BLAKE2b"]) {
+  await page.locator(`${fh}.algo`, { hasText: label }).first().click();
+}
+await fhIdle();
+const fhGot = await fhDigests();
+/** An object's entries in key order, nested one level, so key order cannot matter. */
+const fhCanon = (o: Record<string, Record<string, string>>) =>
+  JSON.stringify(
+    Object.entries(o)
+      .toSorted(([a], [b]) => a.localeCompare(b))
+      .map(([k, v]) => [
+        k,
+        Object.entries(v).toSorted(([a], [b]) => a.localeCompare(b)),
+      ])
+  );
+const fhWant = (body: Uint8Array) => ({
+  BLAKE2b: digestOf("blake2b512", body),
+  CRC32: Bun.hash.crc32(body).toString(16).padStart(8, "0"),
+  MD5: digestOf("md5", body),
+  "SHA-1": digestOf("sha1", body),
+  "SHA-256": digestOf("sha256", body),
+  "SHA-512": digestOf("sha512", body),
+  "SHA3-256": digestOf("sha3-256", body),
+});
+check(
+  "hashes: every Digest agrees with node:crypto",
+  fhCanon(fhGot) ===
+    fhCanon({ "a.txt": fhWant(aBody), "b.bin": fhWant(bBody) }),
+  JSON.stringify(fhGot).slice(0, 300)
+);
+await page.locator(`${fh}.expected`).fill(
+  digestOf("sha1", bBody)
+    .toUpperCase()
+    .replaceAll(/(?<four>.{4})/gu, "$<four> ")
+);
+check(
+  "hashes: an expected hash matches however it is grouped",
+  (await textOf(page.locator(`${fh}.verdict`))) === "Matches b.bin (SHA-1)." &&
+    (await page.locator(`${fh}.digest-row.match`).count()) === 1
+);
+await page.locator(`${fh}.expected`).fill("ab".repeat(48));
+await page.locator(`${fh}.verdict .turn-on`).click();
+await fhIdle();
+const fhAfterTurnOn = await fhDigests();
+check(
+  "hashes: a hash of another length offers its Algorithm, which hashes the files",
+  (await page.locator(`${fh}.algo.on`, { hasText: "SHA-384" }).count()) === 1 &&
+    fhAfterTurnOn["a.txt"]?.["SHA-384"] === digestOf("sha384", aBody)
+);
+await page.locator(`${fh}.expected`).fill("");
+await page.setInputFiles(`${fh}.file-input`, path.join(hashDir, "SHA256SUMS"));
+// The list is read before anything shows, so there is no pass to wait for.
+await page.waitForSelector(`${fh}.check-row`);
+await fhIdle();
+const fhChecks = await page.evaluate(() =>
+  [...document.querySelectorAll(".tool-file-hashes .check-row")].map((r) =>
+    [...r.children].map((c) => c.textContent).join(" ")
+  )
+);
+check(
+  "hashes: a checksum list is judged line by line",
+  fhChecks.join(" ; ") ===
+    "a.txt SHA-256 OK ; b.bin SHA-256 Differs ; gone.txt SHA-256 Not dropped" &&
+    (await textOf(page.locator(`${fh}.check-list .meta`))) ===
+      "1 of 3 OK · 1 differ · 1 not dropped",
+  fhChecks.join(" ; ")
+);
+const fhSaved = await page.evaluate(() => {
+  let blob: Blob | null = null;
+  const real = URL.createObjectURL.bind(URL);
+  URL.createObjectURL = (b: Blob | MediaSource) => {
+    blob = b instanceof Blob ? b : null;
+    return real(b);
+  };
+  (
+    document.querySelector(".tool-file-hashes .save-all") as HTMLElement
+  ).click();
+  URL.createObjectURL = real;
+  const got = blob as Blob | null;
+  return got ? got.text() : "";
+});
+check(
+  "hashes: download writes BSD tags for several Algorithms",
+  fhSaved.split("\n")[0] === `CRC32 (a.txt) = ${fhWant(aBody).CRC32}` &&
+    fhSaved.includes(`SHA256 (b.bin) = ${digestOf("sha256", bBody)}`),
+  fhSaved.split("\n")[0]
+);
+await page.locator(`${fh}.mode button[data-mode="text"]`).click();
+await page.locator(`${fh}.text-input`).fill("hello");
+await page.waitForFunction(
+  (want: string) =>
+    [...document.querySelectorAll(".tool-file-hashes .digest")].some(
+      (d) => d.textContent === want
+    ),
+  digestOf("sha256", new TextEncoder().encode("hello"))
+);
+check("hashes: text is hashed as it is typed", true);
+await page.waitForFunction(() => location.hash.includes("t=hello"));
+const fhLink = await page.evaluate(() => location.href);
+await page.goto("about:blank");
+await page.goto(fhLink);
+await page.waitForFunction(
+  (want: string) =>
+    [...document.querySelectorAll(".tool-file-hashes .digest")].some(
+      (d) => d.textContent === want
+    ),
+  digestOf("md5", new TextEncoder().encode("hello"))
+);
+check(
+  "hashes: the Deep Link restores the text and the Algorithms",
+  (await page.locator(`${fh}.text-input`).inputValue()) === "hello" &&
+    (await page.locator(`${fh}.algo.on`, { hasText: "BLAKE2b" }).count()) === 1
+);
+await page.evaluate(() =>
+  localStorage.removeItem("html-tools:file-hashes:algorithms")
+);
 
 // Dual N-Back: an in-page player watches the board and listens in on Web
 // Audio (each decoded buffer is tagged with the byte length of its file, so
