@@ -830,6 +830,24 @@
   font-weight: 500;
   color: var(--text);
 }
+/* A heading with the action on what it heads: Marks, and Clear marks. */
+.tool-pdf-toolkit .marks-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 6px;
+}
+.tool-pdf-toolkit .marks-head h3 {
+  margin: 0;
+}
+/* A mode button that is on (Redact's Preview): tinted with the accent, hovered or not. */
+.tool-pdf-toolkit button.pressed,
+.tool-pdf-toolkit button.pressed:hover {
+  background: var(--accent-soft);
+  border-color: rgb(201 100 66 / 0.6);
+  color: var(--text);
+}
 .tool-pdf-toolkit .panel-body h4 {
   margin: 4px 0 0;
   font-size: 12px;

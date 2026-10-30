@@ -5174,7 +5174,7 @@ const parts = await ptkDownload(() =>
 // Redact a box drawn over the first page's heading.
 await ptkPanel("redact");
 await ptkDrag(0, [60, 40], [220, 84]);
-await page.locator(`${ptk}.panel-body button`, { hasText: "Preview" }).click();
+await page.locator(`${ptk}.panel-foot button`, { hasText: "Preview" }).click();
 await ptkIdle();
 const redacted = await ptkDownload(() =>
   page.locator(`${ptk}.panel-foot button`, { hasText: "Download" }).click()
@@ -5925,7 +5925,7 @@ check(
     (await page.locator(`${ptk}.annots li`).count()) === 1,
   places.join(" | ")
 );
-await page.locator(`${ptk}.panel-body button`, { hasText: "Preview" }).click();
+await page.locator(`${ptk}.panel-foot button`, { hasText: "Preview" }).click();
 await ptkIdle();
 const redactBody = await textOf(page.locator(`${ptk}.panel-body`));
 const secretOut = await ptkDownload(() =>

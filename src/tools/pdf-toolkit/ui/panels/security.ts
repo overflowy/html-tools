@@ -14,6 +14,7 @@ import type {
 } from "../../pdf/security";
 import type { Check, SignatureReport } from "../../pdf/signatures";
 import type { Quad } from "../../pdf/text";
+import type { RunResult } from "../../worker";
 import type { PanelDef } from "../api";
 import {
   button,
@@ -25,10 +26,11 @@ import {
   formatDate,
   iconButton,
   message,
+  pdfBlob,
 } from "../dom";
 import { Form } from "../form";
 import type { Field, Values } from "../form";
-import { describeResult, resultFoot, transformPanel } from "../panel-kit";
+import { resultFoot, transformPanel } from "../panel-kit";
 import type { Gesture, Mark } from "../viewer";
 
 const GROUP = "Security";
@@ -255,11 +257,67 @@ const redact: PanelDef = {
     const outcome = el("p", { attrs: { hidden: "" }, class: "hint" });
     /** Where the text searched for also is, out of Redact's reach. */
     const outside = el("div", { class: "elsewhere" });
-    const foot = resultFoot(api, {
-      applyLabel: "the redactions",
-      fileName: (a) => `${a.name()}-redacted.pdf`,
+    // Preview is a mode: while it is on, the pages show the redaction and
+    // take no new marks; Apply and Download take what it shows.
+    let previewing = false;
+    let shown: RunResult | null = null;
+    /** Bumped by every preview run and every stop, so only the latest run lands. */
+    let previewSeq = 0;
+    /** Turns marking back on once Preview is off: set below, where the tools are. */
+    let resumeMarking = (): void => undefined;
+    const preview = el("button", {
+      attrs: {
+        title: "Show the pages as redacted; press again to go back to marking",
+        type: "button",
+      },
+      text: "Preview",
     });
-    const runIt = async () => {
+    const apply = button(
+      "Apply",
+      () => {
+        if (shown) {
+          api.apply(shown, "the redactions");
+        }
+      },
+      { primary: true, title: "Make this the document you are working on" }
+    );
+    const download = button("Download", () => {
+      if (shown?.doc) {
+        api.download(pdfBlob(shown.doc.bytes), `${api.name()}-redacted.pdf`);
+      }
+    });
+    api.foot.replaceChildren(
+      preview,
+      el("span", { class: "spacer" }),
+      apply,
+      download
+    );
+    const syncFoot = () => {
+      preview.classList.toggle("pressed", previewing);
+      preview.setAttribute("aria-pressed", String(previewing));
+      preview.disabled = !previewing && marks.length === 0;
+      apply.disabled = !shown;
+      download.disabled = !shown;
+    };
+    const stopPreview = () => {
+      previewSeq += 1;
+      const was = previewing;
+      previewing = false;
+      shown = null;
+      outcome.hidden = true;
+      syncFoot();
+      if (was) {
+        api.showResult(null);
+        resumeMarking();
+      }
+    };
+    const runPreview = async () => {
+      previewSeq += 1;
+      const mine = previewSeq;
+      previewing = true;
+      shown = null;
+      api.setTool(null);
+      syncFoot();
       const r = await api.run(
         "redact",
         {
@@ -270,35 +328,40 @@ const redact: PanelDef = {
         },
         "Redacting"
       );
-      if (r?.doc) {
-        api.showResult(r);
-        foot.show(
-          r,
-          `Redacted: ${describeResult(r)}. Check the After view, then Apply or Download.`
-        );
-        const { annotations, fields } = r.report;
-        const also = [
-          annotations ? count(annotations, "comment", "comments") : "",
-          fields ? count(fields, "form field", "form fields") : "",
-        ].filter(Boolean);
-        outcome.textContent = also.length
-          ? `Also removed ${also.join(" and ")} that lay over the marks.`
-          : "";
-        outcome.hidden = also.length === 0;
+      if (mine !== previewSeq) {
+        return;
       }
+      if (!r?.doc) {
+        stopPreview();
+        return;
+      }
+      shown = r;
+      api.showResult(r);
+      const { annotations, fields } = r.report;
+      const also = [
+        annotations ? count(annotations, "comment", "comments") : "",
+        fields ? count(fields, "form field", "form fields") : "",
+      ].filter(Boolean);
+      outcome.textContent = `${also.length ? `Also removed ${also.join(" and ")} that lay over the marks. ` : ""}Marking is paused while Preview is on.`;
+      outcome.hidden = false;
+      syncFoot();
     };
-    const preview = button("Preview", () => {
-      void runIt();
+    preview.addEventListener("click", () => {
+      if (previewing) {
+        stopPreview();
+      } else {
+        void runPreview();
+      }
     });
+    // A Result is of the pages it was made from: once they change, it goes.
+    api.onPagesChanged(stopPreview);
     const changed = () => {
-      outcome.hidden = true;
-      foot.show(
-        null,
-        marks.length
-          ? count(marks.length, "mark", "marks")
-          : "Nothing marked yet."
-      );
-      preview.disabled = marks.length === 0;
+      // The preview follows the marks, until there are none to show.
+      if (previewing && marks.length) {
+        void runPreview();
+      } else {
+        stopPreview();
+      }
       list.replaceChildren(
         ...marks.slice(0, 300).map((m, i) =>
           el(
@@ -398,6 +461,7 @@ const redact: PanelDef = {
         }
       });
     };
+    resumeMarking = setTool;
     /** List where `q` is outside the pages' content, and return those places. */
     const findOutside = async (q: string): Promise<Place[]> => {
       outside.replaceChildren();
@@ -414,7 +478,7 @@ const redact: PanelDef = {
       if (!places.length) {
         return places;
       }
-      const shown = places.slice(0, 50);
+      const listed = places.slice(0, 50);
       const kinds = new Set(places.map((p) => p.kind));
       const fixes: HTMLElement[] = [];
       if (kinds.has("metadata") || kinds.has("attachment")) {
@@ -431,9 +495,9 @@ const redact: PanelDef = {
         el(
           "ul",
           { class: "places" },
-          ...shown.map((p) => el("li", { text: placeText(p) })),
-          ...(places.length > shown.length
-            ? [el("li", { text: `and ${places.length - shown.length} more` })]
+          ...listed.map((p) => el("li", { text: placeText(p) })),
+          ...(places.length > listed.length
+            ? [el("li", { text: `and ${places.length - listed.length} more` })]
             : [])
         ),
         ...(kinds.has("comment") || kinds.has("field")
@@ -483,7 +547,12 @@ const redact: PanelDef = {
     });
     const form = new Form(redact.fields ?? [], values, (key) => {
       api.persist();
-      if (key === "mode") {
+      if (previewing) {
+        // How marks are drawn waits for marking; the rest shows at once.
+        if (key !== "mode") {
+          void runPreview();
+        }
+      } else if (key === "mode") {
         setTool();
       }
     });
@@ -497,15 +566,16 @@ const redact: PanelDef = {
         })
       ),
       outside,
-      row(
-        preview,
+      outcome,
+      el(
+        "div",
+        { class: "marks-head" },
+        el("h3", { text: "Marks" }),
         button("Clear marks", () => {
           marks.length = 0;
           changed();
         })
       ),
-      outcome,
-      el("h3", { text: "Marks" }),
       list,
       el("p", {
         class: "hint",
