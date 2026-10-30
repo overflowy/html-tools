@@ -674,6 +674,34 @@
 .tool-pdf-toolkit .viewer-body[data-tool="write"] .overlay {
   cursor: text;
 }
+/* Placing images: a plain pointer on the page, a hand to move on an image, arrows on its corners. */
+.tool-pdf-toolkit .viewer-body[data-tool="place"] .overlay {
+  cursor: default;
+}
+.tool-pdf-toolkit .viewer-body[data-tool="place"] .mark-image image {
+  cursor: move;
+}
+.tool-pdf-toolkit .mark-image .outline {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.5px;
+}
+/* A handle is a dot of a line with square ends, the same size at any zoom. */
+.tool-pdf-toolkit .mark-image .handle {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 9px;
+  stroke-linecap: square;
+  vector-effect: non-scaling-stroke;
+}
+.tool-pdf-toolkit .mark-image .handle-nw,
+.tool-pdf-toolkit .mark-image .handle-se {
+  cursor: nwse-resize;
+}
+.tool-pdf-toolkit .mark-image .handle-ne,
+.tool-pdf-toolkit .mark-image .handle-sw {
+  cursor: nesw-resize;
+}
 
 /* Typing on a page: no box, only the text, where the text box will set it. */
 .tool-pdf-toolkit .writing {

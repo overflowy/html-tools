@@ -22,6 +22,7 @@ import {
 import type { Progress } from "../engines";
 import type { OpName, OpOptions } from "../ops";
 import type { OutFile } from "../pdf/doc";
+import type { Point } from "../pdf/geometry";
 import type { Quad } from "../pdf/text";
 import type { OpenResult, Original, PageSize, RunResult } from "../worker";
 import { CANCELLED, PdfWorker } from "../worker-client";
@@ -175,6 +176,9 @@ export class Toolkit {
   private takenOver: HTMLElement | null = null;
   private panelMarks: ((page: number) => Mark[]) | null = null;
   private onGesture: ((g: Gesture) => void) | null = null;
+  private dropTaker:
+    | ((page: number, at: Point, files: File[]) => boolean)
+    | null = null;
   private hits: { page: number; quads: Quad[] }[] = [];
   private hitAt = -1;
   private dragDepth = 0;
@@ -1134,6 +1138,9 @@ export class Toolkit {
         this.cancelHooks.add(hook);
         return () => this.cancelHooks.delete(hook);
       },
+      onDrop: (take) => {
+        this.dropTaker = take;
+      },
       onPagesChanged: (hook) => {
         this.pagesHooks.add(hook);
       },
@@ -1249,6 +1256,7 @@ export class Toolkit {
     this.viewer.setTool(null);
     this.onGesture = null;
     this.panelMarks = null;
+    this.dropTaker = null;
     if (this.result) {
       this.showResult(null);
     }
@@ -1601,12 +1609,19 @@ export class Toolkit {
       e.preventDefault();
       this.dragDepth = 0;
       this.root.classList.remove("dragging");
+      // Where it landed, read now: the event is spent once the files are read.
+      const spot =
+        this.dropTaker && this.showing === "workspace"
+          ? this.viewer.pointAt(e.clientX, e.clientY)
+          : null;
       const { items } = await readDrop(e.dataTransfer);
+      const files = items.flatMap((i) => (i.file ? [i.file] : []));
+      // A panel may take what lands on a page (Annotate places an image there).
+      if (spot && this.dropTaker?.(spot.page, spot.at, files)) {
+        return;
+      }
       // Dropped onto a document, files join it; onto nothing, they start one.
-      void this.openFiles(
-        items.flatMap((i) => (i.file ? [i.file] : [])),
-        this.pages.length > 0
-      );
+      void this.openFiles(files, this.pages.length > 0);
     });
   }
 

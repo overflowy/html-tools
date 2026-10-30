@@ -4,6 +4,7 @@
 
 import ICON_ELLIPSE from "lucide-static/icons/ellipse.svg";
 import ICON_HIGHLIGHT from "lucide-static/icons/highlighter.svg";
+import ICON_IMAGE from "lucide-static/icons/image.svg";
 import ICON_SQUIGGLE from "lucide-static/icons/line-squiggle.svg";
 import ICON_ARROW from "lucide-static/icons/move-up-right.svg";
 import ICON_DRAW from "lucide-static/icons/pencil.svg";
@@ -36,6 +37,7 @@ import {
 } from "../dom";
 import { Form } from "../form";
 import type { Field, Values } from "../form";
+import { isImageFile, mupdfImage } from "../intake";
 import { resultFoot, runner, transformPanel } from "../panel-kit";
 import type { Gesture, Mark } from "../viewer";
 
@@ -123,7 +125,7 @@ interface AnnotTool {
   label: string;
   icon: string;
   /** How it is drawn on the page. */
-  draw: "text" | "point" | "ink" | "rect" | "line" | "write";
+  draw: "text" | "point" | "ink" | "rect" | "line" | "write" | "place";
 }
 
 /** The tools, in the groups the toolbar shows them in. */
@@ -153,6 +155,7 @@ const TOOL_GROUPS: AnnotTool[][] = [
     { draw: "write", icon: ICON_TEXT, kind: "text", label: "Text" },
     { draw: "point", icon: ICON_NOTE, kind: "note", label: "Note" },
     { draw: "ink", icon: ICON_DRAW, kind: "ink", label: "Draw" },
+    { draw: "place", icon: ICON_IMAGE, kind: "image", label: "Image" },
   ],
   [
     { draw: "rect", icon: ICON_RECT, kind: "rect", label: "Rectangle" },
@@ -247,7 +250,12 @@ const annotToolbar = (controls: HTMLElement) => {
 
 /** How annotations look, set in the toolbar: each shown for the tools it applies to. */
 const STYLE_FIELDS: Field[] = [
-  { key: "color", kind: "color", label: "Colour" },
+  {
+    key: "color",
+    kind: "color",
+    label: "Colour",
+    show: (v) => v.tool !== "image",
+  },
   {
     format: (v) => `${Math.round(v * 100)}%`,
     key: "opacity",
@@ -289,6 +297,92 @@ const DEFAULT_COLORS: Partial<Record<AnnotKind, string>> = {
   strikeout: "#d62828",
   text: "#1d3557",
   underline: "#2a9d8f",
+};
+
+/** Points per CSS pixel: an image is put at the size the browser shows it at 100%. */
+const PT_PER_PX = 72 / 96;
+/** The most of a page an image takes when it is put down: it can be made bigger after. */
+const IMAGE_SHARE = 0.5;
+/** The smallest side an image can be made, in points. */
+const IMAGE_MIN = 8;
+/** How far the pointer may move and still have clicked, in points. */
+const CLICK_SLOP = 3;
+const IMAGE_HELP =
+  "Drop an image on a page, or click a page to choose one. Drag it to move it, and a corner to size it; Delete removes it.";
+
+const clamp = (v: number, lo: number, hi: number) =>
+  Math.min(Math.max(v, lo), Math.max(lo, hi));
+
+/** The box an image of `w`×`h` pixels takes, centred on `at` and kept on a page of `size`. */
+const imageBox = (
+  w: number,
+  h: number,
+  at: Point,
+  size: { w: number; h: number }
+): Rect => {
+  const k = Math.min(
+    PT_PER_PX,
+    (size.w * IMAGE_SHARE) / w,
+    (size.h * IMAGE_SHARE) / h
+  );
+  const [bw, bh] = [w * k, h * k];
+  const x = clamp(at[0] - bw / 2, 0, size.w - bw);
+  const y = clamp(at[1] - bh / 2, 0, size.h - bh);
+  return [x, y, x + bw, y + bh];
+};
+
+/** `start` moved by a drag from `from` to `to`, kept on the page. */
+const movedBox = (
+  start: Rect,
+  from: Point,
+  to: Point,
+  size: { w: number; h: number }
+): Rect => {
+  const [w, h] = [start[2] - start[0], start[3] - start[1]];
+  const x = clamp(start[0] + to[0] - from[0], 0, size.w - w);
+  const y = clamp(start[1] + to[1] - from[1], 0, size.h - h);
+  return [x, y, x + w, y + h];
+};
+
+/**
+ * `start` sized by dragging its `corner` to `to`: the opposite corner stays,
+ * the proportions hold, and it stays on the page.
+ */
+const sizedBox = (
+  start: Rect,
+  corner: string,
+  to: Point,
+  size: { w: number; h: number }
+): Rect => {
+  const east = corner.endsWith("e");
+  const south = corner.startsWith("s");
+  const ax = east ? start[0] : start[2];
+  const ay = south ? start[1] : start[3];
+  const [sw, sh] = [start[2] - start[0], start[3] - start[1]];
+  const wanted = Math.max(
+    ((to[0] - ax) * (east ? 1 : -1)) / sw,
+    ((to[1] - ay) * (south ? 1 : -1)) / sh
+  );
+  const room = Math.min(
+    (east ? size.w - ax : ax) / sw,
+    (south ? size.h - ay : ay) / sh
+  );
+  const k = clamp(wanted, IMAGE_MIN / Math.min(sw, sh), room);
+  const [w, h] = [sw * k, sh * k];
+  return [
+    east ? ax : ax - w,
+    south ? ay : ay - h,
+    east ? ax + w : ax,
+    south ? ay + h : ay,
+  ];
+};
+
+/** An image's size in pixels, as the browser decodes it; one without a size of its own (an SVG) is taken as 1024 square. */
+const pixelSize = async (url: string): Promise<{ w: number; h: number }> => {
+  const img = new Image();
+  img.src = url;
+  await img.decode();
+  return { h: img.naturalHeight || 1024, w: img.naturalWidth || 1024 };
 };
 
 /** Whether `p` falls on the icon of a note put at `rect`. */
@@ -364,6 +458,16 @@ const annotate: PanelDef = {
     /** Bumped when what was being typed no longer has a place: the document changed, or the panel closed. */
     let generation = 0;
     const list = el("ul", { class: "annots" });
+    /** What the overlay shows of each image added, and the name its marks go by. */
+    const images = new Map<NewAnnot, { id: string; href: string }>();
+    let imageSeq = 0;
+    /** The image the handles are on, while the Image tool is chosen. */
+    let selected: NewAnnot | null = null;
+    /** Where an image chosen from the picker goes: where the page was clicked. */
+    let pickedAt: { page: number; at: Point } | null = null;
+    const picker = el("input", {
+      attrs: { accept: "image/*", hidden: "", type: "file" },
+    });
     const form = new Form(STYLE_FIELDS, values, () => api.persist());
     const look = () => ({
       color: String(values.color),
@@ -408,10 +512,11 @@ const annotate: PanelDef = {
     const renderList = () => {
       list.replaceChildren();
       for (const [i, a] of added.entries()) {
+        const href = images.get(a)?.href;
         list.append(
           listItem(
             { "data-added": String(i) },
-            a.color,
+            href ? `center / cover no-repeat url("${href}")` : a.color,
             `${KIND_NAMES[a.kind] ?? a.kind}, page ${a.page + 1}${a.text ? `: ${a.text}` : ""}`,
             listButton("Remove", ICON_X)
           )
@@ -451,6 +556,160 @@ const annotate: PanelDef = {
       added.push({ ...a, ...style });
       changed();
     };
+    /** An image added no longer: its preview goes with it. */
+    const forget = (a: NewAnnot | undefined) => {
+      const shown = a ? images.get(a) : undefined;
+      if (a && shown) {
+        URL.revokeObjectURL(shown.href);
+        images.delete(a);
+      }
+      if (a === selected) {
+        selected = null;
+      }
+    };
+    const forgetAll = () => {
+      for (const a of images.keys()) {
+        forget(a);
+      }
+    };
+    const pageSize = (page: number) => api.sizes()[page] ?? { h: 842, w: 595 };
+    /** Put an image on `page` centred on `at`, and select it to be moved and sized. */
+    const placeImage = async (file: File, page: number, at: Point) => {
+      const mine = generation;
+      const href = URL.createObjectURL(file);
+      try {
+        const [image, px] = await Promise.all([
+          mupdfImage(file),
+          pixelSize(href),
+        ]);
+        if (mine !== generation) {
+          URL.revokeObjectURL(href);
+          return;
+        }
+        const a: NewAnnot = {
+          color: "",
+          image,
+          kind: "image",
+          opacity: Number(values.opacity),
+          page,
+          rect: imageBox(px.w, px.h, at, pageSize(page)),
+        };
+        imageSeq += 1;
+        images.set(a, { href, id: `image${imageSeq}` });
+        added.push(a);
+        selected = a;
+        changed();
+      } catch {
+        URL.revokeObjectURL(href);
+        api.error(
+          `${file.name} could not be shown here: open it as PNG or JPEG instead.`
+        );
+      }
+    };
+    /** Images dropped on a page while the Image tool is chosen go there, one a little below the other. */
+    const takeDrop = (page: number, at: Point, files: File[]): boolean => {
+      if (
+        values.tool !== "image" ||
+        !files.length ||
+        !files.every(isImageFile)
+      ) {
+        return false;
+      }
+      const step = 16;
+      for (const [i, file] of files.entries()) {
+        void placeImage(file, page, [at[0] + i * step, at[1] + i * step]);
+      }
+      return true;
+    };
+    picker.addEventListener("change", () => {
+      const [file] = picker.files ?? [];
+      picker.value = "";
+      if (file && pickedAt) {
+        void placeImage(file, pickedAt.page, pickedAt.at);
+      }
+    });
+    /** A drag with the Image tool: on an image it moves it, on a corner it sizes it; a click away lets go of it, or puts a new one there. */
+    let grab: { annot: NewAnnot | null; part: string; start: Rect } | null =
+      null;
+    const placeGesture = (g: Gesture) => {
+      if (!grab) {
+        const [id, part = ""] = (g.hit ?? "").split(":");
+        const annot =
+          [...images].find(([, shown]) => shown.id === id)?.[0] ?? null;
+        grab = { annot, part, start: annot?.rect ?? [0, 0, 0, 0] };
+        if (annot && annot !== selected) {
+          selected = annot;
+          api.redrawMarks();
+        }
+      }
+      const { annot, part, start } = grab;
+      if (g.done) {
+        grab = null;
+      }
+      if (!annot) {
+        const click =
+          Math.hypot(g.to[0] - g.from[0], g.to[1] - g.from[1]) < CLICK_SLOP;
+        if (!(g.done && click)) {
+          return;
+        }
+        if (selected) {
+          selected = null;
+          api.redrawMarks();
+        } else {
+          pickedAt = { at: g.to, page: g.page };
+          picker.click();
+        }
+        return;
+      }
+      const size = pageSize(annot.page);
+      annot.rect =
+        part === "move"
+          ? movedBox(start, g.from, g.to, size)
+          : sizedBox(start, part, g.to, size);
+      if (g.done) {
+        changed();
+      } else {
+        api.redrawMarks(annot.page);
+      }
+    };
+    /** Keys for the image selected: Delete removes it, Escape lets go, the arrows move it a point (ten with Shift). */
+    const imageKeys = (e: KeyboardEvent) => {
+      const typing =
+        e.target instanceof Element &&
+        e.target.closest("input, textarea, select") !== null;
+      if (!selected?.rect || values.tool !== "image" || typing) {
+        return;
+      }
+      const step = e.shiftKey ? 10 : 1;
+      const nudge: Record<string, Point> = {
+        ArrowDown: [0, step],
+        ArrowLeft: [-step, 0],
+        ArrowRight: [step, 0],
+        ArrowUp: [0, -step],
+      };
+      const by = nudge[e.key];
+      if (e.key === "Delete" || e.key === "Backspace") {
+        const at = added.indexOf(selected);
+        forget(added.splice(at, 1)[0]);
+        changed();
+      } else if (e.key === "Escape") {
+        selected = null;
+        api.redrawMarks();
+      } else if (by) {
+        selected.rect = movedBox(
+          selected.rect,
+          [0, 0],
+          by,
+          pageSize(selected.page)
+        );
+        changed();
+      } else {
+        return;
+      }
+      e.preventDefault();
+      e.stopPropagation();
+    };
+    document.addEventListener("keydown", imageKeys, true);
     /** Counts the text selections asked of the worker: only the latest is shown while dragging. */
     let selections = 0;
     /** Mark up the text a drag goes across: shown while it goes on, added when it ends. */
@@ -598,6 +857,10 @@ const annotate: PanelDef = {
     };
     const gesture = (g: Gesture) => {
       const tool = toolFor(values.tool).draw;
+      if (tool === "place") {
+        placeGesture(g);
+        return;
+      }
       if (tool === "text" && g.done) {
         markTextSoon.cancel();
         void markText(g, styleNow());
@@ -635,10 +898,24 @@ const annotate: PanelDef = {
         api.redrawMarks(g.page);
       }
     };
+    /** An image as the overlay shows it, with handles while it is the one selected. */
+    const imageMark = (a: NewAnnot): Mark | null => {
+      const shown = images.get(a);
+      return shown && a.rect
+        ? {
+            href: shown.href,
+            id: shown.id,
+            kind: "image",
+            opacity: a.opacity,
+            rect: a.rect,
+            selected: a === selected && values.tool === "image",
+          }
+        : null;
+    };
     api.setMarks((page) => {
       const marks = added
         .filter((a) => a.page === page)
-        .map(markOf)
+        .map((a) => (a.kind === "image" ? imageMark(a) : markOf(a)))
         .filter((m): m is Mark => m !== null);
       for (const a of existing) {
         if (a.page === page && removed.has(`${a.page}:${a.index}`)) {
@@ -656,8 +933,13 @@ const annotate: PanelDef = {
       return marks;
     });
     const toolbar = annotToolbar(form.root);
+    // The Image tool's file picker, hidden, with the tools.
+    toolbar.root.append(picker);
     const setTool = (kind: string) => {
       values.tool = kind;
+      if (kind !== "image") {
+        selected = null;
+      }
       const color = DEFAULT_COLORS[kind as AnnotKind];
       if (color) {
         form.set("color", color);
@@ -667,7 +949,13 @@ const annotate: PanelDef = {
       form.refresh();
       api.persist();
     };
-    toolbar.onChoose(setTool);
+    toolbar.onChoose((kind) => {
+      setTool(kind);
+      if (kind === "image") {
+        api.note(IMAGE_HELP);
+      }
+    });
+    api.onDrop(takeDrop);
     const load = async () => {
       const r = await api.run("annotations", {}, "Reading annotations", {
         quiet: true,
@@ -683,7 +971,7 @@ const annotate: PanelDef = {
         return;
       }
       if (li.dataset.added !== undefined) {
-        added.splice(Number(li.dataset.added), 1);
+        forget(added.splice(Number(li.dataset.added), 1)[0]);
       } else if (li.dataset.existing) {
         const id = li.dataset.existing;
         if (removed.has(id)) {
@@ -707,12 +995,17 @@ const annotate: PanelDef = {
         markTextSoon.cancel();
         generation += 1;
         live = null;
+        grab = null;
+        document.removeEventListener("keydown", imageKeys, true);
+        forgetAll();
         api.setTool(null);
         api.setMarks(null);
       },
       docChanged: () => {
         generation += 1;
         live = null;
+        grab = null;
+        forgetAll();
         added.length = 0;
         void load();
       },
@@ -720,7 +1013,7 @@ const annotate: PanelDef = {
   },
   name: "Annotate",
   summary:
-    "Mark up the pages with the tools above them: highlight text, write on the page, leave a note, draw, box, or point. They stay annotations any PDF reader can edit.",
+    "Mark up the pages with the tools above them: highlight text, write on the page, leave a note, draw, place an image, box, or point. They stay annotations any PDF reader can edit.",
 };
 
 /* ---------------- fill form ---------------- */

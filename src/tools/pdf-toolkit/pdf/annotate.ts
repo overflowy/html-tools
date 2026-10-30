@@ -1,9 +1,9 @@
 // Annotations: the markup a reader adds on top of a page (highlights,
-// notes, drawings, text boxes, shapes), listed, added, and removed. They stay
+// notes, drawings, text boxes, shapes, images), listed, added, and removed. They stay
 // annotations, editable in any PDF reader; Flatten makes them page content.
 // Coordinates are display space, which is what MuPDF's annotation API takes.
 
-import type { Font, PDFAnnotation, PDFDocument, PDFPage } from "mupdf";
+import type { Font, Image, PDFAnnotation, PDFDocument, PDFPage } from "mupdf";
 
 import { parseColor } from "./compose";
 import { openPdf, savePdf } from "./doc";
@@ -13,7 +13,13 @@ import type { Quad } from "./text";
 
 export type MarkupKind = "highlight" | "underline" | "strikeout" | "squiggly";
 export type ShapeKind = "rect" | "ellipse" | "line" | "arrow";
-export type AnnotKind = MarkupKind | ShapeKind | "note" | "ink" | "text";
+export type AnnotKind =
+  | MarkupKind
+  | ShapeKind
+  | "note"
+  | "ink"
+  | "text"
+  | "image";
 
 export interface NewAnnot {
   page: number;
@@ -23,8 +29,10 @@ export interface NewAnnot {
   opacity: number;
   /** Text markup: the quads of the text it covers. */
   quads?: Quad[];
-  /** Notes (top left corner), rectangles, ellipses. */
+  /** Notes (top left corner), rectangles, ellipses, images (the box the image fills). */
   rect?: Rect;
+  /** An image's file, in a format MuPDF reads (PNG, JPEG, and the like). */
+  image?: Uint8Array;
   /** A text box: where its text starts, top left. Its box is made to fit the text. */
   at?: Point;
   /** Freehand strokes. */
@@ -90,6 +98,7 @@ const MUPDF_TYPE = {
   arrow: "Line",
   ellipse: "Circle",
   highlight: "Highlight",
+  image: "Stamp",
   ink: "Ink",
   line: "Line",
   note: "Text",
@@ -166,10 +175,23 @@ const border = (annot: PDFAnnotation, a: NewAnnot) => {
   }
 };
 
-const create = (page: PDFPage, a: NewAnnot, font: Font) => {
+const create = (
+  page: PDFPage,
+  a: NewAnnot,
+  font: Font,
+  imageOf: (bytes: Uint8Array) => Image
+) => {
   const annot = page.createAnnotation(MUPDF_TYPE[a.kind]);
   const color = parseColor(a.color);
-  if (a.kind === "text") {
+  if (a.kind === "image") {
+    // A stamp whose appearance is the image, filling its box; it has no colour of its own.
+    if (a.rect) {
+      annot.setRect(a.rect);
+    }
+    if (a.image) {
+      annot.setStampImage(imageOf(a.image));
+    }
+  } else if (a.kind === "text") {
     // A text box's colour is its text's; the box itself stays clear.
     annot.setDefaultAppearance("Helv", a.fontSize ?? 12, color);
   } else {
@@ -179,7 +201,9 @@ const create = (page: PDFPage, a: NewAnnot, font: Font) => {
   if (a.quads?.length) {
     annot.setQuadPoints(a.quads);
   }
-  place(annot, a, font);
+  if (a.kind !== "image") {
+    place(annot, a, font);
+  }
   if (a.ink?.length) {
     annot.setInkList(a.ink);
   }
@@ -220,9 +244,10 @@ export const annotate = (
         page.deleteAnnotation(target);
       }
     }
+    const imageOf = (data: Uint8Array) => new env.mupdf.Image(data);
     for (const a of o.add) {
       if (a.page >= 0 && a.page < doc.countPages()) {
-        create(doc.loadPage(a.page), a, font);
+        create(doc.loadPage(a.page), a, font, imageOf);
       }
     }
     return savePdf(env, doc);

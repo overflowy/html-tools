@@ -41,10 +41,14 @@ const MUPDF_IMAGES = new Set([
 
 export type FileKind = "pdf" | "image" | "convertible" | "other";
 
+/** Whether a file is an image, by its type or its name. */
+export const isImageFile = (file: File): boolean =>
+  IMAGE_EXT.has(extension(file.name)) || file.type.startsWith("image/");
+
 /** What a file is, by its first bytes, its type, and its name. */
 export const kindOf = async (file: File): Promise<FileKind> => {
   const ext = extension(file.name);
-  if (IMAGE_EXT.has(ext) || file.type.startsWith("image/")) {
+  if (isImageFile(file)) {
     return "image";
   }
   const head = new Uint8Array(await file.slice(0, 1024).arrayBuffer());

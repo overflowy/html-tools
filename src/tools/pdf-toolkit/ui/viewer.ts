@@ -85,10 +85,30 @@ export type Mark =
       size: number;
       color: string;
       opacity: number;
+    }
+  /**
+   * An image filling `rect`. Selected, it has an outline and a handle at
+   * each corner; the image and its handles name themselves to a drag that
+   * starts on them as `${id}:move` and `${id}:nw` (ne, sw, se).
+   */
+  | {
+      kind: "image";
+      id: string;
+      rect: Rect;
+      href: string;
+      opacity: number;
+      selected: boolean;
     };
 
-/** How the pointer draws: a box, across text, freehand, a line, a click, or a click to type at. */
-export type DrawTool = "rect" | "text" | "ink" | "line" | "point" | "write";
+/** How the pointer draws: a box, across text, freehand, a line, a click, a click to type at, or a drag that moves what it starts on. */
+export type DrawTool =
+  | "rect"
+  | "text"
+  | "ink"
+  | "line"
+  | "point"
+  | "write"
+  | "place";
 
 export interface Gesture {
   /** Position of the page in the list shown. */
@@ -99,6 +119,8 @@ export interface Gesture {
   /** Every point of a stroke. */
   points: Point[];
   done: boolean;
+  /** What the drag started on, if a mark names it (see the image mark). */
+  hit: string | null;
 }
 
 export interface ViewerHost {
@@ -180,7 +202,7 @@ const cssBaseline = (): number => {
 };
 
 /** A pointer position as a point of the page, in display space. */
-const toPage = (s: Slot, e: PointerEvent): Point => {
+const toPage = (s: Slot, e: { clientX: number; clientY: number }): Point => {
   const box = (s.svg ?? s.canvas).getBoundingClientRect();
   const x = ((e.clientX - box.left) / box.width) * s.page.w;
   const y = ((e.clientY - box.top) / box.height) * s.page.h;
@@ -393,6 +415,53 @@ const writtenNode = (m: MarkOf<"written">) => {
   return g;
 };
 
+const IMAGE_CORNERS = ["nw", "ne", "sw", "se"] as const;
+
+/** An image as it will be stamped on the page and, selected, the handles that move and size it. */
+const imageNode = (m: MarkOf<"image">) => {
+  const [x0, y0, x1, y1] = m.rect;
+  const g = svgEl("g", {
+    class: `mark mark-image${m.selected ? " selected" : ""}`,
+  });
+  g.append(
+    svgEl("image", {
+      "data-hit": `${m.id}:move`,
+      height: y1 - y0,
+      href: m.href,
+      opacity: m.opacity,
+      preserveAspectRatio: "none",
+      width: x1 - x0,
+      x: x0,
+      y: y0,
+    })
+  );
+  if (!m.selected) {
+    return g;
+  }
+  g.append(
+    svgEl("rect", {
+      class: "outline",
+      height: y1 - y0,
+      width: x1 - x0,
+      x: x0,
+      y: y0,
+    })
+  );
+  for (const corner of IMAGE_CORNERS) {
+    const x = corner.endsWith("w") ? x0 : x1;
+    const y = corner.startsWith("n") ? y0 : y1;
+    // A dot of a line with square ends: the same few pixels at any zoom.
+    g.append(
+      svgEl("path", {
+        class: `handle handle-${corner}`,
+        d: `M${x} ${y}h0`,
+        "data-hit": `${m.id}:${corner}`,
+      })
+    );
+  }
+  return g;
+};
+
 /** A note's icon as MuPDF draws "Comment": a square in its colour, outlined, with a speech bubble in it. */
 const noteNode = (m: MarkOf<"note">) => {
   const [x, y] = m.at;
@@ -443,6 +512,9 @@ const markNode = (m: Mark): SVGElement => {
     }
     case "written": {
       return writtenNode(m);
+    }
+    case "image": {
+      return imageNode(m);
     }
     default: {
       return noteNode(m);
@@ -1241,7 +1313,8 @@ export class Viewer {
     if (!svg) {
       return;
     }
-    let drag: { from: Point; points: Point[] } | null = null;
+    let drag: { from: Point; points: Point[]; hit: string | null } | null =
+      null;
     const emit = (to: Point, done: boolean) => {
       if (!drag || !this.tool) {
         return;
@@ -1249,6 +1322,7 @@ export class Viewer {
       this.host.gesture({
         done,
         from: drag.from,
+        hit: drag.hit,
         page: s.at,
         points: drag.points,
         to,
@@ -1267,7 +1341,15 @@ export class Viewer {
       }
       svg.setPointerCapture(e.pointerId);
       const p = toPage(s, e);
-      drag = { from: p, points: [p] };
+      const on =
+        e.target instanceof Element
+          ? e.target.closest<SVGElement>("[data-hit]")
+          : null;
+      drag = {
+        from: p,
+        hit: on?.dataset.hit ?? null,
+        points: [p],
+      };
       if (this.tool === "point" || this.tool === "write") {
         emit(p, true);
         drag = null;
@@ -1308,6 +1390,28 @@ export class Viewer {
       const blended = m.kind === "markup" && m.markup === "highlight";
       (blended ? blend : svg).append(markNode(m));
     }
+  }
+
+  /** The page under a point of the window, and where on it, in the Pages view: where a file dropped there lands. */
+  pointAt(
+    clientX: number,
+    clientY: number
+  ): { page: number; at: Point } | null {
+    if (this.mode !== "pages") {
+      return null;
+    }
+    for (const s of this.slots) {
+      const box = (s.svg ?? s.canvas).getBoundingClientRect();
+      const inside =
+        clientX >= box.left &&
+        clientX <= box.right &&
+        clientY >= box.top &&
+        clientY <= box.bottom;
+      if (inside) {
+        return { at: toPage(s, { clientX, clientY }), page: s.at };
+      }
+    }
+    return null;
   }
 
   /** Redraw one page's overlay: a drag in progress, or a hit moved. */

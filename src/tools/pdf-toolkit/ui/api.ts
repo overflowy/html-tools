@@ -89,6 +89,13 @@ export interface Api {
     style: { color: string; text: string }
   ) => Promise<string>;
   setMarks: (fn: ((page: number) => Mark[]) | null) => void;
+  /**
+   * Take files dropped on a page in the Pages view (null to stop): `take`
+   * answers whether it took them; if not, they open as any drop does.
+   */
+  onDrop: (
+    take: ((page: number, at: Point, files: File[]) => boolean) | null
+  ) => void;
   redrawMarks: (page?: number) => void;
   view: (mode: "grid" | "pages") => void;
   goTo: (page: number, y?: number) => void;
