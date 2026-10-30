@@ -33,7 +33,13 @@ const INDENT = "  ";
 type View = "edit" | "split" | "preview";
 type EngineKind = "math" | "diagrams";
 
-const isMac = /Mac|iPhone|iPad/.test(navigator.platform || "");
+// Extensions compare case-insensitively in ASCII only. The u flag would make
+// an i flag fold the Kelvin sign to k, so letters are lowercased by hand.
+const MARKDOWN_EXT_RE = /\.(?:md|markdown|mdown|mkd|txt)$/u;
+const asciiLower = (s: string) =>
+  s.replaceAll(/[A-Z]/gu, (c) => c.toLowerCase());
+
+const isMac = /Mac|iPhone|iPad/u.test(navigator.platform || "");
 const MOD = isMac ? "⌘" : "Ctrl+";
 
 // The File System Access API, which TypeScript's DOM library does not declare.
@@ -55,15 +61,15 @@ interface HandleItem extends DataTransferItem {
   getAsFileSystemHandle?: () => Promise<{ kind: string } & FileHandle>;
 }
 
-function read(key: string): string | null {
+const read = (key: string): string | null => {
   try {
     return localStorage.getItem(key);
   } catch {
     return null;
   }
-}
+};
 
-function write(key: string, value: string | null) {
+const write = (key: string, value: string | null) => {
   try {
     if (value === null) {
       localStorage.removeItem(key);
@@ -73,9 +79,9 @@ function write(key: string, value: string | null) {
   } catch {
     // storage unavailable: the visit still works
   }
-}
+};
 
-function saveBlob(blob: Blob, name: string) {
+const saveBlob = (blob: Blob, name: string) => {
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
   a.download = name;
@@ -83,12 +89,10 @@ function saveBlob(blob: Blob, name: string) {
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 2000);
-}
+};
 
 const tool: Tool = {
   id: "markdown-editor",
-  name: "Markdown Editor",
-  subtitle: "Edit Markdown beside a live preview, with math and diagrams.",
   keywords: [
     "markdown",
     "md",
@@ -156,8 +160,13 @@ const tool: Tool = {
       </div>
       <input type="file" class="file-input" accept="${ACCEPT}" hidden>`;
 
-    const $ = <T extends HTMLElement = HTMLElement>(sel: string) =>
-      el.querySelector(sel) as T;
+    const $ = <T extends HTMLElement = HTMLElement>(sel: string): T => {
+      const found = el.querySelector<T>(sel);
+      if (!found) {
+        throw new Error(`Markdown Editor markup has no ${sel}`);
+      }
+      return found;
+    };
     const editor = $<HTMLTextAreaElement>(".editor");
     const marks = $(".editor-marks");
     const doc = $(".doc");
@@ -186,13 +195,13 @@ const tool: Tool = {
     let pendingDiagrams: Promise<void> = Promise.resolve();
     const engines: Record<EngineKind, "idle" | "loading" | "ready" | "failed"> =
       {
-        math: "idle",
         diagrams: "idle",
+        math: "idle",
       };
 
     /* ---- status and stats ---- */
 
-    function setStatus(msg: string, sticky = false) {
+    const setStatus = (msg: string, sticky = false) => {
       statusEl.textContent = msg;
       clearTimeout(statusTimer);
       if (!sticky) {
@@ -201,71 +210,20 @@ const tool: Tool = {
           4000
         );
       }
-    }
+    };
 
-    function updateStats() {
+    const updateStats = () => {
       const text = editor.value;
-      const words = (text.trim().match(/\S+/g) ?? []).length;
+      const words = (text.trim().match(/\S+/gu) ?? []).length;
       $(".stat-words").textContent = `${words} word${words === 1 ? "" : "s"}`;
       $(".stat-chars").textContent = `${text.length} chars`;
       const lines = text.length ? text.split("\n").length : 1;
       $(".stat-lines").textContent = `${lines} line${lines === 1 ? "" : "s"}`;
-    }
-
-    /* ---- Engines: fetched the first time a Draft needs one ---- */
-
-    function ensureEngine(kind: EngineKind) {
-      if (engines[kind] !== "idle") {
-        return;
-      }
-      engines[kind] = "loading";
-      const label = kind === "math" ? "math typesetter" : "diagram renderer";
-      // Quietly: the document reads fine meanwhile, and the result speaks for itself.
-      (kind === "math" ? loadMath() : loadDiagrams()).then(
-        () => {
-          engines[kind] = "ready";
-          render();
-        },
-        (error: unknown) => {
-          engines[kind] = "failed";
-          setStatus(
-            `Could not load the ${label}: ${
-              error instanceof Error ? error.message : String(error)
-            }`
-          );
-        }
-      );
-    }
-
-    /* ---- rendering ---- */
-
-    function render() {
-      const res = renderMarkdown(editor.value, doc, { light });
-      pendingDiagrams = res.diagrams;
-      tocHeadings = headings(doc);
-      buildToc();
-      updateStats();
-      spy();
-      if (res.needsMath) {
-        ensureEngine("math");
-      }
-      if (res.needsDiagrams) {
-        ensureEngine("diagrams");
-      }
-      // Publishing before the Shell has delivered the Deep Link's payload would replace it with the draft's.
-      if (booted) {
-        publishState();
-      }
-    }
-
-    function scheduleRender() {
-      clearTimeout(renderTimer);
-      renderTimer = window.setTimeout(render, 120);
-    }
+    };
 
     /* ---- Draft and Deep Link ---- */
 
-    function saveDraft() {
+    const saveDraft = () => {
       clearTimeout(draftTimer);
       draftTimer = window.setTimeout(() => {
         write(
@@ -273,9 +231,9 @@ const tool: Tool = {
           JSON.stringify({ name: filenameEl.value, text: editor.value })
         );
       }, 400);
-    }
+    };
 
-    function loadDraft(): boolean {
+    const loadDraft = (): boolean => {
       try {
         const raw = read(DRAFT_KEY);
         if (!raw) {
@@ -291,10 +249,10 @@ const tool: Tool = {
       } catch {
         return false;
       }
-    }
+    };
 
     /** State layout: `<encoded filename>.<compressed text>`; the compressed part never contains a dot. */
-    function publishState() {
+    const publishState = () => {
       const text = editor.value;
       if (!text.trim()) {
         ctx.setState("");
@@ -311,7 +269,330 @@ const tool: Tool = {
       ctx.setState(
         fits ? `${encodeURIComponent(filenameEl.value)}.${packed}` : ""
       );
+    };
+
+    /* ---- Contents ---- */
+
+    const isDrawer = () => el.classList.contains("toc-drawer");
+
+    const buildToc = () => {
+      let html = '<div class="toc-title">Contents</div>';
+      for (const h of tocHeadings) {
+        html += `<button type="button" class="toc-link d${h.level}" data-id="${
+          h.id
+        }" title="${escapeHtml(h.text)}">${escapeHtml(h.text)}</button>`;
+      }
+      if (!tocHeadings.length) {
+        html += '<div class="toc-empty">No headings yet</div>';
+      }
+      tocEl.innerHTML = html;
+    };
+
+    const setToc = (on: boolean) => {
+      tocOpen = on;
+      el.classList.toggle("toc-open", on);
+      tocBtn.classList.toggle("toggled", on);
+      tocBtn.setAttribute("aria-pressed", String(on));
+    };
+
+    tocBtn.addEventListener("click", () => {
+      setToc(!tocOpen);
+      write(TOC_KEY, tocOpen ? "1" : "0");
+    });
+    $(".toc-backdrop").addEventListener("click", () => setToc(false));
+
+    const scrollDocTo = (target: HTMLElement, offset: number) => {
+      // In a stacked Split the preview pane may itself be scrolled out of sight.
+      if (isDrawer() && view === "split") {
+        target.scrollIntoView({ block: "start" });
+      } else {
+        previewPane.scrollTop =
+          target.getBoundingClientRect().top -
+          previewPane.getBoundingClientRect().top +
+          previewPane.scrollTop -
+          offset;
+      }
+    };
+
+    tocEl.addEventListener("click", (e) => {
+      const b = (e.target as HTMLElement).closest<HTMLElement>(
+        "button[data-id]"
+      );
+      if (!b) {
+        return;
+      }
+      const { id } = b.dataset;
+      const h = id
+        ? document.querySelector<HTMLElement>(`#${CSS.escape(id)}`)
+        : null;
+      if (h) {
+        scrollDocTo(h, 20);
+      }
+      if (isDrawer()) {
+        setToc(false);
+      }
+    });
+
+    const copyCode = async (btn: HTMLButtonElement) => {
+      const text = btn.parentElement?.querySelector("pre")?.textContent ?? "";
+      let ok = false;
+      try {
+        await navigator.clipboard.writeText(text);
+        ok = true;
+      } catch {
+        // the async clipboard needs a secure context; this keeps copy working from file://
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.cssText = "position:fixed;left:-9999px;top:0";
+        document.body.append(ta);
+        ta.select();
+        try {
+          ok = document.execCommand("copy");
+        } catch {
+          ok = false;
+        }
+        ta.remove();
+      }
+      btn.textContent = ok ? "Copied" : "Failed";
+      setTimeout(() => (btn.textContent = "Copy"), 1200);
+    };
+
+    // Links within the document jump within it, without touching the Deep Link.
+    doc.addEventListener("click", (e) => {
+      const btn = (e.target as HTMLElement).closest<HTMLButtonElement>(
+        ".copy-btn"
+      );
+      if (btn) {
+        copyCode(btn);
+        return;
+      }
+      const a = (e.target as HTMLElement).closest<HTMLAnchorElement>(
+        'a[href^="#"]'
+      );
+      if (!a) {
+        return;
+      }
+      e.preventDefault();
+      const href = a.getAttribute("href");
+      if (href === null) {
+        return;
+      }
+      const target = doc.querySelector<HTMLElement>(
+        `#${CSS.escape(href.slice(1))}`
+      );
+      if (target) {
+        scrollDocTo(target, 40);
+      }
+    });
+
+    // The entry for the heading at the top of the preview is highlighted as it scrolls.
+    let spyPending = false;
+    const spy = () => {
+      if (spyPending) {
+        return;
+      }
+      spyPending = true;
+      requestAnimationFrame(() => {
+        spyPending = false;
+        const [first] = tocHeadings;
+        if (!first) {
+          return;
+        }
+        const top = previewPane.getBoundingClientRect().top + 24;
+        let current = first;
+        for (const h of tocHeadings) {
+          const node = document.querySelector(`#${CSS.escape(h.id)}`);
+          if (node && node.getBoundingClientRect().top <= top) {
+            current = h;
+          } else {
+            break;
+          }
+        }
+        const atEnd =
+          previewPane.scrollTop + previewPane.clientHeight >=
+          previewPane.scrollHeight - 2;
+        const last = tocHeadings.at(-1);
+        if (atEnd && last) {
+          current = last;
+        }
+        for (const b of tocEl.querySelectorAll<HTMLElement>(".toc-link")) {
+          const active = b.dataset.id === current.id;
+          b.classList.toggle("active", active);
+          if (active) {
+            b.scrollIntoView({ block: "nearest" });
+          }
+        }
+      });
+    };
+
+    /* ---- Engines: fetched the first time a Draft needs one ---- */
+
+    /** Fetches an Engine once, and calls `onLoad` when it arrives. */
+    const ensureEngine = async (kind: EngineKind, onLoad: () => void) => {
+      if (engines[kind] !== "idle") {
+        return;
+      }
+      engines[kind] = "loading";
+      const label = kind === "math" ? "math typesetter" : "diagram renderer";
+      // Quietly: the document reads fine meanwhile, and the result speaks for itself.
+      try {
+        await (kind === "math" ? loadMath() : loadDiagrams());
+      } catch (error) {
+        engines[kind] = "failed";
+        setStatus(
+          `Could not load the ${label}: ${
+            error instanceof Error ? error.message : String(error)
+          }`
+        );
+        return;
+      }
+      engines[kind] = "ready";
+      onLoad();
+    };
+
+    /* ---- rendering ---- */
+
+    const render = () => {
+      const res = renderMarkdown(editor.value, doc, { light });
+      pendingDiagrams = res.diagrams;
+      tocHeadings = headings(doc);
+      buildToc();
+      updateStats();
+      spy();
+      if (res.needsMath) {
+        ensureEngine("math", render);
+      }
+      if (res.needsDiagrams) {
+        ensureEngine("diagrams", render);
+      }
+      // Publishing before the Shell has delivered the Deep Link's payload would replace it with the draft's.
+      if (booted) {
+        publishState();
+      }
+    };
+
+    const scheduleRender = () => {
+      clearTimeout(renderTimer);
+      renderTimer = window.setTimeout(render, 120);
+    };
+
+    /* ---- Scroll Sync: either pane drives the other, proportionally ---- */
+
+    const expected = new Map<HTMLElement, number>();
+    const follow = (from: HTMLElement, to: HTMLElement) => {
+      const fromMax = from.scrollHeight - from.clientHeight;
+      const toMax = to.scrollHeight - to.clientHeight;
+      if (fromMax <= 0 || toMax <= 0) {
+        return;
+      }
+      const target = Math.round((from.scrollTop / fromMax) * toMax);
+      if (Math.abs(to.scrollTop - target) < 1) {
+        return;
+      }
+      // the scroll event this causes is not the user's
+      expected.set(to, target);
+      to.scrollTop = target;
+    };
+    const onScroll = (pane: HTMLElement, other: HTMLElement) => {
+      const e = expected.get(pane);
+      if (e !== undefined) {
+        expected.delete(pane);
+        if (Math.abs(pane.scrollTop - e) < 1) {
+          return;
+        }
+      }
+      if (view === "split") {
+        follow(pane, other);
+      }
+    };
+    editor.addEventListener("scroll", () => {
+      marks.scrollTop = editor.scrollTop;
+      onScroll(editor, previewPane);
+    });
+    previewPane.addEventListener("scroll", () => {
+      onScroll(previewPane, editor);
+      spy();
+    });
+
+    /* ---- View Mode ---- */
+
+    // A pane hidden with display: none forgets its scroll position, so each
+    // pane's position is kept across the modes that hide it.
+    const kept = { editor: 0, preview: 0 };
+    const setView = (mode: View) => {
+      if (view !== "preview") {
+        kept.editor = editor.scrollTop;
+      }
+      if (view !== "edit") {
+        kept.preview = previewPane.scrollTop;
+      }
+      view = mode;
+      el.dataset.view = mode;
+      for (const b of el.querySelectorAll<HTMLElement>(".seg button")) {
+        const on = b.dataset.mode === mode;
+        b.classList.toggle("active", on);
+        b.setAttribute("aria-selected", String(on));
+      }
+      if (mode !== "preview") {
+        expected.set(editor, kept.editor);
+        editor.scrollTop = kept.editor;
+        marks.scrollTop = kept.editor;
+      }
+      if (mode !== "edit") {
+        expected.set(previewPane, kept.preview);
+        previewPane.scrollTop = kept.preview;
+      }
+      spy();
+    };
+    const chooseView = (btn: HTMLElement) => {
+      setView(btn.dataset.mode as View);
+      write(VIEW_KEY, view);
+      if (view !== "preview") {
+        editor.focus();
+      }
+    };
+    for (const btn of el.querySelectorAll<HTMLElement>(".seg button")) {
+      btn.addEventListener("click", () => chooseView(btn));
     }
+
+    /* ---- Light Document ---- */
+
+    const applyLight = (on: boolean) => {
+      light = on;
+      previewPane.classList.toggle("light", on);
+      lightBtn.classList.toggle("toggled", on);
+      lightBtn.setAttribute("aria-pressed", String(on));
+      lightBtn.title = on ? "Dark document" : "Light document";
+      render();
+    };
+    lightBtn.addEventListener("click", () => {
+      applyLight(!light);
+      write(LIGHT_KEY, light ? "1" : "0");
+    });
+
+    /* ---- opening and saving ---- */
+
+    const loadContent = (
+      text: string,
+      name: string,
+      handle: FileHandle | null
+    ) => {
+      editor.value = text.replaceAll("\r\n", "\n");
+      filenameEl.value = name || DEFAULT_NAME;
+      fileHandle = handle;
+      render();
+      saveDraft();
+      editor.setSelectionRange(0, 0);
+      editor.scrollTop = 0;
+      previewPane.scrollTop = 0;
+    };
+
+    const openFromFile = async (file: File, handle: FileHandle | null) => {
+      loadContent(await file.text(), file.name, handle);
+      setStatus(
+        `Opened ${filenameEl.value}${handle ? "; Save writes back to it" : ""}`
+      );
+    };
 
     ctx.onRestore((payload) => {
       const dot = payload.lastIndexOf(".");
@@ -334,45 +615,21 @@ const tool: Tool = {
       setStatus(`Opened ${name} from the link`);
     });
 
-    /* ---- opening and saving ---- */
-
-    function loadContent(
-      text: string,
-      name: string,
-      handle: FileHandle | null
-    ) {
-      editor.value = text.replaceAll("\r\n", "\n");
-      filenameEl.value = name || DEFAULT_NAME;
-      fileHandle = handle;
-      render();
-      saveDraft();
-      editor.setSelectionRange(0, 0);
-      editor.scrollTop = 0;
-      previewPane.scrollTop = 0;
-    }
-
-    async function openFromFile(file: File, handle: FileHandle | null) {
-      loadContent(await file.text(), file.name, handle);
-      setStatus(
-        `Opened ${filenameEl.value}${handle ? "; Save writes back to it" : ""}`
-      );
-    }
-
-    async function openPicker() {
+    const openPicker = async () => {
       const w = window as unknown as PickerWindow;
       if (w.showOpenFilePicker) {
         try {
           const [handle] = await w.showOpenFilePicker({
+            excludeAcceptAllOption: false,
             types: [
               {
-                description: "Markdown",
                 accept: {
                   "text/markdown": [".md", ".markdown", ".mdown", ".mkd"],
                   "text/plain": [".txt"],
                 },
+                description: "Markdown",
               },
             ],
-            excludeAcceptAllOption: false,
           });
           if (handle) {
             await openFromFile(await handle.getFile(), handle);
@@ -383,7 +640,7 @@ const tool: Tool = {
       } else {
         fileInput.click();
       }
-    }
+    };
 
     fileInput.addEventListener("change", () => {
       const f = fileInput.files?.[0];
@@ -393,47 +650,20 @@ const tool: Tool = {
       fileInput.value = "";
     });
 
-    async function writeToHandle(handle: FileHandle) {
+    const writeToHandle = async (handle: FileHandle) => {
       const writable = await handle.createWritable();
       await writable.write(editor.value);
       await writable.close();
-    }
+    };
 
-    async function save() {
-      if (fileHandle) {
-        try {
-          if (
-            fileHandle.queryPermission &&
-            (await fileHandle.queryPermission({ mode: "readwrite" })) !==
-              "granted"
-          ) {
-            if (
-              (await fileHandle.requestPermission?.({ mode: "readwrite" })) !==
-              "granted"
-            ) {
-              throw new Error("denied");
-            }
-          }
-          await writeToHandle(fileHandle);
-          setStatus(`Saved to ${filenameEl.value}`);
-          return;
-        } catch {
-          setStatus(
-            "Could not write to the original file; choose where to save it"
-          );
-        }
-      }
-      await saveAs();
-    }
-
-    async function saveAs() {
+    const saveAs = async () => {
       const w = window as unknown as PickerWindow;
       if (w.showSaveFilePicker) {
         try {
           const handle = await w.showSaveFilePicker({
             suggestedName: filenameEl.value || DEFAULT_NAME,
             types: [
-              { description: "Markdown", accept: { "text/markdown": [".md"] } },
+              { accept: { "text/markdown": [".md"] }, description: "Markdown" },
             ],
           });
           await writeToHandle(handle);
@@ -452,30 +682,55 @@ const tool: Tool = {
         );
         setStatus(`Downloaded ${name}`);
       }
-    }
+    };
 
-    function newDoc() {
+    const save = async () => {
+      if (fileHandle) {
+        try {
+          if (
+            fileHandle.queryPermission &&
+            (await fileHandle.queryPermission({ mode: "readwrite" })) !==
+              "granted" &&
+            (await fileHandle.requestPermission?.({ mode: "readwrite" })) !==
+              "granted"
+          ) {
+            throw new Error("denied");
+          }
+          await writeToHandle(fileHandle);
+          setStatus(`Saved to ${filenameEl.value}`);
+          return;
+        } catch {
+          setStatus(
+            "Could not write to the original file; choose where to save it"
+          );
+        }
+      }
+      await saveAs();
+    };
+
+    const newDoc = () => {
       fileHandle = null;
       editor.value = "";
       filenameEl.value = DEFAULT_NAME;
       render();
       write(DRAFT_KEY, null);
       editor.focus();
-    }
+    };
 
     // New on a document that has text asks first: the button itself turns
     // into the confirmation, and a second click within a few seconds discards.
     const newBtn = $<HTMLButtonElement>(".new-btn");
     let newArmed = 0;
-    function disarmNew() {
+    const disarmNew = () => {
       clearTimeout(newArmed);
       newArmed = 0;
       newBtn.textContent = "New";
       newBtn.classList.remove("confirm");
       newBtn.title = "New document";
-    }
+    };
     newBtn.addEventListener("click", (e) => {
-      e.stopPropagation(); // the document-wide click handler would disarm it
+      // the document-wide click handler would disarm it
+      e.stopPropagation();
       if (newArmed || !editor.value.trim()) {
         disarmNew();
         newDoc();
@@ -494,11 +749,12 @@ const tool: Tool = {
 
     filenameEl.addEventListener("change", () => {
       let name = filenameEl.value.trim() || DEFAULT_NAME;
-      if (!/\.(md|markdown|mdown|mkd|txt)$/i.test(name)) {
+      if (!MARKDOWN_EXT_RE.test(asciiLower(name))) {
         name += ".md";
       }
       filenameEl.value = name;
-      fileHandle = null; // renamed: the next Save asks where to put it
+      // renamed: the next Save asks where to put it
+      fileHandle = null;
       saveDraft();
       publishState();
     });
@@ -511,7 +767,7 @@ const tool: Tool = {
     /* ---- Export PDF: the browser's print dialog, always on a light page.
        Diagrams bake their palette into the SVG, so they are redrawn light first. ---- */
 
-    async function exportPdf() {
+    const exportPdf = async () => {
       const wasDark = !light;
       if (wasDark) {
         applyLight(true);
@@ -534,7 +790,7 @@ const tool: Tool = {
         { once: true }
       );
       window.print();
-    }
+    };
 
     // Printing from the browser's own menu while the Tool is on screen prints the document too.
     window.addEventListener("beforeprint", () => {
@@ -557,7 +813,8 @@ const tool: Tool = {
     });
     el.addEventListener("dragover", (e) => e.preventDefault());
     el.addEventListener("dragleave", () => {
-      if (--dragDepth <= 0) {
+      dragDepth -= 1;
+      if (dragDepth <= 0) {
         dragDepth = 0;
         el.classList.remove("dragging");
       }
@@ -590,18 +847,11 @@ const tool: Tool = {
 
     /* ---- editing ---- */
 
-    editor.addEventListener("input", () => {
-      scheduleRender();
-      saveDraft();
-      if (el.classList.contains("find-open")) {
-        runFind(true);
-      }
-    });
-
     // Edits go through execCommand("insertText"): deprecated, but the only way
     // to write into a textarea that lands on the browser's own undo stack.
-    function replaceRange(start: number, end: number, text: string) {
-      editor.focus(); // execCommand writes into the focused element
+    const replaceRange = (start: number, end: number, text: string) => {
+      // execCommand writes into the focused element
+      editor.focus();
       editor.setSelectionRange(start, end);
       let ok = false;
       try {
@@ -613,19 +863,19 @@ const tool: Tool = {
         editor.setRangeText(text, start, end, "end");
         editor.dispatchEvent(new Event("input", { bubbles: true }));
       }
-    }
+    };
 
-    function selectedLines() {
+    const selectedLines = () => {
       const v = editor.value;
       const start = v.lastIndexOf("\n", editor.selectionStart - 1) + 1;
       let end = v.indexOf("\n", editor.selectionEnd);
       if (end === -1) {
         end = v.length;
       }
-      return { start, end, text: v.slice(start, end) };
-    }
+      return { end, start, text: v.slice(start, end) };
+    };
 
-    function shiftLines(outdent: boolean) {
+    const shiftLines = (outdent: boolean) => {
       const { start, end, text } = selectedLines();
       const from = editor.selectionStart;
       const to = editor.selectionEnd;
@@ -635,21 +885,23 @@ const tool: Tool = {
         .split("\n")
         .map((line, i) => {
           let delta: number;
+          let shifted = line;
           if (outdent) {
-            const lead = (/^(\t| {1,2})/.exec(line) ?? [""])[0];
+            const lead = /^(?:\t| {1,2})/u.exec(line)?.[0] ?? "";
             delta = -lead.length;
-            line = line.slice(lead.length);
+            shifted = line.slice(lead.length);
           } else {
-            delta = line.length ? INDENT.length : 0; // blank lines stay blank
+            // blank lines stay blank
+            delta = line.length ? INDENT.length : 0;
             if (delta) {
-              line = INDENT + line;
+              shifted = INDENT + line;
             }
           }
           if (i === 0) {
             firstDelta = delta;
           }
           totalDelta += delta;
-          return line;
+          return shifted;
         })
         .join("\n");
       if (out === text) {
@@ -660,267 +912,7 @@ const tool: Tool = {
         Math.max(start, from + firstDelta),
         Math.max(start, to + totalDelta)
       );
-    }
-
-    editor.addEventListener("keydown", (e) => {
-      if (e.key === "Escape" && el.classList.contains("find-open")) {
-        closeFind();
-        return;
-      }
-      if (e.key !== "Tab" || e.altKey || e.ctrlKey || e.metaKey) {
-        return;
-      }
-      e.preventDefault();
-      const spansLines = editor.value
-        .slice(editor.selectionStart, editor.selectionEnd)
-        .includes("\n");
-      if (e.shiftKey) {
-        shiftLines(true);
-      } else if (spansLines) {
-        shiftLines(false);
-      } else {
-        replaceRange(editor.selectionStart, editor.selectionEnd, INDENT);
-      }
-    });
-
-    /* ---- Scroll Sync: either pane drives the other, proportionally ---- */
-
-    const expected = new Map<HTMLElement, number>();
-    function follow(from: HTMLElement, to: HTMLElement) {
-      const fromMax = from.scrollHeight - from.clientHeight;
-      const toMax = to.scrollHeight - to.clientHeight;
-      if (fromMax <= 0 || toMax <= 0) {
-        return;
-      }
-      const target = Math.round((from.scrollTop / fromMax) * toMax);
-      if (Math.abs(to.scrollTop - target) < 1) {
-        return;
-      }
-      expected.set(to, target); // the scroll event this causes is not the user's
-      to.scrollTop = target;
-    }
-    function onScroll(pane: HTMLElement, other: HTMLElement) {
-      const e = expected.get(pane);
-      if (e !== undefined) {
-        expected.delete(pane);
-        if (Math.abs(pane.scrollTop - e) < 1) {
-          return;
-        }
-      }
-      if (view === "split") {
-        follow(pane, other);
-      }
-    }
-    editor.addEventListener("scroll", () => {
-      marks.scrollTop = editor.scrollTop;
-      onScroll(editor, previewPane);
-    });
-    previewPane.addEventListener("scroll", () => {
-      onScroll(previewPane, editor);
-      spy();
-    });
-
-    /* ---- Contents ---- */
-
-    function isDrawer() {
-      return el.classList.contains("toc-drawer");
-    }
-
-    function buildToc() {
-      let html = '<div class="toc-title">Contents</div>';
-      for (const h of tocHeadings) {
-        html += `<button type="button" class="toc-link d${h.level}" data-id="${
-          h.id
-        }" title="${escapeHtml(h.text)}">${escapeHtml(h.text)}</button>`;
-      }
-      if (!tocHeadings.length) {
-        html += '<div class="toc-empty">No headings yet</div>';
-      }
-      tocEl.innerHTML = html;
-    }
-
-    function setToc(on: boolean) {
-      tocOpen = on;
-      el.classList.toggle("toc-open", on);
-      tocBtn.classList.toggle("toggled", on);
-      tocBtn.setAttribute("aria-pressed", String(on));
-    }
-
-    tocBtn.addEventListener("click", () => {
-      setToc(!tocOpen);
-      write(TOC_KEY, tocOpen ? "1" : "0");
-    });
-    $(".toc-backdrop").addEventListener("click", () => setToc(false));
-
-    function scrollDocTo(target: HTMLElement, offset: number) {
-      // In a stacked Split the preview pane may itself be scrolled out of sight.
-      if (isDrawer() && view === "split") {
-        target.scrollIntoView({ block: "start" });
-      } else {
-        previewPane.scrollTop =
-          target.getBoundingClientRect().top -
-          previewPane.getBoundingClientRect().top +
-          previewPane.scrollTop -
-          offset;
-      }
-    }
-
-    tocEl.addEventListener("click", (e) => {
-      const b = (e.target as HTMLElement).closest<HTMLElement>(
-        "button[data-id]"
-      );
-      if (!b) {
-        return;
-      }
-      const h = document.getElementById(b.dataset.id!);
-      if (h) {
-        scrollDocTo(h, 20);
-      }
-      if (isDrawer()) {
-        setToc(false);
-      }
-    });
-
-    // Links within the document jump within it, without touching the Deep Link.
-    doc.addEventListener("click", (e) => {
-      const btn = (e.target as HTMLElement).closest<HTMLButtonElement>(
-        ".copy-btn"
-      );
-      if (btn) {
-        copyCode(btn);
-        return;
-      }
-      const a = (e.target as HTMLElement).closest<HTMLAnchorElement>(
-        'a[href^="#"]'
-      );
-      if (!a) {
-        return;
-      }
-      e.preventDefault();
-      const target = doc.querySelector<HTMLElement>(
-        `#${CSS.escape(a.getAttribute("href")!.slice(1))}`
-      );
-      if (target) {
-        scrollDocTo(target, 40);
-      }
-    });
-
-    async function copyCode(btn: HTMLButtonElement) {
-      const text = btn.parentElement?.querySelector("pre")?.textContent ?? "";
-      let ok = false;
-      try {
-        await navigator.clipboard.writeText(text);
-        ok = true;
-      } catch {
-        // the async clipboard needs a secure context; this keeps copy working from file://
-        const ta = document.createElement("textarea");
-        ta.value = text;
-        ta.style.cssText = "position:fixed;left:-9999px;top:0";
-        document.body.append(ta);
-        ta.select();
-        try {
-          ok = document.execCommand("copy");
-        } catch {
-          ok = false;
-        }
-        ta.remove();
-      }
-      btn.textContent = ok ? "Copied" : "Failed";
-      setTimeout(() => (btn.textContent = "Copy"), 1200);
-    }
-
-    // The entry for the heading at the top of the preview is highlighted as it scrolls.
-    let spyPending = false;
-    function spy() {
-      if (spyPending) {
-        return;
-      }
-      spyPending = true;
-      requestAnimationFrame(() => {
-        spyPending = false;
-        if (!tocHeadings.length) {
-          return;
-        }
-        const top = previewPane.getBoundingClientRect().top + 24;
-        let current = tocHeadings[0]!;
-        for (const h of tocHeadings) {
-          const node = document.getElementById(h.id);
-          if (node && node.getBoundingClientRect().top <= top) {
-            current = h;
-          } else {
-            break;
-          }
-        }
-        const atEnd =
-          previewPane.scrollTop + previewPane.clientHeight >=
-          previewPane.scrollHeight - 2;
-        if (atEnd) {
-          current = tocHeadings.at(-1)!;
-        }
-        tocEl.querySelectorAll<HTMLElement>(".toc-link").forEach((b) => {
-          const active = b.dataset.id === current.id;
-          b.classList.toggle("active", active);
-          if (active) {
-            b.scrollIntoView({ block: "nearest" });
-          }
-        });
-      });
-    }
-
-    /* ---- View Mode ---- */
-
-    // A pane hidden with display: none forgets its scroll position, so each
-    // pane's position is kept across the modes that hide it.
-    const kept = { editor: 0, preview: 0 };
-    function setView(mode: View) {
-      if (view !== "preview") {
-        kept.editor = editor.scrollTop;
-      }
-      if (view !== "edit") {
-        kept.preview = previewPane.scrollTop;
-      }
-      view = mode;
-      el.dataset.view = mode;
-      el.querySelectorAll<HTMLElement>(".seg button").forEach((b) => {
-        const on = b.dataset.mode === mode;
-        b.classList.toggle("active", on);
-        b.setAttribute("aria-selected", String(on));
-      });
-      if (mode !== "preview") {
-        expected.set(editor, kept.editor);
-        editor.scrollTop = kept.editor;
-        marks.scrollTop = kept.editor;
-      }
-      if (mode !== "edit") {
-        expected.set(previewPane, kept.preview);
-        previewPane.scrollTop = kept.preview;
-      }
-      spy();
-    }
-    el.querySelectorAll<HTMLElement>(".seg button").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        setView(btn.dataset.mode as View);
-        write(VIEW_KEY, view);
-        if (view !== "preview") {
-          editor.focus();
-        }
-      });
-    });
-
-    /* ---- Light Document ---- */
-
-    function applyLight(on: boolean) {
-      light = on;
-      previewPane.classList.toggle("light", on);
-      lightBtn.classList.toggle("toggled", on);
-      lightBtn.setAttribute("aria-pressed", String(on));
-      lightBtn.title = on ? "Dark document" : "Light document";
-      render();
-    }
-    lightBtn.addEventListener("click", () => {
-      applyLight(!light);
-      write(LIGHT_KEY, light ? "1" : "0");
-    });
+    };
 
     /* ---- find and replace ----
        The browser's own find searches the rendered preview, never the source;
@@ -929,7 +921,45 @@ const tool: Tool = {
     let matches: number[] = [];
     let matchIdx = -1;
 
-    function runFind(keepIndex: boolean) {
+    // A textarea shows no selection while another field has focus, so the
+    // matches are painted on a mirror of the text behind it: same font,
+    // padding, and wrapping, transparent text, a mark around each match.
+    const paintMarks = () => {
+      marks.replaceChildren();
+      if (!matches.length || !el.classList.contains("find-open")) {
+        return;
+      }
+      const text = editor.value;
+      const len = findInput.value.length;
+      const frag = document.createDocumentFragment();
+      let last = 0;
+      for (const [i, m] of matches.entries()) {
+        frag.append(document.createTextNode(text.slice(last, m)));
+        const mark = document.createElement("mark");
+        if (i === matchIdx) {
+          mark.className = "current";
+        }
+        mark.textContent = text.slice(m, m + len);
+        frag.append(mark);
+        last = m + len;
+      }
+      // a trailing newline would collapse without something after it
+      frag.append(document.createTextNode(`${text.slice(last)}\u200B`));
+      marks.append(frag);
+      marks.scrollTop = editor.scrollTop;
+    };
+    const paintCount = () => {
+      let count = "";
+      if (findInput.value) {
+        count = matches.length ? `${matchIdx + 1}/${matches.length}` : "0/0";
+      }
+      findCount.textContent = count;
+      findCount.classList.toggle("none", !!findInput.value && !matches.length);
+      for (const [i, m] of marks.querySelectorAll("mark").entries()) {
+        m.classList.toggle("current", i === matchIdx);
+      }
+    };
+    const runFind = (keepIndex: boolean) => {
       const q = findInput.value;
       matches = [];
       if (q) {
@@ -946,58 +976,22 @@ const tool: Tool = {
       }
       paintCount();
       paintMarks();
-    }
-    // A textarea shows no selection while another field has focus, so the
-    // matches are painted on a mirror of the text behind it: same font,
-    // padding, and wrapping, transparent text, a mark around each match.
-    function paintMarks() {
-      marks.replaceChildren();
-      if (!matches.length || !el.classList.contains("find-open")) {
-        return;
-      }
-      const text = editor.value;
-      const len = findInput.value.length;
-      const frag = document.createDocumentFragment();
-      let last = 0;
-      matches.forEach((m, i) => {
-        frag.append(document.createTextNode(text.slice(last, m)));
-        const mark = document.createElement("mark");
-        if (i === matchIdx) {
-          mark.className = "current";
-        }
-        mark.textContent = text.slice(m, m + len);
-        frag.append(mark);
-        last = m + len;
-      });
-      // a trailing newline would collapse without something after it
-      frag.append(document.createTextNode(`${text.slice(last)}\u200B`));
-      marks.append(frag);
-      marks.scrollTop = editor.scrollTop;
-    }
-    function paintCount() {
-      findCount.textContent = findInput.value
-        ? matches.length
-          ? `${matchIdx + 1}/${matches.length}`
-          : "0/0"
-        : "";
-      findCount.classList.toggle("none", !!findInput.value && !matches.length);
-      marks
-        .querySelectorAll("mark")
-        .forEach((m, i) => m.classList.toggle("current", i === matchIdx));
-    }
+    };
     // Selects the current match and scrolls it into view. Focus stays in the
     // find bar while the user is typing or stepping; the editor takes it, with
     // the match selected, when the bar closes.
-    function revealMatch() {
-      if (matchIdx < 0 || !matches.length) {
+    const revealMatch = () => {
+      const start = matches[matchIdx];
+      if (start === undefined) {
         return;
       }
-      const start = matches[matchIdx]!;
       const end = start + findInput.value.length;
       editor.setSelectionRange(start, end);
       // approximate, but enough to bring a match on screen in a wrapped textarea
       const line = editor.value.slice(0, start).split("\n").length - 1;
-      const lh = Number.parseFloat(getComputedStyle(editor).lineHeight) || 20;
+      // the computed line height is "normal" or a length in px
+      const lh =
+        Number(getComputedStyle(editor).lineHeight.replace(/px$/u, "")) || 20;
       const top = line * lh;
       if (
         top < editor.scrollTop ||
@@ -1006,39 +1000,39 @@ const tool: Tool = {
         editor.scrollTop = Math.max(0, top - editor.clientHeight / 3);
       }
       paintCount();
-    }
-    function stepMatch(dir: number) {
+    };
+    const stepMatch = (dir: number) => {
       if (!matches.length) {
         return;
       }
       matchIdx = (matchIdx + dir + matches.length) % matches.length;
       revealMatch();
-    }
-    function afterEdit() {
+    };
+    const afterEdit = () => {
       scheduleRender();
       saveDraft();
-    }
+    };
     // replaceRange has to focus the editor for execCommand; hand focus back afterwards.
-    function keepingFocus(fn: () => void) {
+    const keepingFocus = (fn: () => void) => {
       const active = document.activeElement as HTMLElement | null;
       fn();
       if (active && findBar.contains(active)) {
         active.focus();
       }
-    }
-    function replaceCurrent() {
-      if (matchIdx < 0 || !matches.length) {
+    };
+    const replaceCurrent = () => {
+      const start = matches[matchIdx];
+      if (start === undefined) {
         return;
       }
-      const start = matches[matchIdx]!;
       keepingFocus(() =>
         replaceRange(start, start + findInput.value.length, replaceInput.value)
       );
       afterEdit();
       runFind(true);
       revealMatch();
-    }
-    function replaceAll() {
+    };
+    const replaceAll = () => {
       if (!matches.length) {
         return;
       }
@@ -1052,12 +1046,13 @@ const tool: Tool = {
         last = m + q.length;
       }
       out += editor.value.slice(last);
-      keepingFocus(() => replaceRange(0, editor.value.length, out)); // one undo step for the lot
+      // one undo step for the lot
+      keepingFocus(() => replaceRange(0, editor.value.length, out));
       afterEdit();
       runFind(false);
       setStatus(`Replaced ${n} occurrence${n === 1 ? "" : "s"}`);
-    }
-    function openFind() {
+    };
+    const openFind = () => {
       if (view === "preview") {
         setView("split");
         write(VIEW_KEY, view);
@@ -1073,13 +1068,13 @@ const tool: Tool = {
       findInput.focus();
       findInput.select();
       runFind(false);
-    }
-    function closeFind() {
+    };
+    const closeFind = () => {
       el.classList.remove("find-open");
       marks.replaceChildren();
       editor.focus();
       revealMatch();
-    }
+    };
 
     findInput.addEventListener("input", () => {
       runFind(false);
@@ -1103,17 +1098,42 @@ const tool: Tool = {
         closeFind();
       }
     });
-    findBar
-      .querySelector(".find-next")!
-      .addEventListener("click", () => stepMatch(1));
-    findBar
-      .querySelector(".find-prev")!
-      .addEventListener("click", () => stepMatch(-1));
-    findBar
-      .querySelector(".find-replace")!
-      .addEventListener("click", replaceCurrent);
-    findBar.querySelector(".find-all")!.addEventListener("click", replaceAll);
-    findBar.querySelector(".find-close")!.addEventListener("click", closeFind);
+    $(".find-next").addEventListener("click", () => stepMatch(1));
+    $(".find-prev").addEventListener("click", () => stepMatch(-1));
+    $(".find-replace").addEventListener("click", replaceCurrent);
+    $(".find-all").addEventListener("click", replaceAll);
+    $(".find-close").addEventListener("click", closeFind);
+
+    /* ---- the editor's own input and keys, which reach into find ---- */
+
+    editor.addEventListener("input", () => {
+      scheduleRender();
+      saveDraft();
+      if (el.classList.contains("find-open")) {
+        runFind(true);
+      }
+    });
+
+    editor.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && el.classList.contains("find-open")) {
+        closeFind();
+        return;
+      }
+      if (e.key !== "Tab" || e.altKey || e.ctrlKey || e.metaKey) {
+        return;
+      }
+      e.preventDefault();
+      const spansLines = editor.value
+        .slice(editor.selectionStart, editor.selectionEnd)
+        .includes("\n");
+      if (e.shiftKey) {
+        shiftLines(true);
+      } else if (spansLines) {
+        shiftLines(false);
+      } else {
+        replaceRange(editor.selectionStart, editor.selectionEnd, INDENT);
+      }
+    });
 
     /* ---- buttons and shortcuts ---- */
 
@@ -1124,7 +1144,7 @@ const tool: Tool = {
     /* ---- Format: the Draft rewritten in one canonical style, as one undo step ---- */
 
     const formatBtn = $<HTMLButtonElement>(".format-btn");
-    async function formatDraft() {
+    const formatDraft = async () => {
       if (formatBtn.disabled || !editor.value.trim()) {
         return;
       }
@@ -1134,9 +1154,10 @@ const tool: Tool = {
         const format = await loadFormatter();
         const before = editor.value;
         const after = await format(before);
+        // edited meanwhile: leave it
         if (before !== editor.value) {
           return;
-        } // edited meanwhile: leave it
+        }
         if (after === before) {
           setStatus("Already formatted");
           return;
@@ -1154,7 +1175,7 @@ const tool: Tool = {
         formatBtn.disabled = false;
         formatBtn.removeAttribute("aria-busy");
       }
-    }
+    };
     formatBtn.addEventListener("click", formatDraft);
 
     window.addEventListener("keydown", (e) => {
@@ -1193,10 +1214,11 @@ const tool: Tool = {
     /* ---- layout: Contents becomes a drawer, and Split stacks, by the Tool's own width ---- */
 
     const narrowViewport = window.matchMedia("(max-width: 767px)");
-    function layout(width: number) {
+    const layout = (width: number) => {
+      // hidden: nothing to judge
       if (!width) {
         return;
-      } // hidden: nothing to judge
+      }
       const wasDrawer = isDrawer();
       el.classList.toggle("toc-drawer", width < DRAWER_WIDTH);
       el.classList.toggle("stacked", width < STACK_WIDTH);
@@ -1207,7 +1229,7 @@ const tool: Tool = {
       } else if (!isDrawer() && wasDrawer) {
         setToc(read(TOC_KEY) !== "0");
       }
-    }
+    };
     layout(el.getBoundingClientRect().width);
     new ResizeObserver((entries) => {
       const w = entries[0]?.contentRect.width ?? 0;
@@ -1220,13 +1242,9 @@ const tool: Tool = {
     /* ---- boot ---- */
 
     const storedView = read(VIEW_KEY);
-    setView(
-      narrowViewport.matches
-        ? "preview"
-        : storedView === "edit" || storedView === "split"
-          ? storedView
-          : "preview"
-    );
+    const startView: View =
+      storedView === "edit" || storedView === "split" ? storedView : "preview";
+    setView(narrowViewport.matches ? "preview" : startView);
     // A drawer opened on load would cover the page; start closed there.
     setToc(read(TOC_KEY) !== "0" && !isDrawer());
     previewPane.classList.toggle("light", light);
@@ -1243,6 +1261,8 @@ const tool: Tool = {
     booted = true;
     queueMicrotask(publishState);
   },
+  name: "Markdown Editor",
+  subtitle: "Edit Markdown beside a live preview, with math and diagrams.",
 };
 
 export default tool;

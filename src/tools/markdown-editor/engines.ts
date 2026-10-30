@@ -16,52 +16,50 @@ const KATEX = `${NPM}katex@${KATEX_VERSION}/dist/`;
 
 export const ENGINES = {
   katex: {
+    approxBytes: 272_000,
     id: "katex",
     label: "KaTeX",
-    version: KATEX_VERSION,
     url: `${KATEX}katex.min.js`,
-    approxBytes: 272_000,
+    version: KATEX_VERSION,
   },
   katexCss: {
+    approxBytes: 23_000,
     id: "katex-css",
     label: "KaTeX styles",
-    version: KATEX_VERSION,
     url: `${KATEX}katex.min.css`,
-    approxBytes: 23_000,
+    version: KATEX_VERSION,
   },
   mermaid: {
+    approxBytes: 3_570_000,
     id: "mermaid",
     label: "Mermaid",
-    version: MERMAID_VERSION,
     url: `${NPM}mermaid@${MERMAID_VERSION}/dist/mermaid.min.js`,
-    approxBytes: 3_570_000,
+    version: MERMAID_VERSION,
   },
   prettier: {
+    approxBytes: 82_000,
     id: "prettier",
     label: "Prettier",
-    version: PRETTIER_VERSION,
     url: `${NPM}prettier@${PRETTIER_VERSION}/standalone.mjs`,
-    approxBytes: 82_000,
+    version: PRETTIER_VERSION,
   },
   prettierMarkdown: {
+    approxBytes: 292_000,
     id: "prettier-markdown",
     label: "Prettier Markdown plugin",
-    version: PRETTIER_VERSION,
     url: `${NPM}prettier@${PRETTIER_VERSION}/plugins/markdown.mjs`,
-    approxBytes: 292_000,
+    version: PRETTIER_VERSION,
   },
 } satisfies Record<string, EngineAsset>;
 
 /** One of KaTeX's fonts, named as its stylesheet names it. */
-function katexFont(name: string): EngineAsset {
-  return {
-    id: `katex-font-${name}`,
-    label: `KaTeX font ${name}`,
-    version: KATEX_VERSION,
-    url: `${KATEX}fonts/${name}.woff2`,
-    approxBytes: 13_000,
-  };
-}
+const katexFont = (name: string): EngineAsset => ({
+  approxBytes: 13_000,
+  id: `katex-font-${name}`,
+  label: `KaTeX font ${name}`,
+  url: `${KATEX}fonts/${name}.woff2`,
+  version: KATEX_VERSION,
+});
 
 export interface KatexApi {
   renderToString: (
@@ -95,25 +93,25 @@ export const katex = () => globals.katex ?? null;
 export const mermaid = () => globals.mermaid ?? null;
 
 /** Runs a classic script from its bytes. A blob: URL keeps the source out of a data: URL's size limits. */
-async function runScript(bytes: ArrayBuffer): Promise<void> {
+const runScript = async (bytes: ArrayBuffer): Promise<void> => {
   const url = URL.createObjectURL(
     new Blob([bytes], { type: "text/javascript" })
   );
   try {
-    await new Promise<void>((resolve, reject) => {
-      const s = document.createElement("script");
-      s.src = url;
-      s.onload = () => resolve();
-      s.onerror = () => reject(new Error("The script could not be run."));
-      document.head.append(s);
-    });
+    const { promise, resolve, reject } = Promise.withResolvers<Event>();
+    const s = document.createElement("script");
+    s.src = url;
+    s.onload = (event) => resolve(event);
+    s.onerror = () => reject(new Error("The script could not be run."));
+    document.head.append(s);
+    await promise;
   } finally {
     URL.revokeObjectURL(url);
   }
-}
+};
 
 /** Progress across several assets fetched together, summed for one status line. */
-function combined(onProgress?: LoadProgress) {
+const combined = (onProgress?: LoadProgress) => {
   const seen = new Map<string, Progress>();
   return (p: Progress) => {
     seen.set(p.asset.id, p);
@@ -125,7 +123,7 @@ function combined(onProgress?: LoadProgress) {
     }
     onProgress?.(loaded, total);
   };
-}
+};
 
 let mathLoading: Promise<KatexApi> | null = null;
 
@@ -135,7 +133,7 @@ let mathLoading: Promise<KatexApi> | null = null;
  * and registered with the document directly, and the stylesheet goes in with
  * its @font-face rules removed.
  */
-export function loadMath(onProgress?: LoadProgress): Promise<KatexApi> {
+export const loadMath = (onProgress?: LoadProgress): Promise<KatexApi> => {
   const ready = katex();
   if (ready) {
     return Promise.resolve(ready);
@@ -156,31 +154,37 @@ export function loadMath(onProgress?: LoadProgress): Promise<KatexApi> {
       weight: string;
       file: string;
     }[] = [];
-    css = css.replaceAll(/@font-face\{([^}]*)\}/g, (_m, body: string) => {
-      const family = /font-family:([^;]+)/.exec(body)?.[1];
-      const file = /url\(fonts\/([\w-]+)\.woff2\)/.exec(body)?.[1];
-      if (family && file) {
-        faces.push({
-          family,
-          style: /font-style:([^;]+)/.exec(body)?.[1] ?? "normal",
-          weight: /font-weight:([^;]+)/.exec(body)?.[1] ?? "400",
-          file,
-        });
+    css = css.replaceAll(
+      /@font-face\{(?<body>[^}]*)\}/gu,
+      (_m, body: string) => {
+        const family = /font-family:(?<v>[^;]+)/u.exec(body)?.groups?.v;
+        const file = /url\(fonts\/(?<v>[\w-]+)\.woff2\)/u.exec(body)?.groups?.v;
+        if (family && file) {
+          faces.push({
+            family,
+            file,
+            style: /font-style:(?<v>[^;]+)/u.exec(body)?.groups?.v ?? "normal",
+            weight: /font-weight:(?<v>[^;]+)/u.exec(body)?.groups?.v ?? "400",
+          });
+        }
+        return "";
       }
-      return "";
-    });
-    const fonts = await Promise.all(
-      faces.map((f) => getEngine(katexFont(f.file), report))
     );
-    faces.forEach((f, i) => {
+    const fonts = await Promise.all(
+      faces.map(async (face) => ({
+        bytes: await getEngine(katexFont(face.file), report),
+        face,
+      }))
+    );
+    for (const { face, bytes } of fonts) {
       document.fonts.add(
-        new FontFace(f.family, fonts[i]!, {
-          style: f.style,
-          weight: f.weight,
+        new FontFace(face.family, bytes, {
           display: "block",
+          style: face.style,
+          weight: face.weight,
         })
       );
-    });
+    }
     const style = document.createElement("style");
     style.dataset.engine = "katex";
     style.textContent = css;
@@ -194,11 +198,13 @@ export function loadMath(onProgress?: LoadProgress): Promise<KatexApi> {
   })();
   mathLoading.catch(() => (mathLoading = null));
   return mathLoading;
-}
+};
 
 let diagramsLoading: Promise<MermaidApi> | null = null;
 
-export function loadDiagrams(onProgress?: LoadProgress): Promise<MermaidApi> {
+export const loadDiagrams = (
+  onProgress?: LoadProgress
+): Promise<MermaidApi> => {
   const ready = mermaid();
   if (ready) {
     return Promise.resolve(ready);
@@ -216,10 +222,10 @@ export function loadDiagrams(onProgress?: LoadProgress): Promise<MermaidApi> {
   })();
   diagramsLoading.catch(() => (diagramsLoading = null));
   return diagramsLoading;
-}
+};
 
 /** Imports an ES module from its bytes. */
-async function importModule<T>(bytes: ArrayBuffer): Promise<T> {
+const importModule = async <T>(bytes: ArrayBuffer): Promise<T> => {
   const url = URL.createObjectURL(
     new Blob([bytes], { type: "text/javascript" })
   );
@@ -228,7 +234,7 @@ async function importModule<T>(bytes: ArrayBuffer): Promise<T> {
   } finally {
     URL.revokeObjectURL(url);
   }
-}
+};
 
 interface PrettierModule {
   format: (
@@ -239,7 +245,9 @@ interface PrettierModule {
 
 let formatterLoading: Promise<Formatter> | null = null;
 
-export function loadFormatter(onProgress?: LoadProgress): Promise<Formatter> {
+export const loadFormatter = (
+  onProgress?: LoadProgress
+): Promise<Formatter> => {
   if (formatterLoading) {
     return formatterLoading;
   }
@@ -258,4 +266,4 @@ export function loadFormatter(onProgress?: LoadProgress): Promise<Formatter> {
   })();
   formatterLoading.catch(() => (formatterLoading = null));
   return formatterLoading;
-}
+};

@@ -1,8 +1,7 @@
 // What a first visit shows: a short document that doubles as a tour, with
 // enough headings to give Contents something to list.
 
-export function welcome(mod: string): string {
-  return `# Markdown Editor
+export const welcome = (mod: string): string => `# Markdown Editor
 
 Nothing you open or type here leaves your browser.
 
@@ -81,4 +80,3 @@ Numbered on first use[^why], gathered at the end.
 
 Keys: **${mod}S** save, **${mod}⇧S** save as, **${mod}O** open, **${mod}E** edit or preview, **${mod}F** find, **Tab** and **⇧Tab** indent and outdent.
 `;
-}
