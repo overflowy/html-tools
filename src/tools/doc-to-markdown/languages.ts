@@ -133,8 +133,13 @@ const RAW: [string, string][] = [
   ["yor", "Yoruba"],
 ];
 
-export const LANGUAGES: Language[] = RAW.map(([code, name]) => ({ code, name }));
-LANGUAGES.sort((a, b) => (a.code === "eng" ? -1 : b.code === "eng" ? 1 : a.name.localeCompare(b.name)));
+export const LANGUAGES: Language[] = RAW.map(([code, name]) => ({
+  code,
+  name,
+}));
+LANGUAGES.sort((a, b) =>
+  a.code === "eng" ? -1 : b.code === "eng" ? 1 : a.name.localeCompare(b.name)
+);
 
 const BY_CODE = new Map(LANGUAGES.map((l) => [l.code, l.name]));
 

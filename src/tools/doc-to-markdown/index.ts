@@ -1,22 +1,36 @@
 import "./tool.css";
 import type { Tool } from "../../shell/types";
+import { cancelConversion, convertDocument } from "./convert";
+import type { Phase } from "./convert";
 import { ACCEPT } from "./detect";
-import { cacheAvailable, cachedFamilies, clearCached, listCached } from "./engines";
+import {
+  cacheAvailable,
+  cachedFamilies,
+  clearCached,
+  listCached,
+} from "./engines";
 import { LANGUAGES, languageName } from "./languages";
-import { cancelConversion, convertDocument, type Phase } from "./convert";
 
 const LANG_KEY = "html-tools:doc-to-markdown:langs";
 const MARKERS_KEY = "html-tools:doc-to-markdown:markers";
 const DEFAULT_LANGS = ["eng"];
 
 function esc(s: string) {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  return s
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
 }
 
 function formatBytes(n: number) {
-  if (n < 1024) return n + " B";
-  if (n < 1024 * 1024) return (n / 1024).toFixed(0) + " KB";
-  return (n / 1024 / 1024).toFixed(1) + " MB";
+  if (n < 1024) {
+    return `${n} B`;
+  }
+  if (n < 1024 * 1024) {
+    return `${(n / 1024).toFixed(0)} KB`;
+  }
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
 
 function baseName(name: string) {
@@ -25,7 +39,9 @@ function baseName(name: string) {
 }
 
 function downloadText(text: string, name: string) {
-  const url = URL.createObjectURL(new Blob([text], { type: "text/markdown;charset=utf-8" }));
+  const url = URL.createObjectURL(
+    new Blob([text], { type: "text/markdown;charset=utf-8" })
+  );
   const a = document.createElement("a");
   a.href = url;
   a.download = name;
@@ -43,15 +59,40 @@ function flash(btn: HTMLButtonElement, label: string) {
 function normalizeLangs(codes: string[]): string[] {
   const known = new Set(LANGUAGES.map((l) => l.code));
   const out: string[] = [];
-  for (const c of codes) if (known.has(c) && !out.includes(c)) out.push(c);
-  return out.length ? out : DEFAULT_LANGS.slice();
+  for (const c of codes) {
+    if (known.has(c) && !out.includes(c)) {
+      out.push(c);
+    }
+  }
+  return out.length ? out : [...DEFAULT_LANGS];
 }
 
 const tool: Tool = {
   id: "doc-to-markdown",
   name: "Document to Markdown",
-  subtitle: "Convert a document, a scanned PDF, or an image of text to Markdown.",
-  keywords: ["ocr", "pdf", "docx", "word", "xlsx", "excel", "pptx", "powerpoint", "odt", "epub", "rtf", "csv", "markdown", "scan", "tesseract", "convert", "image", "text", "extract"],
+  subtitle:
+    "Convert a document, a scanned PDF, or an image of text to Markdown.",
+  keywords: [
+    "ocr",
+    "pdf",
+    "docx",
+    "word",
+    "xlsx",
+    "excel",
+    "pptx",
+    "powerpoint",
+    "odt",
+    "epub",
+    "rtf",
+    "csv",
+    "markdown",
+    "scan",
+    "tesseract",
+    "convert",
+    "image",
+    "text",
+    "extract",
+  ],
   mount(el, ctx) {
     el.innerHTML = `
       <div class="toolbar">
@@ -116,7 +157,9 @@ const tool: Tool = {
     const langList = $(".lang-list");
     const markersBox = $(".markers-box") as HTMLInputElement;
 
-    let selected = normalizeLangs((localStorage.getItem(LANG_KEY) ?? "").split("+"));
+    let selected = normalizeLangs(
+      (localStorage.getItem(LANG_KEY) ?? "").split("+")
+    );
     let markers = localStorage.getItem(MARKERS_KEY) !== "0";
     markersBox.checked = markers;
     let currentName = "";
@@ -127,15 +170,21 @@ const tool: Tool = {
 
     /* ---- languages ---- */
 
-    langList.innerHTML = LANGUAGES.map((l) =>
-      `<label><input type="checkbox" value="${l.code}"> <span class="name">${esc(l.name)}</span><span class="code">${l.code}</span></label>`,
+    langList.innerHTML = LANGUAGES.map(
+      (l) =>
+        `<label><input type="checkbox" value="${l.code}"> <span class="name">${esc(l.name)}</span><span class="code">${l.code}</span></label>`
     ).join("");
-    const boxes = Array.from(langList.querySelectorAll("input")) as HTMLInputElement[];
+    const boxes = [...langList.querySelectorAll("input")] as HTMLInputElement[];
 
     function renderLangs() {
-      for (const b of boxes) b.checked = selected.includes(b.value);
+      for (const b of boxes) {
+        b.checked = selected.includes(b.value);
+      }
       const names = selected.map(languageName);
-      const shown = names.length > 2 ? names.slice(0, 2).join(", ") + " +" + (names.length - 2) : names.join(", ");
+      const shown =
+        names.length > 2
+          ? `${names.slice(0, 2).join(", ")} +${names.length - 2}`
+          : names.join(", ");
       langSummary.innerHTML = `<span class="dim">OCR:</span> ${esc(shown)}`;
     }
 
@@ -146,7 +195,9 @@ const tool: Tool = {
       markersBox.checked = markers;
       const codes = selected.join("+");
       let payload = codes === DEFAULT_LANGS.join("+") && markers ? "" : codes;
-      if (!markers) payload += ".p0";
+      if (!markers) {
+        payload += ".p0";
+      }
       ctx.setState(payload);
     }
 
@@ -166,7 +217,7 @@ const tool: Tool = {
     langFilter.addEventListener("input", () => {
       const q = langFilter.value.trim().toLowerCase();
       let any = false;
-      for (const label of Array.from(langList.querySelectorAll("label"))) {
+      for (const label of langList.querySelectorAll("label")) {
         const hit = !q || label.textContent!.toLowerCase().includes(q);
         label.hidden = !hit;
         any = any || hit;
@@ -176,8 +227,10 @@ const tool: Tool = {
         none = document.createElement("div");
         none.className = "lang-none";
         none.textContent = "No language matches.";
-        langList.appendChild(none);
-      } else if (any && none) none.remove();
+        langList.append(none);
+      } else if (any && none) {
+        none.remove();
+      }
     });
 
     // The filter is reset on close, not open: toggle fires a task after the
@@ -192,7 +245,9 @@ const tool: Tool = {
     });
     // Click outside or Escape closes the panel.
     document.addEventListener("pointerdown", (e) => {
-      if (langs.open && !langs.contains(e.target as Node)) langs.open = false;
+      if (langs.open && !langs.contains(e.target as Node)) {
+        langs.open = false;
+      }
     });
     langs.addEventListener("keydown", (e) => {
       if (e.key === "Escape" && langs.open) {
@@ -203,8 +258,12 @@ const tool: Tool = {
 
     ctx.onRestore((payload) => {
       const [codes, ...flags] = payload.split(".");
-      if (codes) selected = normalizeLangs(codes.split("+"));
-      if (payload) markers = !flags.includes("p0");
+      if (codes) {
+        selected = normalizeLangs(codes.split("+"));
+      }
+      if (payload) {
+        markers = !flags.includes("p0");
+      }
       renderLangs();
       publishState();
     });
@@ -215,7 +274,8 @@ const tool: Tool = {
     async function renderEngines() {
       const ok = await cacheAvailable();
       if (!ok) {
-        enginesText.textContent = "Engines cannot be kept here (no IndexedDB); they download on every conversion.";
+        enginesText.textContent =
+          "Engines cannot be kept here (no IndexedDB); they download on every conversion.";
         enginesClear.hidden = true;
         return;
       }
@@ -226,13 +286,17 @@ const tool: Tool = {
         return;
       }
       const total = rows.reduce((n, r) => n + r.bytes, 0);
-      enginesText.textContent = "Engines cached: " + formatBytes(total);
+      enginesText.textContent = `Engines cached: ${formatBytes(total)}`;
       // The breakdown is a hover away, not in the way.
-      enginesText.title = cachedFamilies(rows).map((f) => f.label + " " + formatBytes(f.bytes)).join("\n");
+      enginesText.title = cachedFamilies(rows)
+        .map((f) => `${f.label} ${formatBytes(f.bytes)}`)
+        .join("\n");
       enginesClear.hidden = false;
     }
     enginesClear.addEventListener("click", async () => {
-      if (running) return;
+      if (running) {
+        return;
+      }
       enginesClear.disabled = true;
       try {
         await clearCached();
@@ -257,13 +321,15 @@ const tool: Tool = {
         fill.style.width = "";
       } else {
         bar.classList.remove("busy");
-        fill.style.width = Math.round(Math.max(0, Math.min(1, p.fraction)) * 100) + "%";
+        fill.style.width = `${Math.round(Math.max(0, Math.min(1, p.fraction)) * 100)}%`;
       }
     }
 
     function reset() {
-      if (running) cancelConversion();
-      runId++;
+      if (running) {
+        cancelConversion();
+      }
+      runId += 1;
       running = false;
       currentName = "";
       currentMarkdown = "";
@@ -277,7 +343,9 @@ const tool: Tool = {
     }
 
     async function load(blob: Blob, name: string) {
-      if (running) cancelConversion();
+      if (running) {
+        cancelConversion();
+      }
       const id = ++runId;
       running = true;
       currentName = name;
@@ -291,24 +359,42 @@ const tool: Tool = {
       setPhase({ text: "Reading file", fraction: null });
       try {
         const bytes = await blob.arrayBuffer();
-        if (id !== runId) return;
-        const out = await convertDocument(bytes, name, { languages: selected.slice(), pageMarkers: markers, onPhase: (p) => id === runId && setPhase(p) });
-        if (id !== runId) return;
+        if (id !== runId) {
+          return;
+        }
+        const out = await convertDocument(bytes, name, {
+          languages: [...selected],
+          pageMarkers: markers,
+          onPhase: (p) => id === runId && setPhase(p),
+        });
+        if (id !== runId) {
+          return;
+        }
         currentMarkdown = out.markdown;
         output.value = out.markdown;
         // A document with no text converts to nothing: nothing to copy or save.
-        for (const b of [$(".copy-btn"), $(".download-btn")] as HTMLButtonElement[]) b.disabled = !out.markdown;
+        for (const b of [
+          $(".copy-btn"),
+          $(".download-btn"),
+        ] as HTMLButtonElement[]) {
+          b.disabled = !out.markdown;
+        }
         meta.textContent = out.summary;
         result.classList.add("on");
         if (out.note) {
           note.textContent = out.note;
           note.classList.add("on");
         }
-      } catch (e) {
-        if (id !== runId) return;
-        const msg = e instanceof Error ? e.message : String(e);
-        if (msg !== "The conversion was cancelled.") showError(msg);
-        else emptyHint.style.display = "block";
+      } catch (error) {
+        if (id !== runId) {
+          return;
+        }
+        const msg = error instanceof Error ? error.message : String(error);
+        if (msg === "The conversion was cancelled.") {
+          emptyHint.style.display = "block";
+        } else {
+          showError(msg);
+        }
       } finally {
         if (id === runId) {
           running = false;
@@ -319,11 +405,15 @@ const tool: Tool = {
     }
 
     $(".cancel-btn").addEventListener("click", () => {
-      if (running) cancelConversion();
+      if (running) {
+        cancelConversion();
+      }
     });
 
     $(".copy-btn").addEventListener("click", async () => {
-      if (!currentMarkdown) return;
+      if (!currentMarkdown) {
+        return;
+      }
       try {
         await navigator.clipboard.writeText(currentMarkdown);
         flash($(".copy-btn") as HTMLButtonElement, "Copied");
@@ -335,14 +425,18 @@ const tool: Tool = {
     });
 
     $(".download-btn").addEventListener("click", () => {
-      if (!currentMarkdown) return;
-      downloadText(currentMarkdown, baseName(currentName) + ".md");
+      if (!currentMarkdown) {
+        return;
+      }
+      downloadText(currentMarkdown, `${baseName(currentName)}.md`);
     });
 
     $(".choose-btn").addEventListener("click", () => fileInput.click());
     fileInput.addEventListener("change", () => {
       const file = fileInput.files?.[0];
-      if (file) load(file, file.name);
+      if (file) {
+        load(file, file.name);
+      }
       fileInput.value = "";
     });
 
@@ -352,7 +446,7 @@ const tool: Tool = {
     let dragDepth = 0;
     el.addEventListener("dragenter", (e) => {
       e.preventDefault();
-      dragDepth++;
+      dragDepth += 1;
       el.classList.add("dragging");
     });
     el.addEventListener("dragover", (e) => e.preventDefault());
@@ -368,19 +462,27 @@ const tool: Tool = {
       el.classList.remove("dragging");
       const files = e.dataTransfer?.files;
       const file = files?.[0];
-      if (!file) return;
+      if (!file) {
+        return;
+      }
       load(file, file.name);
       if (files && files.length > 1) {
-        note.textContent = "One Document at a time: converting " + file.name + ", the other " + (files.length - 1) + " ignored.";
+        note.textContent = `One Document at a time: converting ${
+          file.name
+        }, the other ${files.length - 1} ignored.`;
         note.classList.add("on");
       }
     });
 
     // Cmd+V anywhere in the tool with an image on the clipboard
     document.addEventListener("paste", (e) => {
-      if (el.hidden) return;
+      if (el.hidden) {
+        return;
+      }
       const items = e.clipboardData?.items;
-      if (!items) return;
+      if (!items) {
+        return;
+      }
       for (const item of items) {
         if (item.kind === "file") {
           const file = item.getAsFile();

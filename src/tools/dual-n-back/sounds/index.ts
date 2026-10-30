@@ -15,6 +15,20 @@ import operations_subtract from "./operations/subtract.mp3";
 
 /** Each folder's files by name (the name without its extension). */
 export const SOUNDS = {
-  letters: { c: letters_c, h: letters_h, k: letters_k, l: letters_l, q: letters_q, r: letters_r, s: letters_s, t: letters_t },
-  operations: { add: operations_add, divide: operations_divide, multiply: operations_multiply, subtract: operations_subtract },
+  letters: {
+    c: letters_c,
+    h: letters_h,
+    k: letters_k,
+    l: letters_l,
+    q: letters_q,
+    r: letters_r,
+    s: letters_s,
+    t: letters_t,
+  },
+  operations: {
+    add: operations_add,
+    divide: operations_divide,
+    multiply: operations_multiply,
+    subtract: operations_subtract,
+  },
 } as const;

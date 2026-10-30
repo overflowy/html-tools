@@ -59,8 +59,9 @@
   color: var(--text-muted);
 }
 
-.tool-jsonc-sorter .pane-head .spacer { flex: 1; }
-
+.tool-jsonc-sorter .pane-head .spacer {
+  flex: 1;
+}
 
 .tool-jsonc-sorter .src {
   flex: 1;
@@ -88,11 +89,22 @@
   line-height: 1.55;
 }
 
-.tool-jsonc-sorter .output .k { color: var(--tok-key); }
-.tool-jsonc-sorter .output .s { color: var(--tok-str); }
-.tool-jsonc-sorter .output .n { color: var(--tok-num); }
-.tool-jsonc-sorter .output .b { color: var(--tok-bool); }
-.tool-jsonc-sorter .output .c { color: var(--tok-com); font-style: italic; }
+.tool-jsonc-sorter .output .k {
+  color: var(--tok-key);
+}
+.tool-jsonc-sorter .output .s {
+  color: var(--tok-str);
+}
+.tool-jsonc-sorter .output .n {
+  color: var(--tok-num);
+}
+.tool-jsonc-sorter .output .b {
+  color: var(--tok-bool);
+}
+.tool-jsonc-sorter .output .c {
+  color: var(--tok-com);
+  font-style: italic;
+}
 
 .tool-jsonc-sorter .statusbar {
   padding: 6px 12px;
@@ -107,9 +119,15 @@
 }
 
 /* Nothing to report, no bar: it appears with the first result or error. */
-.tool-jsonc-sorter .statusbar:has(.status-text:empty) { display: none; }
-.tool-jsonc-sorter .statusbar.error { color: var(--danger-text); }
+.tool-jsonc-sorter .statusbar:has(.status-text:empty) {
+  display: none;
+}
+.tool-jsonc-sorter .statusbar.error {
+  color: var(--danger-text);
+}
 
 @media (max-width: 1000px) {
-  .tool-jsonc-sorter .panes { grid-template-columns: 1fr; }
+  .tool-jsonc-sorter .panes {
+    grid-template-columns: 1fr;
+  }
 }

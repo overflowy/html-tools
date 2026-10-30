@@ -20,7 +20,9 @@
 
 /* User agent and country span both columns; the two addresses sit side by side. */
 .tool-whoami [data-row="ua"],
-.tool-whoami [data-row="country"] { grid-column: 1 / -1; }
+.tool-whoami [data-row="country"] {
+  grid-column: 1 / -1;
+}
 
 .tool-whoami .pane {
   display: flex;
@@ -41,7 +43,9 @@
   color: var(--text-muted);
 }
 
-.tool-whoami .pane-head .spacer { flex: 1; }
+.tool-whoami .pane-head .spacer {
+  flex: 1;
+}
 
 .tool-whoami .value {
   padding: 12px;
@@ -60,7 +64,9 @@
   user-select: text;
 }
 
-.tool-whoami .value.missing { color: var(--danger-text); }
+.tool-whoami .value.missing {
+  color: var(--danger-text);
+}
 
 .tool-whoami .value .detail {
   display: block;
@@ -71,5 +77,7 @@
 }
 
 @media (max-width: 767px) {
-  .tool-whoami .cards { grid-template-columns: 1fr; }
+  .tool-whoami .cards {
+    grid-template-columns: 1fr;
+  }
 }

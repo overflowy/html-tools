@@ -9,7 +9,16 @@
     "lint:fix": "oxlint --fix",
     "lint:ci": "oxlint --deny-warnings",
     "test": "bun run smoke.ts",
-    "test:unit": "bun test"
+    "test:unit": "bun test",
+    "fix": "ultracite fix"
+  },
+  "dependencies": {
+    "dompurify": "3.4.14",
+    "highlight.js": "11.12.0",
+    "lz-string": "^1.5.0",
+    "marked": "18.0.11",
+    "smol-toml": "1.8.0",
+    "tesseract.js": "7.0.0"
   },
   "devDependencies": {
     "@react-symbols/icons": "1.4.1",
@@ -21,19 +30,13 @@
     "jsqr": "^1.4.0",
     "lucide-static": "1.39.0",
     "monaco-editor": "0.56.0",
-    "oxlint": "^1.79.0",
+    "oxfmt": "^0.71.0",
+    "oxlint": "^1.86.0",
     "playwright-core": "^1.62.1",
     "pyodide": "314.0.6",
     "react": "19.2.8",
     "react-dom": "19.2.8",
-    "typescript": "^7.0.2"
-  },
-  "dependencies": {
-    "dompurify": "3.4.14",
-    "highlight.js": "11.12.0",
-    "lz-string": "^1.5.0",
-    "marked": "18.0.11",
-    "smol-toml": "1.8.0",
-    "tesseract.js": "7.0.0"
+    "typescript": "^7.0.2",
+    "ultracite": "8.0.2"
   }
 }

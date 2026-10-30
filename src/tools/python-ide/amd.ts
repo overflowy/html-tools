@@ -17,20 +17,29 @@ interface Definition {
 }
 
 interface Plugin {
-  load(name: string, req: LocalRequire, onload: (value: unknown) => void, config: object): void;
+  load: (
+    name: string,
+    req: LocalRequire,
+    onload: (value: unknown) => void,
+    config: object
+  ) => void;
 }
 
 interface LocalRequire {
-  (deps: string[], callback?: (...mods: unknown[]) => void, onError?: (e: unknown) => void): void;
+  (
+    deps: string[],
+    callback?: (...mods: unknown[]) => void,
+    onError?: (e: unknown) => void
+  ): void;
   (dep: string): unknown;
-  toUrl(path: string): string;
+  toUrl: (path: string) => string;
 }
 
 export interface AmdOptions {
   /** Where `<id>.js` lives when it is not in the registry. */
   cdnBase: string;
   /** What `require.toUrl` answers for a resolved path such as `vs/editor/editor.main.css`. */
-  toUrl(path: string): string;
+  toUrl: (path: string) => string;
 }
 
 const scope = globalThis as unknown as { define?: unknown };
@@ -46,7 +55,9 @@ export class AmdLoader {
   /** Runs chunk sources so their `define` calls register. */
   defineFrom(sources: string[]) {
     this.withDefine(() => {
-      for (const src of sources) new Function(src)();
+      for (const src of sources) {
+        new Function(src)();
+      }
     });
   }
 
@@ -62,16 +73,26 @@ export class AmdLoader {
   private installDefine() {
     if (this.defineUsers++ === 0) {
       this.previousDefine = scope.define;
-      scope.define = (id: string, deps: string[] | Factory, factory?: Factory | object) => {
+      scope.define = (
+        id: string,
+        deps: string[] | Factory,
+        factory?: Factory | object
+      ) => {
         if (typeof deps === "function" || (deps && !Array.isArray(deps))) {
           factory = deps as Factory | object;
           deps = [];
         }
-        this.definitions.set(id, { id, deps: deps as string[], factory: factory as Factory | object });
+        this.definitions.set(id, {
+          id,
+          deps: deps as string[],
+          factory: factory as Factory | object,
+        });
       };
     }
     return () => {
-      if (--this.defineUsers === 0) scope.define = this.previousDefine;
+      if (--this.defineUsers === 0) {
+        scope.define = this.previousDefine;
+      }
     };
   }
 
@@ -85,24 +106,38 @@ export class AmdLoader {
   }
 
   private resolve(id: string, from?: string): string {
-    if (!from || !(id.startsWith("./") || id.startsWith("../"))) return id;
+    if (!from || !(id.startsWith("./") || id.startsWith("../"))) {
+      return id;
+    }
     const parts = from.split("/");
     parts.pop();
     for (const seg of id.split("/")) {
-      if (seg === ".") continue;
-      if (seg === "..") parts.pop();
-      else parts.push(seg);
+      if (seg === ".") {
+        continue;
+      }
+      if (seg === "..") {
+        parts.pop();
+      } else {
+        parts.push(seg);
+      }
     }
     return parts.join("/");
   }
 
   private load(id: string): Promise<unknown> {
-    if (this.modules.has(id)) return Promise.resolve(this.modules.get(id));
+    if (this.modules.has(id)) {
+      return Promise.resolve(this.modules.get(id));
+    }
     const inFlight = this.loading.get(id);
-    if (inFlight) return inFlight;
+    if (inFlight) {
+      return inFlight;
+    }
     const p = this.instantiate(id);
     this.loading.set(id, p);
-    p.then(() => this.loading.delete(id), () => this.loading.delete(id));
+    p.then(
+      () => this.loading.delete(id),
+      () => this.loading.delete(id)
+    );
     return p;
   }
 
@@ -110,13 +145,19 @@ export class AmdLoader {
     const bang = id.indexOf("!");
     if (bang !== -1) {
       const plugin = (await this.load(id.slice(0, bang))) as Plugin;
-      const value = await new Promise<unknown>((resolve) => plugin.load(id.slice(bang + 1), this.localRequire(id), resolve, {}));
+      const value = await new Promise<unknown>((resolve) =>
+        plugin.load(id.slice(bang + 1), this.localRequire(id), resolve, {})
+      );
       this.modules.set(id, value);
       return value;
     }
-    if (!this.definitions.has(id)) await this.fetch(id);
+    if (!this.definitions.has(id)) {
+      await this.fetch(id);
+    }
     const def = this.definitions.get(id);
-    if (!def) throw new Error("Monaco module " + id + " did not define itself.");
+    if (!def) {
+      throw new Error(`Monaco module ${id} did not define itself.`);
+    }
     if (typeof def.factory !== "function") {
       this.modules.set(id, def.factory);
       return def.factory;
@@ -126,25 +167,41 @@ export class AmdLoader {
     this.modules.set(id, exports);
     const args: unknown[] = [];
     for (const dep of def.deps) {
-      if (dep === "exports") args.push(exports);
-      else if (dep === "require") args.push(this.localRequire(id));
-      else if (dep === "module") args.push({ id, exports });
-      else args.push(await this.load(this.resolve(dep, id)));
+      if (dep === "exports") {
+        args.push(exports);
+      } else if (dep === "require") {
+        args.push(this.localRequire(id));
+      } else if (dep === "module") {
+        args.push({ id, exports });
+      } else {
+        args.push(await this.load(this.resolve(dep, id)));
+      }
     }
     const result = def.factory(...args);
-    if (result !== undefined) this.modules.set(id, result);
+    if (result !== undefined) {
+      this.modules.set(id, result);
+    }
     return this.modules.get(id);
   }
 
   private localRequire(from: string): LocalRequire {
-    const req = ((deps: string | string[], callback?: (...mods: unknown[]) => void, onError?: (e: unknown) => void) => {
+    const req = ((
+      deps: string | string[],
+      callback?: (...mods: unknown[]) => void,
+      onError?: (e: unknown) => void
+    ) => {
       if (typeof deps === "string") {
         const id = this.resolve(deps, from);
-        if (!this.modules.has(id)) throw new Error("Monaco module " + id + " is not loaded yet.");
+        if (!this.modules.has(id)) {
+          throw new Error(`Monaco module ${id} is not loaded yet.`);
+        }
         return this.modules.get(id);
       }
-      this.require(deps, from).then((mods) => callback?.(...mods), (e) => onError?.(e));
-      return undefined;
+      this.require(deps, from).then(
+        (mods) => callback?.(...mods),
+        (error) => onError?.(error)
+      );
+      return;
     }) as LocalRequire;
     req.toUrl = (path) => this.options.toUrl(this.resolve(path, from));
     return req;
@@ -153,7 +210,9 @@ export class AmdLoader {
   /** A chunk not in the cache: a classic script from the CDN, with `define` live while it runs. */
   private fetch(id: string): Promise<void> {
     const existing = this.fetching.get(id);
-    if (existing) return existing;
+    if (existing) {
+      return existing;
+    }
     const p = new Promise<void>((resolve, reject) => {
       const release = this.installDefine();
       const done = () => {
@@ -161,19 +220,22 @@ export class AmdLoader {
         s.remove();
       };
       const s = document.createElement("script");
-      s.src = this.options.cdnBase + id + ".js";
+      s.src = `${this.options.cdnBase + id}.js`;
       s.onload = () => {
         done();
         resolve();
       };
       s.onerror = () => {
         done();
-        reject(new Error("Could not load Monaco module " + id + " from the CDN."));
+        reject(new Error(`Could not load Monaco module ${id} from the CDN.`));
       };
-      document.head.appendChild(s);
+      document.head.append(s);
     });
     this.fetching.set(id, p);
-    p.then(() => this.fetching.delete(id), () => this.fetching.delete(id));
+    p.then(
+      () => this.fetching.delete(id),
+      () => this.fetching.delete(id)
+    );
     return p;
   }
 }

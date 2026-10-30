@@ -1,22 +1,38 @@
 // Adopted from coderpatsy's save decoder (coderpatsy.bitbucket.io/decoder.html).
 import LZString from "lz-string";
+
 import "./tool.css";
 import type { Tool } from "../../shell/types";
 
 function formatBytes(n: number) {
-  if (n < 1024) return n + " B";
-  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
-  return (n / 1024 / 1024).toFixed(2) + " MB";
+  if (n < 1024) {
+    return `${n} B`;
+  }
+  if (n < 1024 * 1024) {
+    return `${(n / 1024).toFixed(1)} KB`;
+  }
+  return `${(n / 1024 / 1024).toFixed(2)} MB`;
 }
 
 /** Longest encoded save we are willing to put in the Deep Link. */
-const STATE_CAP = 30000;
+const STATE_CAP = 30_000;
 
 const tool: Tool = {
   id: "save-decoder",
   name: "LZString Save Decoder",
-  subtitle: "Decode and encode LZString-compressed base64 saves from incremental games.",
-  keywords: ["lzstring", "lz-string", "save", "decode", "encode", "base64", "json", "compress", "kittens"],
+  subtitle:
+    "Decode and encode LZString-compressed base64 saves from incremental games.",
+  keywords: [
+    "lzstring",
+    "lz-string",
+    "save",
+    "decode",
+    "encode",
+    "base64",
+    "json",
+    "compress",
+    "kittens",
+  ],
   mount(el, ctx) {
     el.innerHTML = `
       <div class="options">
@@ -73,31 +89,38 @@ const tool: Tool = {
 
     function setStatus(bar: HTMLElement, kind: string, msg: string) {
       bar.className = bar.className.replace(/ (ok|error)$/, "");
-      if (kind) bar.className += " " + kind;
+      if (kind) {
+        bar.className += ` ${kind}`;
+      }
       (bar.querySelector(".status-text") as HTMLElement).textContent = msg;
     }
 
     function indentValue(): string | null {
       const v = $optIndent.value;
-      if (v === "off") return null;
+      if (v === "off") {
+        return null;
+      }
       return v === "tab" ? "\t" : " ".repeat(Number(v));
     }
 
     /** State layout: `<indent>.<encoded save, base64 with + and / made URL-safe>`. */
     function publishState(): boolean {
-      const raw = $enc.value.replace(/\s+/g, "");
+      const raw = $enc.value.replaceAll(/\s+/g, "");
       let packed = "";
       let fits = true;
       if (raw && /^[A-Za-z0-9+/=]+$/.test(raw)) {
-        if (raw.length <= STATE_CAP) packed = raw.replace(/\+/g, "-").replace(/\//g, "_");
-        else fits = false;
+        if (raw.length <= STATE_CAP) {
+          packed = raw.replaceAll("+", "-").replaceAll("/", "_");
+        } else {
+          fits = false;
+        }
       }
-      ctx.setState($optIndent.value + "." + packed);
+      ctx.setState(`${$optIndent.value}.${packed}`);
       return fits;
     }
 
     function decode() {
-      const raw = $enc.value.replace(/\s+/g, "");
+      const raw = $enc.value.replaceAll(/\s+/g, "");
       const linked = publishState();
       if (!raw) {
         setStatus($encStatus, "", "");
@@ -119,14 +142,22 @@ const tool: Tool = {
       try {
         const json = JSON.parse(decoded);
         note = "JSON";
-        out = indent === null ? JSON.stringify(json) : JSON.stringify(json, null, indent);
+        out =
+          indent === null
+            ? JSON.stringify(json)
+            : JSON.stringify(json, null, indent);
       } catch {
         // not JSON: show the raw decoded string
       }
       $dec.value = out;
       syncCopy();
-      setStatus($encStatus, "ok", formatBytes(raw.length) + " decoded to " + formatBytes(out.length) + " (" + note + ")" +
-        (linked ? "" : " · too large to keep in the URL"));
+      setStatus(
+        $encStatus,
+        "ok",
+        `${formatBytes(raw.length)} decoded to ${formatBytes(out.length)} (${
+          note
+        })${linked ? "" : " · too large to keep in the URL"}`
+      );
       setStatus($decStatus, "", "");
     }
 
@@ -139,18 +170,27 @@ const tool: Tool = {
       let data: string;
       try {
         data = JSON.stringify(JSON.parse(raw));
-      } catch (e) {
+      } catch (error) {
         // Refuse rather than compress broken text: games JSON.parse the
         // decompressed payload and would surface this error on import.
-        setStatus($decStatus, "error", "Not valid JSON, not encoding. " + (e as Error).message);
+        setStatus(
+          $decStatus,
+          "error",
+          `Not valid JSON, not encoding. ${(error as Error).message}`
+        );
         return;
       }
       const encoded = LZString.compressToBase64(data);
       $enc.value = encoded;
       syncCopy();
       const linked = publishState();
-      setStatus($decStatus, "ok", formatBytes(raw.length) + " encoded to " + formatBytes(encoded.length) + " (JSON, minified)" +
-        (linked ? "" : " · too large to keep in the URL"));
+      setStatus(
+        $decStatus,
+        "ok",
+        `${formatBytes(raw.length)} encoded to ${formatBytes(
+          encoded.length
+        )} (JSON, minified)${linked ? "" : " · too large to keep in the URL"}`
+      );
       setStatus($encStatus, "", "Encoded output");
     }
 
@@ -160,59 +200,102 @@ const tool: Tool = {
       timer = setTimeout(fn, 120);
     }
 
-    $enc.addEventListener("input", () => { syncCopy(); schedule(decode); });
-    $dec.addEventListener("input", () => { syncCopy(); schedule(encode); });
+    $enc.addEventListener("input", () => {
+      syncCopy();
+      schedule(decode);
+    });
+    $dec.addEventListener("input", () => {
+      syncCopy();
+      schedule(encode);
+    });
     $optIndent.addEventListener("change", () => {
-      if ($enc.value.trim()) decode();
-      else publishState();
+      if ($enc.value.trim()) {
+        decode();
+      } else {
+        publishState();
+      }
     });
 
     ctx.onRestore((payload) => {
       const dot = payload.indexOf(".");
       const indent = dot === -1 ? payload : payload.slice(0, dot);
       const packed = dot === -1 ? "" : payload.slice(dot + 1);
-      if (["2", "4", "tab", "off"].includes(indent)) $optIndent.value = indent;
-      if (packed) $enc.value = packed.replace(/-/g, "+").replace(/_/g, "/");
-      if ($enc.value.trim()) decode();
+      if (["2", "4", "tab", "off"].includes(indent)) {
+        $optIndent.value = indent;
+      }
+      if (packed) {
+        $enc.value = packed.replaceAll("-", "+").replaceAll("_", "/");
+      }
+      if ($enc.value.trim()) {
+        decode();
+      }
       syncCopy();
     });
 
-    async function pasteInto(area: HTMLTextAreaElement, run: () => void, bar: HTMLElement) {
+    async function pasteInto(
+      area: HTMLTextAreaElement,
+      run: () => void,
+      bar: HTMLElement
+    ) {
       try {
         area.value = await navigator.clipboard.readText();
         syncCopy();
         run();
       } catch {
-        setStatus(bar, "error", "The browser blocked clipboard access. Paste with the keyboard instead.");
+        setStatus(
+          bar,
+          "error",
+          "The browser blocked clipboard access. Paste with the keyboard instead."
+        );
       }
     }
 
     function copyFrom(area: HTMLTextAreaElement, btn: HTMLButtonElement) {
-      if (!area.value) return;
+      if (!area.value) {
+        return;
+      }
       navigator.clipboard.writeText(area.value).then(() => {
         const old = btn.textContent;
         btn.textContent = "Copied";
-        setTimeout(() => { btn.textContent = old; }, 1200);
+        setTimeout(() => {
+          btn.textContent = old;
+        }, 1200);
       });
     }
 
-    (el.querySelector(".btn-paste-enc") as HTMLButtonElement).addEventListener("click", () => pasteInto($enc, decode, $encStatus));
-    (el.querySelector(".btn-paste-dec") as HTMLButtonElement).addEventListener("click", () => pasteInto($dec, encode, $decStatus));
-    $copyEnc.addEventListener("click", function () { copyFrom($enc, this); });
-    $copyDec.addEventListener("click", function () { copyFrom($dec, this); });
-    (el.querySelector(".btn-clear-enc") as HTMLButtonElement).addEventListener("click", () => {
-      $enc.value = "";
-      syncCopy();
-      publishState();
-      setStatus($encStatus, "", "");
-      $enc.focus();
+    (el.querySelector(".btn-paste-enc") as HTMLButtonElement).addEventListener(
+      "click",
+      () => pasteInto($enc, decode, $encStatus)
+    );
+    (el.querySelector(".btn-paste-dec") as HTMLButtonElement).addEventListener(
+      "click",
+      () => pasteInto($dec, encode, $decStatus)
+    );
+    $copyEnc.addEventListener("click", function mount() {
+      copyFrom($enc, this);
     });
-    (el.querySelector(".btn-clear-dec") as HTMLButtonElement).addEventListener("click", () => {
-      $dec.value = "";
-      syncCopy();
-      setStatus($decStatus, "", "");
-      $dec.focus();
+    $copyDec.addEventListener("click", function mount() {
+      copyFrom($dec, this);
     });
+    (el.querySelector(".btn-clear-enc") as HTMLButtonElement).addEventListener(
+      "click",
+      () => {
+        $enc.value = "";
+        syncCopy();
+        publishState();
+        setStatus($encStatus, "", "");
+        $enc.focus();
+      }
+    );
+    (el.querySelector(".btn-clear-dec") as HTMLButtonElement).addEventListener(
+      "click",
+      () => {
+        $dec.value = "";
+        syncCopy();
+        setStatus($decStatus, "", "");
+        $dec.focus();
+      }
+    );
   },
 };
 

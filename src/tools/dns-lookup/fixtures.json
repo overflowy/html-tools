@@ -1,22 +1,201 @@
 {
-  "cloudflare_a": {"Status":0,"TC":false,"RD":true,"RA":true,"AD":false,"CD":false,"Question":[{"name":"example.com","type":1}],"Answer":[{"name":"example.com","type":1,"TTL":252,"data":"104.20.23.154"},{"name":"example.com","type":1,"TTL":252,"data":"172.66.147.243"}]},
-  "google_a": {"Status":0,"TC":false,"RD":true,"RA":true,"AD":true,"CD":false,"Question":[{"name":"example.com.","type":1}],"Answer":[{"name":"example.com.","type":1,"TTL":300,"data":"104.20.23.154"},{"name":"example.com.","type":1,"TTL":300,"data":"172.66.147.243"}],"Comment":"Response from 108.162.195.228."},
-  "cloudflare_mx": {"Status":0,"TC":false,"RD":true,"RA":true,"AD":false,"CD":false,"Question":[{"name":"example.com","type":15}],"Answer":[{"name":"example.com","type":15,"TTL":300,"data":"10 mail.example.com."},{"name":"example.com","type":15,"TTL":300,"data":"20 mail2.example.com."},{"name":"example.com","type":15,"TTL":300,"data":"30 mail3.example.com."}]},
-  "cloudflare_txt": {"Status":0,"TC":false,"RD":true,"RA":true,"AD":true,"CD":false,"Question":[{"name":"example.com","type":16}],"Answer":[{"name":"example.com","type":16,"TTL":300,"data":"\"v=spf1 -all\""},{"name":"example.com","type":16,"TTL":300,"data":"\"_k2n1y4vw3qtb4skdx9e7dxt97qrmmq9\""}]},
-  "cloudflare_empty": {"Status":0,"TC":false,"RD":true,"RA":true,"AD":true,"CD":false,"Question":[{"name":"example.com","type":33}],"Authority":[{"name":"example.com","type":6,"TTL":1800,"data":"elliott.ns.cloudflare.com. dns.cloudflare.com. 2411783310 10000 2400 604800 1800"}]},
-  "cloudflare_nxdomain": {"Status":3,"TC":false,"RD":true,"RA":true,"AD":false,"CD":false,"Question":[{"name":"doesnotexist.example.com","type":1}],"Authority":[{"name":"example.com","type":6,"TTL":1800,"data":"elliott.ns.cloudflare.com. dns.cloudflare.com. 2411783310 10000 2400 604800 1800"}]},
-  "cloudflare_notimp": {"Status":4,"TC":false,"RD":true,"RA":true,"AD":false,"CD":false,"Question":[{"name":"example.com","type":255}],"Comment":["EDE(21): Not Supported"]},
-  "cloudflare_a_dnssec": {"Status":0,"TC":false,"RD":true,"RA":true,"AD":true,"CD":false,"Question":[{"name":"example.com","type":1}],"Answer":[{"name":"example.com","type":1,"TTL":173,"data":"172.66.147.243"},{"name":"example.com","type":1,"TTL":173,"data":"104.20.23.154"},{"name":"example.com","type":46,"TTL":173,"data":"A 13 2 300 1788383032 1788203032 34505 example.com. PpGO35V9ibQXF0dqO+EAGhBmiM5i9FtOnVCeyaWCNjWphRhXSnqkFKy2ibgaxXq+HMH6Aj3BhHKhVQXOhCtjRw=="}]},
-  "cloudflare_ptr": {"Status":0,"TC":false,"RD":true,"RA":true,"AD":false,"CD":false,"Question":[{"name":"8.8.8.8.in-addr.arpa","type":12}],"Answer":[{"name":"8.8.8.8.in-addr.arpa","type":12,"TTL":85783,"data":"dns.google."}]},
-  "cloudflare_https": {"Status":0,"TC":false,"RD":true,"RA":true,"AD":true,"CD":false,"Question":[{"name":"cloudflare.com","type":65}],"Answer":[{"name":"cloudflare.com","type":65,"TTL":49,"data":"1 . alpn=h3,h2 ipv4hint=104.16.132.229,104.16.133.229 ipv6hint=2606:4700::6810:84e5,2606:4700::6810:85e5"}]},
+  "cloudflare_a": {
+    "Status": 0,
+    "TC": false,
+    "RD": true,
+    "RA": true,
+    "AD": false,
+    "CD": false,
+    "Question": [{ "name": "example.com", "type": 1 }],
+    "Answer": [
+      { "name": "example.com", "type": 1, "TTL": 252, "data": "104.20.23.154" },
+      { "name": "example.com", "type": 1, "TTL": 252, "data": "172.66.147.243" }
+    ]
+  },
+  "google_a": {
+    "Status": 0,
+    "TC": false,
+    "RD": true,
+    "RA": true,
+    "AD": true,
+    "CD": false,
+    "Question": [{ "name": "example.com.", "type": 1 }],
+    "Answer": [
+      {
+        "name": "example.com.",
+        "type": 1,
+        "TTL": 300,
+        "data": "104.20.23.154"
+      },
+      {
+        "name": "example.com.",
+        "type": 1,
+        "TTL": 300,
+        "data": "172.66.147.243"
+      }
+    ],
+    "Comment": "Response from 108.162.195.228."
+  },
+  "cloudflare_mx": {
+    "Status": 0,
+    "TC": false,
+    "RD": true,
+    "RA": true,
+    "AD": false,
+    "CD": false,
+    "Question": [{ "name": "example.com", "type": 15 }],
+    "Answer": [
+      {
+        "name": "example.com",
+        "type": 15,
+        "TTL": 300,
+        "data": "10 mail.example.com."
+      },
+      {
+        "name": "example.com",
+        "type": 15,
+        "TTL": 300,
+        "data": "20 mail2.example.com."
+      },
+      {
+        "name": "example.com",
+        "type": 15,
+        "TTL": 300,
+        "data": "30 mail3.example.com."
+      }
+    ]
+  },
+  "cloudflare_txt": {
+    "Status": 0,
+    "TC": false,
+    "RD": true,
+    "RA": true,
+    "AD": true,
+    "CD": false,
+    "Question": [{ "name": "example.com", "type": 16 }],
+    "Answer": [
+      {
+        "name": "example.com",
+        "type": 16,
+        "TTL": 300,
+        "data": "\"v=spf1 -all\""
+      },
+      {
+        "name": "example.com",
+        "type": 16,
+        "TTL": 300,
+        "data": "\"_k2n1y4vw3qtb4skdx9e7dxt97qrmmq9\""
+      }
+    ]
+  },
+  "cloudflare_empty": {
+    "Status": 0,
+    "TC": false,
+    "RD": true,
+    "RA": true,
+    "AD": true,
+    "CD": false,
+    "Question": [{ "name": "example.com", "type": 33 }],
+    "Authority": [
+      {
+        "name": "example.com",
+        "type": 6,
+        "TTL": 1800,
+        "data": "elliott.ns.cloudflare.com. dns.cloudflare.com. 2411783310 10000 2400 604800 1800"
+      }
+    ]
+  },
+  "cloudflare_nxdomain": {
+    "Status": 3,
+    "TC": false,
+    "RD": true,
+    "RA": true,
+    "AD": false,
+    "CD": false,
+    "Question": [{ "name": "doesnotexist.example.com", "type": 1 }],
+    "Authority": [
+      {
+        "name": "example.com",
+        "type": 6,
+        "TTL": 1800,
+        "data": "elliott.ns.cloudflare.com. dns.cloudflare.com. 2411783310 10000 2400 604800 1800"
+      }
+    ]
+  },
+  "cloudflare_notimp": {
+    "Status": 4,
+    "TC": false,
+    "RD": true,
+    "RA": true,
+    "AD": false,
+    "CD": false,
+    "Question": [{ "name": "example.com", "type": 255 }],
+    "Comment": ["EDE(21): Not Supported"]
+  },
+  "cloudflare_a_dnssec": {
+    "Status": 0,
+    "TC": false,
+    "RD": true,
+    "RA": true,
+    "AD": true,
+    "CD": false,
+    "Question": [{ "name": "example.com", "type": 1 }],
+    "Answer": [
+      {
+        "name": "example.com",
+        "type": 1,
+        "TTL": 173,
+        "data": "172.66.147.243"
+      },
+      { "name": "example.com", "type": 1, "TTL": 173, "data": "104.20.23.154" },
+      {
+        "name": "example.com",
+        "type": 46,
+        "TTL": 173,
+        "data": "A 13 2 300 1788383032 1788203032 34505 example.com. PpGO35V9ibQXF0dqO+EAGhBmiM5i9FtOnVCeyaWCNjWphRhXSnqkFKy2ibgaxXq+HMH6Aj3BhHKhVQXOhCtjRw=="
+      }
+    ]
+  },
+  "cloudflare_ptr": {
+    "Status": 0,
+    "TC": false,
+    "RD": true,
+    "RA": true,
+    "AD": false,
+    "CD": false,
+    "Question": [{ "name": "8.8.8.8.in-addr.arpa", "type": 12 }],
+    "Answer": [
+      {
+        "name": "8.8.8.8.in-addr.arpa",
+        "type": 12,
+        "TTL": 85783,
+        "data": "dns.google."
+      }
+    ]
+  },
+  "cloudflare_https": {
+    "Status": 0,
+    "TC": false,
+    "RD": true,
+    "RA": true,
+    "AD": true,
+    "CD": false,
+    "Question": [{ "name": "cloudflare.com", "type": 65 }],
+    "Answer": [
+      {
+        "name": "cloudflare.com",
+        "type": 65,
+        "TTL": 49,
+        "data": "1 . alpn=h3,h2 ipv4hint=104.16.132.229,104.16.133.229 ipv6hint=2606:4700::6810:84e5,2606:4700::6810:85e5"
+      }
+    ]
+  },
   "certspotter_page": [
     {
       "id": "15224312938",
       "tbs_sha256": "2cc6e913",
       "cert_sha256": "20e64153",
-      "dns_names": [
-        "staging.example.com"
-      ],
+      "dns_names": ["staging.example.com"],
       "not_before": "2026-06-05T06:11:15Z",
       "not_after": "2026-09-03T07:09:54Z",
       "revoked": false
@@ -25,11 +204,7 @@
       "id": "15226275449",
       "tbs_sha256": "3a3acd64",
       "cert_sha256": "39ade500",
-      "dns_names": [
-        "example.com",
-        "www.example.com",
-        "DOCS.example.com."
-      ],
+      "dns_names": ["example.com", "www.example.com", "DOCS.example.com."],
       "not_before": "2026-06-05T08:46:06Z",
       "not_after": "2026-09-03T09:46:01Z",
       "revoked": false
@@ -61,28 +236,229 @@
       "\"v=spf1 include:_spf.example.net mx ~all\"",
       "\"google-site-verification=abc123\""
     ],
-    "_spf.example.net": [
-      "\"v=spf1 ip4:192.0.2.0/24 ip6:2001:db8::/32 -all\""
-    ],
+    "_spf.example.net": ["\"v=spf1 ip4:192.0.2.0/24 ip6:2001:db8::/32 -all\""],
     "_dmarc.example.com": [
       "\"v=DMARC1; p=quarantine; rua=mailto:dmarc@example.com; pct=100\""
     ],
     "google._domainkey.example.com": [
       "\"v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAr95W77w0FzaZfb9nsOUL4rMlNhF+vEduzhy6m2r0CI5TTmWZfOcJu5m5lmUafVrvhNjhyGZV7rnS8+YN9l5EVshzmVqHs8u2dn3ay4X2VNF6RItlS4s5XVxLX+YVlWAos2q0mA27LCo+nd4tLtyEtBWHrL8X\" \"/nmQ7+/6SqIFV3f+LMCQSx4yMx+rOp/co0+bVlk3/8nJKOBVoqPbq4vPDOWMGzMoFPqdfDFnWrU0Fn9rg0VGeg+LTTJyE5ckEFD35SY0fUk1PuqhRXobuAZO6+aexyHoWc8ffVVQh1DpQUNAhjgpZ4cGdMLQ+naz45VUmITKp3G1eNZA1J+xWEaxqwIDAQAB\""
     ],
-    "k1._domainkey.example.com": [
-      "\"v=DKIM1; k=rsa; p=\""
-    ],
+    "k1._domainkey.example.com": ["\"v=DKIM1; k=rsa; p=\""],
     "default._bimi.example.com": [
       "\"v=BIMI1; l=https://example.com/brand/logo.svg; a=https://example.com/brand/vmc.pem\""
     ]
   },
   "bimi_logo": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<svg xmlns=\"http://www.w3.org/2000/svg\" version=\"1.2\" baseProfile=\"tiny-ps\" viewBox=\"0 0 64 64\"><title>Example</title><rect width=\"64\" height=\"64\" fill=\"#c96442\"/></svg>\n",
   "bimi_cert": "-----BEGIN CERTIFICATE-----\nMIIDMzCCAhugAwIBAgIUFTEedhGJqGvaig4PvUaS6emFlUMwDQYJKoZIhvcNAQEL\nBQAwKDEUMBIGA1UEAwwLZXhhbXBsZS5jb20xEDAOBgNVBAoMB0V4YW1wbGUwIBcN\nMjYwOTAxMjA1MzAyWhgPMjEyNjA4MDgyMDUzMDJaMCgxFDASBgNVBAMMC2V4YW1w\nbGUuY29tMRAwDgYDVQQKDAdFeGFtcGxlMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8A\nMIIBCgKCAQEA2UXAUs+5ytYRLRETLH2VH2lzY1HCf4BLowBcxH4Tpk6EkR7uKUlZ\nZW7UX5emr+8SbxzTnUs+G9A3Fma0H6+bso+vb8Uq638Krtjz2xoqKVNXq+TIXn11\nr0oOXQVbZSaZLOnxcIVRqn5Xub/CGBWf+6oyAjVM5RoG8QWD9UFjUkXwPJtX1BXE\nq6xlAANlM58O5fLMQ/E6+VvNHlZQPkwMyy35Vl3GJkjdSnYfFshsTn6YG5FTCxNI\n4rQvB3/Qc+GqcS0C7r2TBesshK3z4uTkD3p9Bj2FAqXQ72wApYSml2fpae9ZP5SH\nKbJ9b5SSnzkcwDhHA9cm2+y+zmyT9urHLwIDAQABo1MwUTAdBgNVHQ4EFgQUn4iz\nml/8ErzYa/+T+csibbBBJ0cwHwYDVR0jBBgwFoAUn4izml/8ErzYa/+T+csibbBB\nJ0cwDwYDVR0TAQH/BAUwAwEB/zANBgkqhkiG9w0BAQsFAAOCAQEAr6jBRSaaRuc0\nLHIHDlpRj0JzHADZ2VE2QQUzMyInvLDk0EyzfeMZIPB9ItMBCp6LqbB7GDrsSoqA\nZ5S2spJSvzlUJP0krNQXsmShlgwrFjAa48VaSILqEFiEflsWgoDzhZt+UzSdYE4M\nUpHd+OyxQ7fZRYPB6G0hAgDpQj/6Ixk8fpmQcthq6DPSoS+SD30UD9JbF/pfKXps\n2zXO38rHZxPrEG6Szfb6p1JD5ai57T+Vc0u1MEwtc9iPEvljV4Babcj8EzKsPlZB\nw8H4pBiX+rxn69U76jn+oRZcyfqJ+l79IiMBD5HzN9vITsDxEJautOU5Yi3/iPq1\n95qWD5hxcw==\n-----END CERTIFICATE-----\n",
-  "rdap_bootstrap_dns": {"version":"1.0","services":[[["com"],["https://rdap.verisign.com/com/v1/"]],[["net"],["https://rdap.verisign.com/net/v1/"]],[["org"],["https://rdap.publicinterestregistry.org/rdap/"]],[["uk"],["https://rdap.nominet.uk/uk/"]]]},
-  "rdap_bootstrap_ipv4": {"version":"1.0","services":[[["8.0.0.0/8","3.0.0.0/8"],["https://rdap.arin.net/registry/","http://rdap.arin.net/registry/"]],[["193.0.0.0/8","2.0.0.0/8"],["https://rdap.db.ripe.net/"]]]},
-  "rdap_bootstrap_ipv6": {"version":"1.0","services":[[["2001:4860::/32"],["https://rdap.arin.net/registry/"]],[["2001:600::/23"],["https://rdap.db.ripe.net/"]]]},
-  "rdap_domain": {"objectClassName":"domain","handle":"2336799_DOMAIN_COM-VRSN","ldhName":"EXAMPLE.COM","status":["client delete prohibited","client transfer prohibited","client update prohibited"],"entities":[{"objectClassName":"entity","handle":"376","roles":["registrar"],"publicIds":[{"type":"IANA Registrar ID","identifier":"376"}],"vcardArray":["vcard",[["version",{},"text","4.0"],["fn",{},"text","RESERVED-Internet Assigned Numbers Authority"]]],"entities":[{"objectClassName":"entity","roles":["abuse"],"vcardArray":["vcard",[["version",{},"text","4.0"],["fn",{},"text","Abuse Desk"],["tel",{"type":"voice"},"uri","tel:+1.5550100"],["email",{},"text","abuse@registrar.example"]]]}]}],"events":[{"eventAction":"registration","eventDate":"1995-08-14T04:00:00Z"},{"eventAction":"expiration","eventDate":"2099-08-13T04:00:00Z"},{"eventAction":"last changed","eventDate":"2026-08-14T08:01:43Z"},{"eventAction":"last update of RDAP database","eventDate":"2026-09-01T21:03:53Z"}],"secureDNS":{"delegationSigned":true,"dsData":[{"keyTag":2371,"algorithm":13,"digestType":2,"digest":"C988EC423E3880EB8DD8A46FE06CA230EE23F35B578D64E78B29C3E1C83D245A"}]},"nameservers":[{"objectClassName":"nameserver","ldhName":"ELLIOTT.NS.CLOUDFLARE.COM"},{"objectClassName":"nameserver","ldhName":"HERA.NS.CLOUDFLARE.COM"}]},
-  "rdap_ip": {"cidr0_cidrs":[{"v4prefix":"8.8.8.0","length":24}],"endAddress":"8.8.8.255","entities":[{"entities":[{"handle":"ABUSE5250-ARIN","objectClassName":"entity","roles":["abuse"],"status":["validated"],"vcardArray":["vcard",[["version",{},"text","4.0"],["adr",{"label":"1600 Amphitheatre Parkway\nMountain View\nCA\n94043\nUnited States"},"text",["","","","","","",""]],["fn",{},"text","Abuse"],["org",{},"text","Google Inc."],["kind",{},"text","group"],["email",{},"text","network-abuse@google.com"],["tel",{"type":["work","voice"]},"text","+1-650-253-0000"]]]},{"handle":"ZG39-ARIN","objectClassName":"entity","roles":["administrative","technical"],"status":["validated"],"vcardArray":["vcard",[["version",{},"text","4.0"],["adr",{"label":"1600 Amphitheatre Parkway\nMountain View\nCA\n94043\nUnited States"},"text",["","","","","","",""]],["fn",{},"text","Google LLC"],["org",{},"text","Google LLC"],["kind",{},"text","group"],["email",{},"text","arin-contact@google.com"],["tel",{"type":["work","voice"]},"text","+1-650-253-0000"]]]}],"handle":"GOGL","objectClassName":"entity","roles":["registrant"],"vcardArray":["vcard",[["version",{},"text","4.0"],["fn",{},"text","Google LLC"],["adr",{"label":"1600 Amphitheatre Parkway\nMountain View\nCA\n94043\nUnited States"},"text",["","","","","","",""]],["kind",{},"text","org"]]]}],"events":[{"eventAction":"last changed","eventDate":"2023-12-28T17:24:56-05:00"},{"eventAction":"registration","eventDate":"2023-12-28T17:24:33-05:00"}],"handle":"NET-8-8-8-0-2","ipVersion":"v4","name":"GOGL","objectClassName":"ip network","parentHandle":"NET-8-0-0-0-0","startAddress":"8.8.8.0","status":["active"],"type":"DIRECT ALLOCATION"},
-  "whois_text": {"domain":"google.it","available":"no","type":"Italy","registrar":"MarkMonitor International Limited","statuses":["ok"],"created":944784000,"updated":1781046814,"expires":4080412800,"whois":"Domain:             google.it\r\nStatus:             ok\r\nSigned:             no\r\nCreated:            1999-12-10 00:00:00\r\nLast Update:        2026-06-09 00:33:34\r\nExpire Date:        2099-04-21\r\n\r\nRegistrant\r\n  Organization:     Google LLC\r\n\r\nRegistrar\r\n  Organization:     MarkMonitor International Limited\r\n  Name:             MARKMONITOR-REG\r\n\r\nNameservers\r\n  ns1.google.com\r\n  ns2.google.com\r\n"}
+  "rdap_bootstrap_dns": {
+    "version": "1.0",
+    "services": [
+      [["com"], ["https://rdap.verisign.com/com/v1/"]],
+      [["net"], ["https://rdap.verisign.com/net/v1/"]],
+      [["org"], ["https://rdap.publicinterestregistry.org/rdap/"]],
+      [["uk"], ["https://rdap.nominet.uk/uk/"]]
+    ]
+  },
+  "rdap_bootstrap_ipv4": {
+    "version": "1.0",
+    "services": [
+      [
+        ["8.0.0.0/8", "3.0.0.0/8"],
+        ["https://rdap.arin.net/registry/", "http://rdap.arin.net/registry/"]
+      ],
+      [["193.0.0.0/8", "2.0.0.0/8"], ["https://rdap.db.ripe.net/"]]
+    ]
+  },
+  "rdap_bootstrap_ipv6": {
+    "version": "1.0",
+    "services": [
+      [["2001:4860::/32"], ["https://rdap.arin.net/registry/"]],
+      [["2001:600::/23"], ["https://rdap.db.ripe.net/"]]
+    ]
+  },
+  "rdap_domain": {
+    "objectClassName": "domain",
+    "handle": "2336799_DOMAIN_COM-VRSN",
+    "ldhName": "EXAMPLE.COM",
+    "status": [
+      "client delete prohibited",
+      "client transfer prohibited",
+      "client update prohibited"
+    ],
+    "entities": [
+      {
+        "objectClassName": "entity",
+        "handle": "376",
+        "roles": ["registrar"],
+        "publicIds": [{ "type": "IANA Registrar ID", "identifier": "376" }],
+        "vcardArray": [
+          "vcard",
+          [
+            ["version", {}, "text", "4.0"],
+            ["fn", {}, "text", "RESERVED-Internet Assigned Numbers Authority"]
+          ]
+        ],
+        "entities": [
+          {
+            "objectClassName": "entity",
+            "roles": ["abuse"],
+            "vcardArray": [
+              "vcard",
+              [
+                ["version", {}, "text", "4.0"],
+                ["fn", {}, "text", "Abuse Desk"],
+                ["tel", { "type": "voice" }, "uri", "tel:+1.5550100"],
+                ["email", {}, "text", "abuse@registrar.example"]
+              ]
+            ]
+          }
+        ]
+      }
+    ],
+    "events": [
+      { "eventAction": "registration", "eventDate": "1995-08-14T04:00:00Z" },
+      { "eventAction": "expiration", "eventDate": "2099-08-13T04:00:00Z" },
+      { "eventAction": "last changed", "eventDate": "2026-08-14T08:01:43Z" },
+      {
+        "eventAction": "last update of RDAP database",
+        "eventDate": "2026-09-01T21:03:53Z"
+      }
+    ],
+    "secureDNS": {
+      "delegationSigned": true,
+      "dsData": [
+        {
+          "keyTag": 2371,
+          "algorithm": 13,
+          "digestType": 2,
+          "digest": "C988EC423E3880EB8DD8A46FE06CA230EE23F35B578D64E78B29C3E1C83D245A"
+        }
+      ]
+    },
+    "nameservers": [
+      {
+        "objectClassName": "nameserver",
+        "ldhName": "ELLIOTT.NS.CLOUDFLARE.COM"
+      },
+      { "objectClassName": "nameserver", "ldhName": "HERA.NS.CLOUDFLARE.COM" }
+    ]
+  },
+  "rdap_ip": {
+    "cidr0_cidrs": [{ "v4prefix": "8.8.8.0", "length": 24 }],
+    "endAddress": "8.8.8.255",
+    "entities": [
+      {
+        "entities": [
+          {
+            "handle": "ABUSE5250-ARIN",
+            "objectClassName": "entity",
+            "roles": ["abuse"],
+            "status": ["validated"],
+            "vcardArray": [
+              "vcard",
+              [
+                ["version", {}, "text", "4.0"],
+                [
+                  "adr",
+                  {
+                    "label": "1600 Amphitheatre Parkway\nMountain View\nCA\n94043\nUnited States"
+                  },
+                  "text",
+                  ["", "", "", "", "", "", ""]
+                ],
+                ["fn", {}, "text", "Abuse"],
+                ["org", {}, "text", "Google Inc."],
+                ["kind", {}, "text", "group"],
+                ["email", {}, "text", "network-abuse@google.com"],
+                [
+                  "tel",
+                  { "type": ["work", "voice"] },
+                  "text",
+                  "+1-650-253-0000"
+                ]
+              ]
+            ]
+          },
+          {
+            "handle": "ZG39-ARIN",
+            "objectClassName": "entity",
+            "roles": ["administrative", "technical"],
+            "status": ["validated"],
+            "vcardArray": [
+              "vcard",
+              [
+                ["version", {}, "text", "4.0"],
+                [
+                  "adr",
+                  {
+                    "label": "1600 Amphitheatre Parkway\nMountain View\nCA\n94043\nUnited States"
+                  },
+                  "text",
+                  ["", "", "", "", "", "", ""]
+                ],
+                ["fn", {}, "text", "Google LLC"],
+                ["org", {}, "text", "Google LLC"],
+                ["kind", {}, "text", "group"],
+                ["email", {}, "text", "arin-contact@google.com"],
+                [
+                  "tel",
+                  { "type": ["work", "voice"] },
+                  "text",
+                  "+1-650-253-0000"
+                ]
+              ]
+            ]
+          }
+        ],
+        "handle": "GOGL",
+        "objectClassName": "entity",
+        "roles": ["registrant"],
+        "vcardArray": [
+          "vcard",
+          [
+            ["version", {}, "text", "4.0"],
+            ["fn", {}, "text", "Google LLC"],
+            [
+              "adr",
+              {
+                "label": "1600 Amphitheatre Parkway\nMountain View\nCA\n94043\nUnited States"
+              },
+              "text",
+              ["", "", "", "", "", "", ""]
+            ],
+            ["kind", {}, "text", "org"]
+          ]
+        ]
+      }
+    ],
+    "events": [
+      {
+        "eventAction": "last changed",
+        "eventDate": "2023-12-28T17:24:56-05:00"
+      },
+      {
+        "eventAction": "registration",
+        "eventDate": "2023-12-28T17:24:33-05:00"
+      }
+    ],
+    "handle": "NET-8-8-8-0-2",
+    "ipVersion": "v4",
+    "name": "GOGL",
+    "objectClassName": "ip network",
+    "parentHandle": "NET-8-0-0-0-0",
+    "startAddress": "8.8.8.0",
+    "status": ["active"],
+    "type": "DIRECT ALLOCATION"
+  },
+  "whois_text": {
+    "domain": "google.it",
+    "available": "no",
+    "type": "Italy",
+    "registrar": "MarkMonitor International Limited",
+    "statuses": ["ok"],
+    "created": 944784000,
+    "updated": 1781046814,
+    "expires": 4080412800,
+    "whois": "Domain:             google.it\r\nStatus:             ok\r\nSigned:             no\r\nCreated:            1999-12-10 00:00:00\r\nLast Update:        2026-06-09 00:33:34\r\nExpire Date:        2099-04-21\r\n\r\nRegistrant\r\n  Organization:     Google LLC\r\n\r\nRegistrar\r\n  Organization:     MarkMonitor International Limited\r\n  Name:             MARKMONITOR-REG\r\n\r\nNameservers\r\n  ns1.google.com\r\n  ns2.google.com\r\n"
+  }
 }

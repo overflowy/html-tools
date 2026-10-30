@@ -9,19 +9,24 @@
 
 import type { PyodideAPI, loadPyodide as LoadPyodide } from "pyodide";
 import type { PyProxy } from "pyodide/ffi";
+
 import { scriptDataUrl } from "../../shared/script-url";
-import RUNTIME_PY from "./runtime.py";
 import MPL_BACKEND_PY from "./mpl_backend.py";
+import RUNTIME_PY from "./runtime.py";
 
 type PyodideConfig = NonNullable<Parameters<typeof LoadPyodide>[0]>;
 
 /** The Emscripten filesystem calls used here; Pyodide's types leave FS undeclared. */
 interface EmFS {
-  mkdirTree(path: string): void;
-  writeFile(path: string, data: string | Uint8Array, opts?: { canOwn?: boolean }): void;
-  unlink(path: string): void;
-  rmdir(path: string): void;
-  readdir(path: string): string[];
+  mkdirTree: (path: string) => void;
+  writeFile: (
+    path: string,
+    data: string | Uint8Array,
+    opts?: { canOwn?: boolean }
+  ) => void;
+  unlink: (path: string) => void;
+  rmdir: (path: string) => void;
+  readdir: (path: string) => string[];
 }
 
 export const PROJECT_ROOT = "/project";
@@ -77,7 +82,14 @@ export type ReplResult =
 
 export type PyRequest =
   | ({ type: "boot"; id: number } & BootOptions)
-  | { type: "files"; id: number; files: FileEntry[]; removed: string[]; folders: string[]; removedFolders: string[] }
+  | {
+      type: "files";
+      id: number;
+      files: FileEntry[];
+      removed: string[];
+      folders: string[];
+      removedFolders: string[];
+    }
   | ({ type: "run"; id: number } & RunOptions)
   | { type: "install"; id: number; specs: string[] }
   | { type: "uninstall"; id: number; names: string[] }
@@ -90,7 +102,14 @@ export type PyRequest =
   /** The Terminal's answer to an input request: a line with its newline, or null at end of input. */
   | { type: "inputReply"; id: number; line: string | null }
   /** The main thread's answer to a fetch request. */
-  | { type: "fetched"; id: number; ok: boolean; status?: number; bytes?: ArrayBuffer; error?: string };
+  | {
+      type: "fetched";
+      id: number;
+      ok: boolean;
+      status?: number;
+      bytes?: ArrayBuffer;
+      error?: string;
+    };
 
 export type PyResponse =
   | { type: "fetch"; id: number; url: string }
@@ -105,7 +124,9 @@ export type PyResponse =
 // A dedicated worker has no targetOrigin to give (and Bun's types disagree
 // with the DOM's about Transferable).
 const post = (msg: PyResponse, transfer: Transferable[] = []) =>
-  (self as unknown as { postMessage(m: unknown, t: Transferable[]): void }).postMessage(msg, transfer);
+  (
+    self as unknown as { postMessage: (m: unknown, t: Transferable[]) => void }
+  ).postMessage(msg, transfer);
 
 let pyodide: PyodideAPI | null = null;
 let runtime: PyProxy | null = null;
@@ -115,18 +136,29 @@ let terminal = { cols: 80, rows: 24 };
 
 const preloaded = new Map<string, ArrayBuffer>();
 let nextFetchId = 1;
-const fetches = new Map<number, { resolve: (r: Response) => void; reject: (e: Error) => void }>();
+const fetches = new Map<
+  number,
+  { resolve: (r: Response) => void; reject: (e: Error) => void }
+>();
 const realFetch = globalThis.fetch.bind(globalThis);
 
 function urlOf(input: RequestInfo | URL): string {
-  if (typeof input === "string") return input;
-  if (input instanceof URL) return input.href;
+  if (typeof input === "string") {
+    return input;
+  }
+  if (input instanceof URL) {
+    return input.href;
+  }
   return input.url;
 }
 
 function contentType(url: string): string {
-  if (url.endsWith(".wasm")) return "application/wasm";
-  if (url.endsWith(".json")) return "application/json";
+  if (url.endsWith(".wasm")) {
+    return "application/wasm";
+  }
+  if (url.endsWith(".json")) {
+    return "application/json";
+  }
   return "application/octet-stream";
 }
 
@@ -143,20 +175,40 @@ function askMain(url: string): Promise<Response> {
   });
 }
 
-globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+globalThis.fetch = (async (
+  input: RequestInfo | URL,
+  init?: RequestInit
+): Promise<Response> => {
   const url = urlOf(input);
   const bytes = preloaded.get(url);
-  if (bytes) return new Response(bytes, { headers: { "Content-Type": contentType(url) } });
-  if (isWheel(url)) return askMain(url);
+  if (bytes) {
+    return new Response(bytes, {
+      headers: { "Content-Type": contentType(url) },
+    });
+  }
+  if (isWheel(url)) {
+    return askMain(url);
+  }
   return realFetch(input, init);
 }) as typeof fetch;
 
 function onFetched(msg: Extract<PyRequest, { type: "fetched" }>) {
   const p = fetches.get(msg.id);
-  if (!p) return;
+  if (!p) {
+    return;
+  }
   fetches.delete(msg.id);
-  if (msg.ok && msg.bytes) p.resolve(new Response(msg.bytes, { headers: { "Content-Type": "application/octet-stream" } }));
-  else p.resolve(new Response(msg.error ?? "not available", { status: msg.status ?? 502 }));
+  if (msg.ok && msg.bytes) {
+    p.resolve(
+      new Response(msg.bytes, {
+        headers: { "Content-Type": "application/octet-stream" },
+      })
+    );
+  } else {
+    p.resolve(
+      new Response(msg.error ?? "not available", { status: msg.status ?? 502 })
+    );
+  }
 }
 
 /* ---------------- input ---------------- */
@@ -199,21 +251,31 @@ function writer(stream: "stdout" | "stderr") {
   };
 }
 
-async function boot(opts: BootOptions): Promise<{ python: string; jspi: boolean }> {
-  preloaded.set(opts.cdnBase + "pyodide.asm.wasm", opts.wasm);
-  preloaded.set(opts.cdnBase + "python_stdlib.zip", opts.stdlib);
+async function boot(
+  opts: BootOptions
+): Promise<{ python: string; jspi: boolean }> {
+  preloaded.set(`${opts.cdnBase}pyodide.asm.wasm`, opts.wasm);
+  preloaded.set(`${opts.cdnBase}python_stdlib.zip`, opts.stdlib);
   const loaderUrl = scriptDataUrl(opts.loader, "pyodide.mjs");
   const factoryUrl = scriptDataUrl(opts.factory, "pyodide.asm.mjs");
   post({ type: "progress", message: "Starting Python" });
-  const { loadPyodide } = (await import(loaderUrl)) as { loadPyodide: (c: PyodideConfig) => Promise<PyodideAPI> };
-  const { default: createPyodideModule } = (await import(factoryUrl)) as { default: PyodideConfig["createPyodideModule"] };
+  const { loadPyodide } = (await import(loaderUrl)) as {
+    loadPyodide: (c: PyodideConfig) => Promise<PyodideAPI>;
+  };
+  const { default: createPyodideModule } = (await import(factoryUrl)) as {
+    default: PyodideConfig["createPyodideModule"];
+  };
   const py = await loadPyodide({
     indexURL: opts.cdnBase,
     createPyodideModule,
     lockFileContents: JSON.parse(opts.lock),
     packageBaseUrl: opts.cdnBase,
     packages: opts.packages,
-    env: { HOME: "/home/pyodide", MPLBACKEND: "module://pyide_mpl", PYTHONUNBUFFERED: "1" },
+    env: {
+      HOME: "/home/pyodide",
+      MPLBACKEND: "module://pyide_mpl",
+      PYTHONUNBUFFERED: "1",
+    },
   });
   preloaded.clear();
   pyodide = py;
@@ -223,21 +285,27 @@ async function boot(opts: BootOptions): Promise<{ python: string; jspi: boolean 
   const fs = FS(py);
   fs.mkdirTree(RUNTIME_DIR);
   fs.mkdirTree(PROJECT_ROOT);
-  fs.writeFile(RUNTIME_DIR + "/pyide_runtime.py", RUNTIME_PY);
-  fs.writeFile(RUNTIME_DIR + "/pyide_mpl.py", MPL_BACKEND_PY);
+  fs.writeFile(`${RUNTIME_DIR}/pyide_runtime.py`, RUNTIME_PY);
+  fs.writeFile(`${RUNTIME_DIR}/pyide_mpl.py`, MPL_BACKEND_PY);
   py.runPython(`import sys; sys.path.append(${JSON.stringify(RUNTIME_DIR)})`);
   runtime = py.pyimport("pyide_runtime");
-  const python = py.runPython("import platform; platform.python_version()") as string;
+  const python = py.runPython(
+    "import platform; platform.python_version()"
+  ) as string;
   // Whether run_sync, and with it interactive input, works: only inside a
   // runPythonAsync stack, which is where every Run and REPL line is entered.
-  const jspi = (await py.runPythonAsync("from pyodide.ffi import can_run_sync; can_run_sync()")) as boolean;
+  const jspi = (await py.runPythonAsync(
+    "from pyodide.ffi import can_run_sync; can_run_sync()"
+  )) as boolean;
   return { python, jspi };
 }
 
 /* ---------------- requests ---------------- */
 
 function need(): { py: PyodideAPI; rt: PyProxy } {
-  if (!pyodide || !runtime) throw new Error("The interpreter has not booted.");
+  if (!pyodide || !runtime) {
+    throw new Error("The interpreter has not booted.");
+  }
   return { py: pyodide, rt: runtime };
 }
 
@@ -256,32 +324,41 @@ function writeFiles(msg: Extract<PyRequest, { type: "files" }>) {
   const fs = FS();
   for (const rel of msg.removed) {
     try {
-      fs.unlink(PROJECT_ROOT + "/" + rel);
+      fs.unlink(`${PROJECT_ROOT}/${rel}`);
     } catch {
       // already gone
     }
   }
-  for (const rel of msg.removedFolders) removeTree(fs, PROJECT_ROOT + "/" + rel);
+  for (const rel of msg.removedFolders) {
+    removeTree(fs, `${PROJECT_ROOT}/${rel}`);
+  }
   const failed: string[] = [];
   for (const dir of msg.folders) {
     try {
-      fs.mkdirTree(PROJECT_ROOT + "/" + dir);
-    } catch (e) {
-      failed.push(`${dir}/: ${describe(e)}`);
+      fs.mkdirTree(`${PROJECT_ROOT}/${dir}`);
+    } catch (error) {
+      failed.push(`${dir}/: ${describe(error)}`);
     }
   }
   for (const f of msg.files) {
-    const full = PROJECT_ROOT + "/" + f.path;
+    const full = `${PROJECT_ROOT}/${f.path}`;
     const dir = full.slice(0, full.lastIndexOf("/"));
     try {
-      if (dir) fs.mkdirTree(dir);
-      if (typeof f.data === "string") fs.writeFile(full, f.data);
-      else fs.writeFile(full, new Uint8Array(f.data), { canOwn: true });
-    } catch (e) {
-      failed.push(`${f.path}: ${describe(e)}`);
+      if (dir) {
+        fs.mkdirTree(dir);
+      }
+      if (typeof f.data === "string") {
+        fs.writeFile(full, f.data);
+      } else {
+        fs.writeFile(full, new Uint8Array(f.data), { canOwn: true });
+      }
+    } catch (error) {
+      failed.push(`${f.path}: ${describe(error)}`);
     }
   }
-  if (failed.length) throw new Error(failed.join("\n"));
+  if (failed.length) {
+    throw new Error(failed.join("\n"));
+  }
 }
 
 /** Removes a folder with everything in it; a missing one is nothing to do. */
@@ -293,7 +370,7 @@ function removeTree(fs: EmFS, full: string) {
     return;
   }
   for (const name of names) {
-    const child = full + "/" + name;
+    const child = `${full}/${name}`;
     try {
       fs.unlink(child);
     } catch {
@@ -307,15 +384,26 @@ function removeTree(fs: EmFS, full: string) {
   }
 }
 
-async function run(msg: Extract<PyRequest, { type: "run" }>): Promise<RunResult> {
+async function run(
+  msg: Extract<PyRequest, { type: "run" }>
+): Promise<RunResult> {
   const { py } = need();
   terminal = { cols: msg.cols, rows: msg.rows };
-  host.runArgs = { path: PROJECT_ROOT + "/" + msg.path, argv: msg.argv, env: msg.env, stdin: msg.stdin };
+  host.runArgs = {
+    path: `${PROJECT_ROOT}/${msg.path}`,
+    argv: msg.argv,
+    env: msg.env,
+    stdin: msg.stdin,
+  };
   // Entered through runPythonAsync so that run_sync (and with it interactive
   // input) is available to everything the file calls.
-  const result = (await py.runPythonAsync("import pyide_runtime; pyide_runtime.run_file()")) as RunResult;
+  const result = (await py.runPythonAsync(
+    "import pyide_runtime; pyide_runtime.run_file()"
+  )) as RunResult;
   // to_js may hand back views into Pyodide's memory; only copies can be transferred.
-  for (const c of result.changed) c.data = c.data.slice();
+  for (const c of result.changed) {
+    c.data = c.data.slice();
+  }
   return result;
 }
 
@@ -327,45 +415,66 @@ async function pythonJson<T>(code: string): Promise<T> {
 
 /** A JavaScript value as a Python literal, to pass arguments in the code itself. */
 function lit(value: unknown): string {
-  return "__import__('json').loads(" + JSON.stringify(JSON.stringify(value)) + ")";
+  return `__import__('json').loads(${JSON.stringify(JSON.stringify(value))})`;
 }
 
 async function handle(msg: PyRequest): Promise<unknown> {
   switch (msg.type) {
-    case "boot":
+    case "boot": {
       return boot(msg);
-    case "files":
+    }
+    case "files": {
       writeFiles(msg);
       return null;
-    case "run":
+    }
+    case "run": {
       return run(msg);
-    case "install":
-      return pythonJson<EnvironmentResult>(`import pyide_runtime; await pyide_runtime.install(${lit(msg.specs)})`);
-    case "uninstall":
-      return pythonJson<EnvironmentResult>(`import pyide_runtime; await pyide_runtime.uninstall(${lit(msg.names)})`);
-    case "environment":
-      return pythonJson<EnvironmentResult>("import pyide_runtime; pyide_runtime.environment()");
+    }
+    case "install": {
+      return pythonJson<EnvironmentResult>(
+        `import pyide_runtime; await pyide_runtime.install(${lit(msg.specs)})`
+      );
+    }
+    case "uninstall": {
+      return pythonJson<EnvironmentResult>(
+        `import pyide_runtime; await pyide_runtime.uninstall(${lit(msg.names)})`
+      );
+    }
+    case "environment": {
+      return pythonJson<EnvironmentResult>(
+        "import pyide_runtime; pyide_runtime.environment()"
+      );
+    }
     case "mirror": {
       const { rt } = need();
       return (rt.mirror as () => Record<string, string>)();
     }
-    case "repl":
-      return pythonJson<ReplResult>(`import pyide_runtime; await pyide_runtime.repl(${lit(msg.line)})`);
-    case "complete":
-      return pythonJson<{ completions: string[]; start: number }>(`import pyide_runtime; pyide_runtime.complete(${lit(msg.source)})`);
+    case "repl": {
+      return pythonJson<ReplResult>(
+        `import pyide_runtime; await pyide_runtime.repl(${lit(msg.line)})`
+      );
+    }
+    case "complete": {
+      return pythonJson<{ completions: string[]; start: number }>(
+        `import pyide_runtime; pyide_runtime.complete(${lit(msg.source)})`
+      );
+    }
     case "resetRepl": {
       const { rt } = need();
       (rt.reset_repl as () => void)();
       return null;
     }
-    default:
-      throw new Error("Unknown request " + (msg as { type: string }).type);
+    default: {
+      throw new Error(`Unknown request ${(msg as { type: string }).type}`);
+    }
   }
 }
 
 self.onmessage = async (ev: MessageEvent<PyRequest>) => {
   const msg = ev.data;
-  if (msg.type === "fetched") return onFetched(msg);
+  if (msg.type === "fetched") {
+    return onFetched(msg);
+  }
   if (msg.type === "inputReply") {
     const resolve = inputs.get(msg.id);
     inputs.delete(msg.id);
@@ -379,10 +488,14 @@ self.onmessage = async (ev: MessageEvent<PyRequest>) => {
   try {
     const result = await handle(msg);
     const transfer: Transferable[] = [];
-    if (msg.type === "run") for (const c of (result as RunResult).changed) transfer.push(c.data.buffer as ArrayBuffer);
+    if (msg.type === "run") {
+      for (const c of (result as RunResult).changed) {
+        transfer.push(c.data.buffer as ArrayBuffer);
+      }
+    }
     post({ type: "done", id: msg.id, result }, transfer);
-  } catch (e) {
-    post({ type: "fail", id: msg.id, message: describe(e) });
+  } catch (error) {
+    post({ type: "fail", id: msg.id, message: describe(error) });
   }
 };
 
@@ -404,12 +517,24 @@ const ERRNO: Record<number, string> = {
  * read for a message or a name before falling back to String.
  */
 function describe(e: unknown): string {
-  if (e instanceof Error) return e.message;
+  if (e instanceof Error) {
+    return e.message;
+  }
   if (typeof e === "object" && e !== null) {
-    const { errno, message, name } = e as { errno?: unknown; message?: unknown; name?: unknown };
-    if (typeof errno === "number") return ERRNO[errno] ?? `filesystem error ${errno}`;
-    if (typeof message === "string" && message) return message;
-    if (typeof name === "string" && name) return name;
+    const { errno, message, name } = e as {
+      errno?: unknown;
+      message?: unknown;
+      name?: unknown;
+    };
+    if (typeof errno === "number") {
+      return ERRNO[errno] ?? `filesystem error ${errno}`;
+    }
+    if (typeof message === "string" && message) {
+      return message;
+    }
+    if (typeof name === "string" && name) {
+      return name;
+    }
   }
   return String(e);
 }

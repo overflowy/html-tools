@@ -1,26 +1,41 @@
 import LZString from "lz-string";
+
 import "./tool.css";
 import type { Tool } from "../../shell/types";
-import { encode, type Ecl, type Encoded } from "./qrcode";
 import {
-  emailPayload, geoPayload, phonePayload, smsPayload, vcardPayload, wifiPayload,
-  type ContactFields, type WifiAuth,
+  emailPayload,
+  geoPayload,
+  phonePayload,
+  smsPayload,
+  vcardPayload,
+  wifiPayload,
 } from "./payload";
+import type { ContactFields, WifiAuth } from "./payload";
+import { encode } from "./qrcode";
+import type { Ecl, Encoded } from "./qrcode";
 
 /** Longest compressed field blob we are willing to put in the Deep Link. */
-const STATE_CAP = 30000;
+const STATE_CAP = 30_000;
 
 const QUIET_ZONE = 4;
 
-const TYPES = ["text", "wifi", "contact", "email", "sms", "phone", "geo"] as const;
+const TYPES = [
+  "text",
+  "wifi",
+  "contact",
+  "email",
+  "sms",
+  "phone",
+  "geo",
+] as const;
 type PayloadType = (typeof TYPES)[number];
 
 /* ---------------- color helpers ---------------- */
 
 function luminance(hex: string): number {
   const channel = (i: number) => {
-    const v = parseInt(hex.slice(i, i + 2), 16) / 255;
-    return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+    const v = Number.parseInt(hex.slice(i, i + 2), 16) / 255;
+    return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
   };
   return 0.2126 * channel(1) + 0.7152 * channel(3) + 0.0722 * channel(5);
 }
@@ -29,16 +44,26 @@ function luminance(hex: string): number {
 function contrastWarning(fg: string, bg: string): string {
   const lumFg = luminance(fg);
   const lumBg = luminance(bg);
-  if (lumFg >= lumBg) return "inverted colors: scanners expect a dark code on a light background";
+  if (lumFg >= lumBg) {
+    return "inverted colors: scanners expect a dark code on a light background";
+  }
   const ratio = (lumBg + 0.05) / (lumFg + 0.05);
-  if (ratio < 2.5) return "low contrast: may not scan";
+  if (ratio < 2.5) {
+    return "low contrast: may not scan";
+  }
   return "";
 }
 
 /* ---------------- rendering ---------------- */
 
 /** Draw at an integer scale nearest the requested size; returns the actual pixel size. */
-function drawCanvas(canvas: HTMLCanvasElement, qr: Encoded, target: number, fg: string, bg: string): number {
+function drawCanvas(
+  canvas: HTMLCanvasElement,
+  qr: Encoded,
+  target: number,
+  fg: string,
+  bg: string
+): number {
   const total = qr.size + QUIET_ZONE * 2;
   const scale = Math.max(1, Math.round(target / total));
   const px = scale * total;
@@ -48,10 +73,15 @@ function drawCanvas(canvas: HTMLCanvasElement, qr: Encoded, target: number, fg: 
   ctx.fillStyle = bg;
   ctx.fillRect(0, 0, px, px);
   ctx.fillStyle = fg;
-  for (let y = 0; y < qr.size; y++) {
-    for (let x = 0; x < qr.size; x++) {
+  for (let y = 0; y < qr.size; y += 1) {
+    for (let x = 0; x < qr.size; x += 1) {
       if (qr.matrix[y * qr.size + x]) {
-        ctx.fillRect((x + QUIET_ZONE) * scale, (y + QUIET_ZONE) * scale, scale, scale);
+        ctx.fillRect(
+          (x + QUIET_ZONE) * scale,
+          (y + QUIET_ZONE) * scale,
+          scale,
+          scale
+        );
       }
     }
   }
@@ -61,21 +91,27 @@ function drawCanvas(canvas: HTMLCanvasElement, qr: Encoded, target: number, fg: 
 function svgString(qr: Encoded, fg: string, bg: string): string {
   const total = qr.size + QUIET_ZONE * 2;
   const parts: string[] = [];
-  for (let y = 0; y < qr.size; y++) {
-    for (let x = 0; x < qr.size; x++) {
-      if (qr.matrix[y * qr.size + x]) parts.push("M" + (x + QUIET_ZONE) + " " + (y + QUIET_ZONE) + "h1v1h-1z");
+  for (let y = 0; y < qr.size; y += 1) {
+    for (let x = 0; x < qr.size; x += 1) {
+      if (qr.matrix[y * qr.size + x]) {
+        parts.push(`M${x + QUIET_ZONE} ${y + QUIET_ZONE}h1v1h-1z`);
+      }
     }
   }
-  return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + total + " " + total + '" shape-rendering="crispEdges">' +
-    '<rect width="' + total + '" height="' + total + '" fill="' + bg + '"/>' +
-    '<path d="' + parts.join("") + '" fill="' + fg + '"/></svg>';
+  return (
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${total} ${
+      total
+    }" shape-rendering="crispEdges">` +
+    `<rect width="${total}" height="${total}" fill="${bg}"/>` +
+    `<path d="${parts.join("")}" fill="${fg}"/></svg>`
+  );
 }
 
 function downloadBlob(blob: Blob, filename: string) {
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
   a.download = filename;
-  document.body.appendChild(a);
+  document.body.append(a);
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 5000);
@@ -84,13 +120,32 @@ function downloadBlob(blob: Blob, filename: string) {
 /* ---------------- UI ---------------- */
 
 const textField = (cls: string, label: string, placeholder = "") =>
-  '<label class="field">' + label + '<input type="text" class="' + cls + '" placeholder="' + placeholder + '" spellcheck="false" autocapitalize="off" autocomplete="off"></label>';
+  `<label class="field">${label}<input type="text" class="${
+    cls
+  }" placeholder="${
+    placeholder
+  }" spellcheck="false" autocapitalize="off" autocomplete="off"></label>`;
 
 const tool: Tool = {
   id: "qr-generator",
   name: "QR Code Generator",
   subtitle: "Make a QR code and download it as PNG or SVG.",
-  keywords: ["qr", "qr code", "generator", "wifi", "vcard", "contact", "barcode", "url", "link", "email", "sms", "phone", "geo", "share"],
+  keywords: [
+    "qr",
+    "qr code",
+    "generator",
+    "wifi",
+    "vcard",
+    "contact",
+    "barcode",
+    "url",
+    "link",
+    "email",
+    "sms",
+    "phone",
+    "geo",
+    "share",
+  ],
   mount(el, ctx) {
     el.innerHTML = `
       <div class="type-row seg" role="tablist" aria-label="Payload type">
@@ -201,8 +256,14 @@ const tool: Tool = {
     const $bg = $(".opt-bg") as HTMLInputElement;
     const $btnCopy = $(".btn-copy") as HTMLButtonElement;
     // Download and Copy act on the code shown, so they wait for one.
-    const $exports = [$(".btn-png"), $(".btn-svg"), $btnCopy] as HTMLButtonElement[];
-    const typeButtons = [...el.querySelectorAll(".type-row button")] as HTMLButtonElement[];
+    const $exports = [
+      $(".btn-png"),
+      $(".btn-svg"),
+      $btnCopy,
+    ] as HTMLButtonElement[];
+    const typeButtons = [
+      ...el.querySelectorAll(".type-row button"),
+    ] as HTMLButtonElement[];
 
     type Field = HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
     const $f = (sel: string) => el.querySelector(sel) as Field;
@@ -210,8 +271,21 @@ const tool: Tool = {
     // Every form field, keyed by payload type, in a stable order for the Deep Link.
     const FIELDS: Record<PayloadType, Field[]> = {
       text: [$f(".f-text")],
-      wifi: [$f(".f-wifi-ssid"), $f(".f-wifi-pass"), $f(".f-wifi-auth"), $f(".f-wifi-hidden")],
-      contact: [$f(".f-ct-first"), $f(".f-ct-last"), $f(".f-ct-phone"), $f(".f-ct-email"), $f(".f-ct-org"), $f(".f-ct-title"), $f(".f-ct-url")],
+      wifi: [
+        $f(".f-wifi-ssid"),
+        $f(".f-wifi-pass"),
+        $f(".f-wifi-auth"),
+        $f(".f-wifi-hidden"),
+      ],
+      contact: [
+        $f(".f-ct-first"),
+        $f(".f-ct-last"),
+        $f(".f-ct-phone"),
+        $f(".f-ct-email"),
+        $f(".f-ct-org"),
+        $f(".f-ct-title"),
+        $f(".f-ct-url"),
+      ],
       email: [$f(".f-em-to"), $f(".f-em-subject"), $f(".f-em-body")],
       sms: [$f(".f-sms-num"), $f(".f-sms-msg")],
       phone: [$f(".f-ph-num")],
@@ -222,48 +296,100 @@ const tool: Tool = {
     let lastQr: Encoded | null = null;
 
     function setStatus(kind: string, msg: string) {
-      $status.className = "statusbar " + kind;
+      $status.className = `statusbar ${kind}`;
       $statusText.textContent = msg;
     }
 
     function fieldValue(f: Field): string {
-      if (f instanceof HTMLInputElement && f.type === "checkbox") return f.checked ? "1" : "0";
+      if (f instanceof HTMLInputElement && f.type === "checkbox") {
+        return f.checked ? "1" : "0";
+      }
       return f.value;
     }
 
     /** The Payload for the active type, or a reason there is none yet. */
-    function composePayload(): { payload: string } | { waiting: true } | { error: string } {
+    function composePayload():
+      | { payload: string }
+      | { waiting: true }
+      | { error: string } {
       const v = FIELDS[currentType].map(fieldValue);
       switch (currentType) {
-        case "text":
-          if (!v[0]!.trim()) return { waiting: true };
+        case "text": {
+          if (!v[0]!.trim()) {
+            return { waiting: true };
+          }
           return { payload: v[0]! };
+        }
         case "wifi": {
-          if (!v[0] && !v[1]) return { waiting: true };
-          if (!v[0]) return { error: "Enter the network name." };
-          return { payload: wifiPayload(v[0]!, v[1]!, v[2] as WifiAuth, v[3] === "1") };
+          if (!v[0] && !v[1]) {
+            return { waiting: true };
+          }
+          if (!v[0]) {
+            return { error: "Enter the network name." };
+          }
+          return {
+            payload: wifiPayload(v[0]!, v[1]!, v[2] as WifiAuth, v[3] === "1"),
+          };
         }
         case "contact": {
-          if (v.every((x) => !x.trim())) return { waiting: true };
-          if (!v[0]!.trim() && !v[1]!.trim()) return { error: "Enter at least a name." };
-          const c: ContactFields = { first: v[0]!.trim(), last: v[1]!.trim(), phone: v[2]!.trim(), email: v[3]!.trim(), org: v[4]!.trim(), title: v[5]!.trim(), url: v[6]!.trim() };
+          if (v.every((x) => !x.trim())) {
+            return { waiting: true };
+          }
+          if (!v[0]!.trim() && !v[1]!.trim()) {
+            return { error: "Enter at least a name." };
+          }
+          const c: ContactFields = {
+            first: v[0]!.trim(),
+            last: v[1]!.trim(),
+            phone: v[2]!.trim(),
+            email: v[3]!.trim(),
+            org: v[4]!.trim(),
+            title: v[5]!.trim(),
+            url: v[6]!.trim(),
+          };
           return { payload: vcardPayload(c) };
         }
-        case "email":
-          if (!v[0]!.trim()) return v[1] || v[2] ? { error: "Enter the destination address." } : { waiting: true };
+        case "email": {
+          if (!v[0]!.trim()) {
+            return v[1] || v[2]
+              ? { error: "Enter the destination address." }
+              : { waiting: true };
+          }
           return { payload: emailPayload(v[0]!.trim(), v[1]!, v[2]!) };
-        case "sms":
-          if (!v[0]!.trim()) return v[1] ? { error: "Enter the phone number." } : { waiting: true };
+        }
+        case "sms": {
+          if (!v[0]!.trim()) {
+            return v[1]
+              ? { error: "Enter the phone number." }
+              : { waiting: true };
+          }
           return { payload: smsPayload(v[0]!, v[1]!) };
-        case "phone":
-          if (!v[0]!.trim()) return { waiting: true };
+        }
+        case "phone": {
+          if (!v[0]!.trim()) {
+            return { waiting: true };
+          }
           return { payload: phonePayload(v[0]!) };
+        }
         case "geo": {
-          if (!v[0]!.trim() && !v[1]!.trim()) return { waiting: true };
+          if (!v[0]!.trim() && !v[1]!.trim()) {
+            return { waiting: true };
+          }
           const lat = Number(v[0]);
           const lng = Number(v[1]);
-          if (!v[0]!.trim() || !v[1]!.trim() || !Number.isFinite(lat) || !Number.isFinite(lng)) return { error: "Enter numeric latitude and longitude." };
-          if (Math.abs(lat) > 90 || Math.abs(lng) > 180) return { error: "Latitude must be within ±90 and longitude within ±180." };
+          if (
+            !v[0]!.trim() ||
+            !v[1]!.trim() ||
+            !Number.isFinite(lat) ||
+            !Number.isFinite(lng)
+          ) {
+            return { error: "Enter numeric latitude and longitude." };
+          }
+          if (Math.abs(lat) > 90 || Math.abs(lng) > 180) {
+            return {
+              error: "Latitude must be within ±90 and longitude within ±180.",
+            };
+          }
           return { payload: geoPayload(v[0]!, v[1]!) };
         }
       }
@@ -271,22 +397,34 @@ const tool: Tool = {
 
     function clampedSize(): number {
       const n = Math.round(Number($size.value));
-      if (!Number.isFinite(n)) return 512;
+      if (!Number.isFinite(n)) {
+        return 512;
+      }
       return Math.min(4096, Math.max(64, n));
     }
 
     /** State layout: `<type>.<ecl>.<size>.<fg>.<bg>.<compressed field values>`. */
     function publishState(): boolean {
-      const packed = LZString.compressToEncodedURIComponent(JSON.stringify(FIELDS[currentType].map(fieldValue)));
-      const head = [currentType, $ecl.value, clampedSize(), $fg.value.slice(1), $bg.value.slice(1)];
+      const packed = LZString.compressToEncodedURIComponent(
+        JSON.stringify(FIELDS[currentType].map(fieldValue))
+      );
+      const head = [
+        currentType,
+        $ecl.value,
+        clampedSize(),
+        $fg.value.slice(1),
+        $bg.value.slice(1),
+      ];
       const fits = packed.length <= STATE_CAP;
-      ctx.setState(head.concat(fits ? packed : "").join("."));
+      ctx.setState([...head, fits ? packed : ""].join("."));
       return fits;
     }
 
     function clearPreview(msg: string, kind = "") {
       lastQr = null;
-      for (const b of $exports) b.disabled = true;
+      for (const b of $exports) {
+        b.disabled = true;
+      }
       $canvas.hidden = true;
       setStatus(kind, msg);
     }
@@ -305,15 +443,22 @@ const tool: Tool = {
       try {
         const qr = encode(composed.payload, $ecl.value as Ecl);
         lastQr = qr;
-        for (const b of $exports) b.disabled = false;
+        for (const b of $exports) {
+          b.disabled = false;
+        }
         const px = drawCanvas($canvas, qr, clampedSize(), $fg.value, $bg.value);
         $canvas.hidden = false;
         const warning = contrastWarning($fg.value, $bg.value);
-        setStatus(warning ? "warn" : "ok",
-          "v" + qr.version + " · " + qr.size + "×" + qr.size + " modules · " + qr.mode + " mode · " + px + "×" + px + " px" +
-          (warning ? " · " + warning : "") + (linked ? "" : " · too large to keep in the URL"));
-      } catch (e) {
-        clearPreview((e as Error).message, "error");
+        setStatus(
+          warning ? "warn" : "ok",
+          `v${qr.version} · ${qr.size}×${qr.size} modules · ${qr.mode} mode · ${
+            px
+          }×${px} px${
+            warning ? ` · ${warning}` : ""
+          }${linked ? "" : " · too large to keep in the URL"}`
+        );
+      } catch (error) {
+        clearPreview((error as Error).message, "error");
       }
     }
 
@@ -324,7 +469,9 @@ const tool: Tool = {
         b.classList.toggle("active", on);
         b.setAttribute("aria-selected", String(on));
       }
-      for (const f of el.querySelectorAll<HTMLElement>(".form")) f.hidden = f.dataset.form !== type;
+      for (const f of el.querySelectorAll<HTMLElement>(".form")) {
+        f.hidden = f.dataset.form !== type;
+      }
       run();
     }
 
@@ -332,22 +479,41 @@ const tool: Tool = {
       const parts = payload.split(".");
       const [type, ecl, size, fg, bg] = parts;
       const packed = parts.slice(5).join(".");
-      if (ecl === "L" || ecl === "M" || ecl === "Q" || ecl === "H") $ecl.value = ecl;
-      if (/^\d+$/.test(size ?? "")) $size.value = String(Math.min(4096, Math.max(64, Number(size))));
-      if (/^[0-9a-fA-F]{6}$/.test(fg ?? "")) $fg.value = "#" + fg!.toLowerCase();
-      if (/^[0-9a-fA-F]{6}$/.test(bg ?? "")) $bg.value = "#" + bg!.toLowerCase();
-      const restored: PayloadType = TYPES.includes(type as PayloadType) ? (type as PayloadType) : "text";
+      if (ecl === "L" || ecl === "M" || ecl === "Q" || ecl === "H") {
+        $ecl.value = ecl;
+      }
+      if (/^\d+$/.test(size ?? "")) {
+        $size.value = String(Math.min(4096, Math.max(64, Number(size))));
+      }
+      if (/^[0-9a-fA-F]{6}$/.test(fg ?? "")) {
+        $fg.value = `#${fg!.toLowerCase()}`;
+      }
+      if (/^[0-9a-fA-F]{6}$/.test(bg ?? "")) {
+        $bg.value = `#${bg!.toLowerCase()}`;
+      }
+      const restored: PayloadType = TYPES.includes(type as PayloadType)
+        ? (type as PayloadType)
+        : "text";
       if (packed) {
         try {
-          const values = JSON.parse(LZString.decompressFromEncodedURIComponent(packed) || "[]");
+          const values = JSON.parse(
+            LZString.decompressFromEncodedURIComponent(packed) || "[]"
+          );
           if (Array.isArray(values)) {
             FIELDS[restored].forEach((f, i) => {
-              if (typeof values[i] !== "string") return;
-              if (f instanceof HTMLInputElement && f.type === "checkbox") f.checked = values[i] === "1";
-              else f.value = values[i];
+              if (typeof values[i] !== "string") {
+                return;
+              }
+              if (f instanceof HTMLInputElement && f.type === "checkbox") {
+                f.checked = values[i] === "1";
+              } else {
+                f.value = values[i];
+              }
             });
           }
-        } catch { /* malformed payload: restore options only */ }
+        } catch {
+          /* malformed payload: restore options only */
+        }
       }
       selectType(restored);
     });
@@ -358,7 +524,11 @@ const tool: Tool = {
       timer = setTimeout(run, 120);
     }
 
-    for (const b of typeButtons) b.addEventListener("click", () => selectType(b.dataset.type as PayloadType));
+    for (const b of typeButtons) {
+      b.addEventListener("click", () =>
+        selectType(b.dataset.type as PayloadType)
+      );
+    }
     el.querySelector(".forms")!.addEventListener("input", schedule);
     $ecl.addEventListener("change", run);
     $size.addEventListener("input", schedule);
@@ -367,36 +537,60 @@ const tool: Tool = {
 
     $(".btn-clear").addEventListener("click", () => {
       for (const f of FIELDS[currentType]) {
-        if (f instanceof HTMLInputElement && f.type === "checkbox") f.checked = false;
-        else if (f instanceof HTMLSelectElement) f.selectedIndex = 0;
-        else f.value = "";
+        if (f instanceof HTMLInputElement && f.type === "checkbox") {
+          f.checked = false;
+        } else if (f instanceof HTMLSelectElement) {
+          f.selectedIndex = 0;
+        } else {
+          f.value = "";
+        }
       }
       run();
       (FIELDS[currentType][0] as HTMLElement).focus();
     });
 
     $(".btn-png").addEventListener("click", () => {
-      if (!lastQr) return;
+      if (!lastQr) {
+        return;
+      }
       $canvas.toBlob((blob) => {
-        if (blob) downloadBlob(blob, "qr-code.png");
+        if (blob) {
+          downloadBlob(blob, "qr-code.png");
+        }
       }, "image/png");
     });
 
     $(".btn-svg").addEventListener("click", () => {
-      if (!lastQr) return;
-      downloadBlob(new Blob([svgString(lastQr, $fg.value, $bg.value)], { type: "image/svg+xml" }), "qr-code.svg");
+      if (!lastQr) {
+        return;
+      }
+      downloadBlob(
+        new Blob([svgString(lastQr, $fg.value, $bg.value)], {
+          type: "image/svg+xml",
+        }),
+        "qr-code.svg"
+      );
     });
 
     $btnCopy.addEventListener("click", async () => {
-      if (!lastQr) return;
+      if (!lastQr) {
+        return;
+      }
       try {
         const blob = await new Promise<Blob>((resolve, reject) => {
-          $canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("no blob"))), "image/png");
+          $canvas.toBlob(
+            (b) => (b ? resolve(b) : reject(new Error("no blob"))),
+            "image/png"
+          );
         });
-        await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+        await navigator.clipboard.write([
+          new ClipboardItem({ "image/png": blob }),
+        ]);
         const old = $btnCopy.textContent;
         $btnCopy.textContent = "Copied";
-        setTimeout(() => { $btnCopy.textContent = old; }, 1200);
+        setTimeout(() => {
+          $btnCopy.textContent = old;
+        }, 1200);
       } catch {
         setStatus("error", "Could not copy the image to the clipboard.");
       }

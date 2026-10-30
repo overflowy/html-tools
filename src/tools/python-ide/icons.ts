@@ -3,53 +3,30 @@
 // here, so a call site reads as the action and the glyph can change alone.
 // The Tree's file and folder icons are another set: see file-icons.ts.
 
-import check from "lucide-static/icons/check.svg";
-import chevronLeft from "lucide-static/icons/chevron-left.svg";
-import chevronRight from "lucide-static/icons/chevron-right.svg";
-import copy from "lucide-static/icons/copy.svg";
-import download from "lucide-static/icons/download.svg";
-import ellipsis from "lucide-static/icons/ellipsis.svg";
-import eraser from "lucide-static/icons/eraser.svg";
-import filePlus from "lucide-static/icons/file-plus.svg";
-import folderPlus from "lucide-static/icons/folder-plus.svg";
-import image from "lucide-static/icons/image.svg";
-import panelBottom from "lucide-static/icons/panel-bottom.svg";
-import panelLeft from "lucide-static/icons/panel-left.svg";
-import play from "lucide-static/icons/play.svg";
-import rotateCw from "lucide-static/icons/rotate-cw.svg";
-import search from "lucide-static/icons/search.svg";
-import settings from "lucide-static/icons/settings.svg";
-import sparkles from "lucide-static/icons/sparkles.svg";
-import square from "lucide-static/icons/square.svg";
-import textCursorInput from "lucide-static/icons/text-cursor-input.svg";
-import trash from "lucide-static/icons/trash.svg";
-import upload from "lucide-static/icons/upload.svg";
-import variable from "lucide-static/icons/variable.svg";
-import x from "lucide-static/icons/x.svg";
-
 /** Filled by the run bar's CSS, as playback controls are. */
-export const ICON_RUN = play;
-export const ICON_STOP = square;
-export const ICON_RESTART = rotateCw;
-export const ICON_FORMAT = sparkles;
-export const ICON_SETTINGS = settings;
-export const ICON_STDIN = textCursorInput;
-export const ICON_INLAY_HINTS = variable;
-export const ICON_NEW_FILE = filePlus;
-export const ICON_NEW_FOLDER = folderPlus;
-export const ICON_UPLOAD = upload;
-export const ICON_CLOSE = x;
-export const ICON_CHEVRON = chevronRight;
-export const ICON_PREVIOUS = chevronLeft;
-export const ICON_NEXT = chevronRight;
-export const ICON_MORE = ellipsis;
-export const ICON_DOWNLOAD = download;
-export const ICON_TRASH = trash;
-export const ICON_FIGURE = image;
-export const ICON_PANEL = panelBottom;
-export const ICON_CLEAR = eraser;
-export const ICON_COPY = copy;
-export const ICON_CHECK = check;
+export { default as ICON_RUN } from "lucide-static/icons/play.svg";
+export { default as ICON_STOP } from "lucide-static/icons/square.svg";
+export { default as ICON_RESTART } from "lucide-static/icons/rotate-cw.svg";
+export { default as ICON_FORMAT } from "lucide-static/icons/sparkles.svg";
+export { default as ICON_SETTINGS } from "lucide-static/icons/settings.svg";
+export { default as ICON_STDIN } from "lucide-static/icons/text-cursor-input.svg";
+export { default as ICON_INLAY_HINTS } from "lucide-static/icons/variable.svg";
+export { default as ICON_NEW_FILE } from "lucide-static/icons/file-plus.svg";
+export { default as ICON_NEW_FOLDER } from "lucide-static/icons/folder-plus.svg";
+export { default as ICON_UPLOAD } from "lucide-static/icons/upload.svg";
+export { default as ICON_CLOSE } from "lucide-static/icons/x.svg";
+export { default as ICON_CHEVRON } from "lucide-static/icons/chevron-right.svg";
+export { default as ICON_PREVIOUS } from "lucide-static/icons/chevron-left.svg";
+export { default as ICON_NEXT } from "lucide-static/icons/chevron-right.svg";
+export { default as ICON_MORE } from "lucide-static/icons/ellipsis.svg";
+export { default as ICON_DOWNLOAD } from "lucide-static/icons/download.svg";
+export { default as ICON_TRASH } from "lucide-static/icons/trash.svg";
+export { default as ICON_FIGURE } from "lucide-static/icons/image.svg";
+export { default as ICON_PANEL } from "lucide-static/icons/panel-bottom.svg";
+export { default as ICON_CLEAR } from "lucide-static/icons/eraser.svg";
+export { default as ICON_COPY } from "lucide-static/icons/copy.svg";
+export { default as ICON_CHECK } from "lucide-static/icons/check.svg";
+
 /** The Shell's own Sidebar glyph. */
-export const ICON_SIDEBAR = panelLeft;
-export const ICON_SEARCH = search;
+export { default as ICON_SIDEBAR } from "lucide-static/icons/panel-left.svg";
+export { default as ICON_SEARCH } from "lucide-static/icons/search.svg";

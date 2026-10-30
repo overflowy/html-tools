@@ -1,4 +1,5 @@
 import type { Tool } from "../../shell/types";
+
 import "./tool.css";
 
 async function copyText(text: string) {
@@ -8,7 +9,7 @@ async function copyText(text: string) {
     // file:// is not a secure context everywhere; the old way still works there.
     const ta = document.createElement("textarea");
     ta.value = text;
-    document.body.appendChild(ta);
+    document.body.append(ta);
     ta.select();
     document.execCommand("copy");
     ta.remove();
@@ -70,11 +71,15 @@ const tool: Tool = {
     });
     $value.addEventListener("click", () => {
       // A click that ends a drag across the text is a selection, not a request to copy.
-      if (document.getSelection()?.toString()) return;
+      if (document.getSelection()?.toString()) {
+        return;
+      }
       void copyFromValue();
     });
     $value.addEventListener("keydown", (e) => {
-      if (e.key !== "Enter" && e.key !== " ") return;
+      if (e.key !== "Enter" && e.key !== " ") {
+        return;
+      }
       e.preventDefault();
       void copyFromValue();
     });

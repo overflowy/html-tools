@@ -3,27 +3,54 @@ import type { Tool } from "../../shell/types";
 
 function detectMime(b64: string) {
   const sig = b64.slice(0, 16);
-  if (sig.startsWith("iVBORw0KGgo")) return { mime: "image/png", ext: "png" };
-  if (sig.startsWith("/9j/")) return { mime: "image/jpeg", ext: "jpg" };
-  if (sig.startsWith("R0lGOD")) return { mime: "image/gif", ext: "gif" };
-  if (sig.startsWith("UklGR")) return { mime: "image/webp", ext: "webp" };
-  if (sig.startsWith("PHN2Zy") || sig.startsWith("PD94bW")) return { mime: "image/svg+xml", ext: "svg" };
-  if (sig.startsWith("Qk")) return { mime: "image/bmp", ext: "bmp" };
-  if (sig.startsWith("AAABAA")) return { mime: "image/x-icon", ext: "ico" };
+  if (sig.startsWith("iVBORw0KGgo")) {
+    return { mime: "image/png", ext: "png" };
+  }
+  if (sig.startsWith("/9j/")) {
+    return { mime: "image/jpeg", ext: "jpg" };
+  }
+  if (sig.startsWith("R0lGOD")) {
+    return { mime: "image/gif", ext: "gif" };
+  }
+  if (sig.startsWith("UklGR")) {
+    return { mime: "image/webp", ext: "webp" };
+  }
+  if (sig.startsWith("PHN2Zy") || sig.startsWith("PD94bW")) {
+    return { mime: "image/svg+xml", ext: "svg" };
+  }
+  if (sig.startsWith("Qk")) {
+    return { mime: "image/bmp", ext: "bmp" };
+  }
+  if (sig.startsWith("AAABAA")) {
+    return { mime: "image/x-icon", ext: "ico" };
+  }
   return { mime: "image/png", ext: "png" };
 }
 
 function formatBytes(n: number) {
-  if (n < 1024) return n + " B";
-  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
-  return (n / 1024 / 1024).toFixed(2) + " MB";
+  if (n < 1024) {
+    return `${n} B`;
+  }
+  if (n < 1024 * 1024) {
+    return `${(n / 1024).toFixed(1)} KB`;
+  }
+  return `${(n / 1024 / 1024).toFixed(2)} MB`;
 }
 
 const tool: Tool = {
   id: "base64-to-image",
   name: "Base64 ⇄ Image",
   subtitle: "Turn base64 into an image, or an image into base64.",
-  keywords: ["base64", "image", "decode", "encode", "convert", "data uri", "png", "preview"],
+  keywords: [
+    "base64",
+    "image",
+    "decode",
+    "encode",
+    "convert",
+    "data uri",
+    "png",
+    "preview",
+  ],
   mount(el) {
     el.innerHTML = `
       <div class="container">
@@ -86,10 +113,12 @@ const tool: Tool = {
         declaredMime = dataUriMatch[1]!;
         b64 = dataUriMatch[2]!;
       }
-      b64 = b64.replace(/\s+/g, "");
+      b64 = b64.replaceAll(/\s+/g, "");
 
       if (!/^[A-Za-z0-9+/]*={0,2}$/.test(b64)) {
-        showError("Invalid base64: contains characters outside the base64 alphabet.");
+        showError(
+          "Invalid base64: contains characters outside the base64 alphabet."
+        );
         return;
       }
 
@@ -103,20 +132,22 @@ const tool: Tool = {
 
       let detected;
       if (declaredMime) {
-        const ext = (declaredMime.split("/")[1] || "png").replace("+xml", "").replace("jpeg", "jpg");
+        const ext = (declaredMime.split("/")[1] || "png")
+          .replace("+xml", "")
+          .replace("jpeg", "jpg");
         detected = { mime: declaredMime, ext };
       } else {
         detected = detectMime(b64);
       }
 
-      const dataUri = "data:" + detected.mime + ";base64," + b64;
+      const dataUri = `data:${detected.mime};base64,${b64}`;
       currentDataUri = dataUri;
       currentExt = detected.ext;
 
       preview.onload = () => {
-        meta.textContent =
-          detected.mime + " · " + formatBytes(byteCount) + " · " +
-          preview.naturalWidth + " × " + preview.naturalHeight + " px";
+        meta.textContent = `${detected.mime} · ${formatBytes(byteCount)} · ${
+          preview.naturalWidth
+        } × ${preview.naturalHeight} px`;
         outputArea.style.display = "block";
         status.textContent = "";
       };
@@ -158,7 +189,9 @@ const tool: Tool = {
         input.value = text;
         convert(text);
       } catch {
-        showError("The browser blocked clipboard access. Paste with the keyboard instead.");
+        showError(
+          "The browser blocked clipboard access. Paste with the keyboard instead."
+        );
       }
     });
 
@@ -166,7 +199,7 @@ const tool: Tool = {
     let dragDepth = 0;
     el.addEventListener("dragenter", (e) => {
       e.preventDefault();
-      dragDepth++;
+      dragDepth += 1;
       el.classList.add("dragging");
     });
     el.addEventListener("dragover", (e) => e.preventDefault());
@@ -181,16 +214,25 @@ const tool: Tool = {
       dragDepth = 0;
       el.classList.remove("dragging");
       const file = e.dataTransfer?.files[0];
-      if (!file) return;
-      if (file.type.startsWith("image/")) loadImageBlob(file);
-      else showError("Dropped file is not an image.");
+      if (!file) {
+        return;
+      }
+      if (file.type.startsWith("image/")) {
+        loadImageBlob(file);
+      } else {
+        showError("Dropped file is not an image.");
+      }
     });
 
     // Cmd+V anywhere in the tool with an image on the clipboard
     document.addEventListener("paste", (e) => {
-      if (el.hidden) return;
+      if (el.hidden) {
+        return;
+      }
       const items = e.clipboardData?.items;
-      if (!items) return;
+      if (!items) {
+        return;
+      }
       for (const item of items) {
         if (item.type.startsWith("image/")) {
           const file = item.getAsFile();
@@ -211,27 +253,32 @@ const tool: Tool = {
     });
 
     $(".download-btn").addEventListener("click", () => {
-      if (!currentDataUri) return;
+      if (!currentDataUri) {
+        return;
+      }
       const a = document.createElement("a");
       a.href = currentDataUri;
-      a.download = "image." + currentExt;
-      document.body.appendChild(a);
+      a.download = `image.${currentExt}`;
+      document.body.append(a);
       a.click();
       document.body.removeChild(a);
     });
 
     copyBtn.addEventListener("click", async () => {
-      if (!currentDataUri) return;
+      if (!currentDataUri) {
+        return;
+      }
       try {
         await navigator.clipboard.writeText(currentDataUri);
         const orig = copyBtn.textContent;
         copyBtn.textContent = "Copied";
-        setTimeout(() => { copyBtn.textContent = orig; }, 1200);
+        setTimeout(() => {
+          copyBtn.textContent = orig;
+        }, 1200);
       } catch {
         showError("Could not copy to clipboard.");
       }
     });
-
   },
 };
 

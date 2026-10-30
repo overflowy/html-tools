@@ -1,17 +1,68 @@
 import "./tool.css";
 import type { Tool } from "../../shell/types";
 import {
-  COMMON_TYPES, LookupError, RESOLVERS, SUBDOMAIN_SOURCES, TYPE_GROUPS, formatTtl, lookup, mergeSubdomains,
-  normalizeName, outcomeOf, pool, rcodeName, resolverById, reverseName, subdomainSearchName, typeName, validCustomType,
-  type DnsRecord, type DnsResponse, type LookupResult, type QueryOptions, type Resolver, type SubdomainHit,
+  COMMON_TYPES,
+  LookupError,
+  RESOLVERS,
+  SUBDOMAIN_SOURCES,
+  TYPE_GROUPS,
+  formatTtl,
+  lookup,
+  mergeSubdomains,
+  normalizeName,
+  outcomeOf,
+  pool,
+  rcodeName,
+  resolverById,
+  reverseName,
+  subdomainSearchName,
+  typeName,
+  validCustomType,
+} from "./dns";
+import type {
+  DnsRecord,
+  DnsResponse,
+  LookupResult,
+  QueryOptions,
+  Resolver,
+  SubdomainHit,
 } from "./dns";
 import {
-  checkBimi, checkDkim, checkDkimSelector, checkDmarc, checkSpf, evaluateMx, unquoteTxt,
-  type AssetFetcher, type AssetReport, type BimiReport, type DkimKey, type Finding, type TxtResolver, type Verdict,
+  checkBimi,
+  checkDkim,
+  checkDkimSelector,
+  checkDmarc,
+  checkSpf,
+  evaluateMx,
+  unquoteTxt,
+} from "./email";
+import type {
+  AssetFetcher,
+  AssetReport,
+  BimiReport,
+  DkimKey,
+  Finding,
+  TxtResolver,
+  Verdict,
 } from "./email";
 import {
-  BOOTSTRAP_URLS, ianaTldPage, judgeDomain, judgeWhoisText, loadBootstrap, lookupDomain, lookupIp, lookupWhoisText, rdapFetch,
-  type Contact, type DomainInfo, type IpInfo, type RdapFetch, type TextFetch, type WhoisText,
+  BOOTSTRAP_URLS,
+  ianaTldPage,
+  judgeDomain,
+  judgeWhoisText,
+  loadBootstrap,
+  lookupDomain,
+  lookupIp,
+  lookupWhoisText,
+  rdapFetch,
+} from "./rdap";
+import type {
+  Contact,
+  DomainInfo,
+  IpInfo,
+  RdapFetch,
+  TextFetch,
+  WhoisText,
 } from "./rdap";
 
 type Action = "lookup" | "all" | "subs" | "email" | "whois";
@@ -23,148 +74,236 @@ const CONCURRENCY = 4;
 const PICKER_TYPES = new Set(TYPE_GROUPS.flatMap((g) => g.types));
 
 function esc(s: string): string {
-  return s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
+  return s.replaceAll(
+    /[&<>"]/g,
+    (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!
+  );
 }
 
 function plural(n: number, word: string): string {
-  return n + " " + word + (n === 1 ? "" : "s");
+  return `${n} ${word}${n === 1 ? "" : "s"}`;
 }
 
 function flagsHtml(r: DnsResponse): string {
-  const status = '<span class="flag status ' + (r.Status === 0 ? "on" : "bad") + '">' + esc(rcodeName(r.Status)) + "</span>";
+  const status = `<span class="flag status ${
+    r.Status === 0 ? "on" : "bad"
+  }">${esc(rcodeName(r.Status))}</span>`;
   const bits = (["RD", "RA", "AD", "CD", "TC"] as const)
-    .map((f) => '<span class="flag ' + (r[f] ? "on" : "off") + '" title="' + f + '">' + f + "</span>")
+    .map(
+      (f) =>
+        `<span class="flag ${r[f] ? "on" : "off"}" title="${f}">${f}</span>`
+    )
     .join("");
   return status + bits;
 }
 
 function tableHtml(records: DnsRecord[]): string {
-  const rows = records.map((rec) =>
-    "<tr><td class=\"c-name\">" + esc(rec.name) + "</td>" +
-    '<td class="c-type"><span class="type-badge">' + esc(typeName(rec.type)) + "</span></td>" +
-    '<td class="c-ttl" title="' + rec.TTL + ' seconds">' + esc(formatTtl(rec.TTL)) + "</td>" +
-    '<td class="c-data">' + esc(rec.data) + "</td></tr>");
-  return '<table class="records"><thead><tr><th>Name</th><th>Type</th><th>TTL</th><th>Data</th></tr></thead><tbody>' +
-    rows.join("") + "</tbody></table>";
+  const rows = records.map(
+    (rec) =>
+      `<tr><td class="c-name">${esc(rec.name)}</td>` +
+      `<td class="c-type"><span class="type-badge">${esc(
+        typeName(rec.type)
+      )}</span></td>` +
+      `<td class="c-ttl" title="${rec.TTL} seconds">${esc(
+        formatTtl(rec.TTL)
+      )}</td>` +
+      `<td class="c-data">${esc(rec.data)}</td></tr>`
+  );
+  return `<table class="records"><thead><tr><th>Name</th><th>Type</th><th>TTL</th><th>Data</th></tr></thead><tbody>${rows.join(
+    ""
+  )}</tbody></table>`;
 }
 
 function commentsHtml(r: DnsResponse): string {
-  return r.Comment.map((c) => '<p class="comment">' + esc(c) + "</p>").join("");
+  return r.Comment.map((c) => `<p class="comment">${esc(c)}</p>`).join("");
 }
 
-const VERDICT_LABEL: Record<Verdict, string> = { ok: "ok", warn: "warning", fail: "failing", none: "n/a" };
+const VERDICT_LABEL: Record<Verdict, string> = {
+  ok: "ok",
+  warn: "warning",
+  fail: "failing",
+  none: "n/a",
+};
 
 function verdictPill(v: Verdict): string {
-  return '<span class="verdict ' + v + '">' + VERDICT_LABEL[v] + "</span>";
+  return `<span class="verdict ${v}">${VERDICT_LABEL[v]}</span>`;
 }
 
 function findingsHtml(findings: Finding[]): string {
-  if (!findings.length) return "";
-  return '<ul class="findings">' + findings.map((f) =>
-    '<li class="' + f.level + '"><span class="mark"></span>' + esc(f.text) + "</li>").join("") + "</ul>";
+  if (!findings.length) {
+    return "";
+  }
+  return `<ul class="findings">${findings
+    .map(
+      (f) =>
+        `<li class="${f.level}"><span class="mark"></span>${esc(f.text)}</li>`
+    )
+    .join("")}</ul>`;
 }
 
 function recordLine(record: string | null): string {
-  return record === null ? "" : '<code class="record">' + esc(record) + "</code>";
+  return record === null ? "" : `<code class="record">${esc(record)}</code>`;
 }
 
 function dkimKeyHtml(k: DkimKey): string {
-  const label = k.selectors.length > 3
-    ? k.selectors.slice(0, 2).join(", ") + " +" + (k.selectors.length - 2) + " more"
-    : k.selectors.join(", ");
-  return '<div class="dkim-key">' +
-    '<div class="dkim-head"><span class="type-badge" title="' + esc(k.selectors.join(", ")) + '">' + esc(label) + "</span>" + verdictPill(k.verdict) +
-    '<span class="dkim-meta">' + esc(k.keyType) + (k.bits ? " · " + k.bits + " bits" : "") + "</span></div>" +
-    recordLine(k.record) + findingsHtml(k.findings) + "</div>";
+  const label =
+    k.selectors.length > 3
+      ? `${k.selectors.slice(0, 2).join(", ")} +${k.selectors.length - 2} more`
+      : k.selectors.join(", ");
+  return (
+    `<div class="dkim-key">` +
+    `<div class="dkim-head"><span class="type-badge" title="${esc(
+      k.selectors.join(", ")
+    )}">${esc(label)}</span>${verdictPill(
+      k.verdict
+    )}<span class="dkim-meta">${esc(k.keyType)}${
+      k.bits ? ` · ${k.bits} bits` : ""
+    }</span></div>${recordLine(k.record)}${findingsHtml(k.findings)}</div>`
+  );
 }
 
 function assetHtml(label: string, asset: AssetReport | null): string {
-  if (!asset) return "";
-  return '<div class="asset"><div class="asset-head"><span class="asset-label">' + label + "</span>" +
-    '<a class="asset-url" href="' + esc(asset.url) + '" target="_blank" rel="noreferrer">' + esc(asset.url) + "</a></div>" +
-    findingsHtml(asset.findings) + "</div>";
+  if (!asset) {
+    return "";
+  }
+  return (
+    `<div class="asset"><div class="asset-head"><span class="asset-label">${
+      label
+    }</span>` +
+    `<a class="asset-url" href="${esc(
+      asset.url
+    )}" target="_blank" rel="noreferrer">${esc(
+      asset.url
+    )}</a></div>${findingsHtml(asset.findings)}</div>`
+  );
 }
 
 /** The BIMI card body: the logo as the mail client would show it (an img never runs scripts), then the findings. */
 function bimiHtml(b: BimiReport): string {
   const logo = b.logoUrl
-    ? '<img class="bimi-logo" src="' + esc(b.logoUrl) + '" alt="" width="56" height="56">'
+    ? `<img class="bimi-logo" src="${esc(
+        b.logoUrl
+      )}" alt="" width="56" height="56">`
     : "";
-  return logo + recordLine(b.record) + findingsHtml(b.findings) + assetHtml("logo", b.logo) + assetHtml("certificate", b.certificate);
+  return (
+    logo +
+    recordLine(b.record) +
+    findingsHtml(b.findings) +
+    assetHtml("logo", b.logo) +
+    assetHtml("certificate", b.certificate)
+  );
 }
 
 function contactHtml(c: Contact | null): string {
-  if (!c) return "";
-  const parts = [c.name, c.email ? '<a href="mailto:' + esc(c.email) + '">' + esc(c.email) + "</a>" : "", c.phone].filter(Boolean);
+  if (!c) {
+    return "";
+  }
+  const parts = [
+    c.name,
+    c.email ? `<a href="mailto:${esc(c.email)}">${esc(c.email)}</a>` : "",
+    c.phone,
+  ].filter(Boolean);
   return parts.join(" · ");
 }
 
 /** A definition-list row; skipped entirely when there is nothing to show. */
 function row(label: string, valueHtml: string): string {
-  return valueHtml ? "<dt>" + label + "</dt><dd>" + valueHtml + "</dd>" : "";
+  return valueHtml ? `<dt>${label}</dt><dd>${valueHtml}</dd>` : "";
 }
 
 function registryLink(url: string): string {
-  return '<a class="asset-url" href="' + esc(url) + '" target="_blank" rel="noreferrer">' + esc(new URL(url).host) + "</a>";
+  return `<a class="asset-url" href="${esc(
+    url
+  )}" target="_blank" rel="noreferrer">${esc(new URL(url).host)}</a>`;
 }
 
 function domainInfoHtml(info: DomainInfo): string {
   const registrar = info.registrar
-    ? esc(info.registrar.name || "unnamed") + (info.registrar.ianaId ? ' <span class="muted">(IANA ID ' + esc(info.registrar.ianaId) + ")</span>" : "")
+    ? esc(info.registrar.name || "unnamed") +
+      (info.registrar.ianaId
+        ? ` <span class="muted">(IANA ID ${esc(info.registrar.ianaId)})</span>`
+        : "")
     : "";
-  return '<dl class="facts">' +
-    row("registrar", registrar) +
-    row("abuse contact", contactHtml(info.registrar?.abuse ?? null)) +
-    row("registrant", contactHtml(info.registrant)) +
-    row("nameservers", info.nameservers.map(esc).join("<br>")) +
-    row("registry", registryLink(info.url)) +
-    "</dl>";
+  return `<dl class="facts">${row("registrar", registrar)}${row(
+    "abuse contact",
+    contactHtml(info.registrar?.abuse ?? null)
+  )}${row("registrant", contactHtml(info.registrant))}${row(
+    "nameservers",
+    info.nameservers.map(esc).join("<br>")
+  )}${row("registry", registryLink(info.url))}</dl>`;
 }
 
 function ipInfoHtml(info: IpInfo): string {
-  const range = info.cidrs.length ? info.cidrs.join(", ") : info.start + " – " + info.end;
-  return '<dl class="facts">' +
-    row("network", esc(range) + (info.name ? ' <span class="muted">' + esc(info.name) + "</span>" : "")) +
-    row("holder", contactHtml(info.holder)) +
-    row("country", esc(info.country)) +
-    row("allocation", esc(info.type)) +
-    row("status", info.status.map(esc).join(", ")) +
-    row("abuse contact", contactHtml(info.abuse)) +
-    row("registry", registryLink(info.url)) +
-    "</dl>";
+  const range = info.cidrs.length
+    ? info.cidrs.join(", ")
+    : `${info.start} – ${info.end}`;
+  return `<dl class="facts">${row(
+    "network",
+    esc(range) +
+      (info.name ? ` <span class="muted">${esc(info.name)}</span>` : "")
+  )}${row("holder", contactHtml(info.holder))}${row(
+    "country",
+    esc(info.country)
+  )}${row("allocation", esc(info.type))}${row(
+    "status",
+    info.status.map(esc).join(", ")
+  )}${row("abuse contact", contactHtml(info.abuse))}${row(
+    "registry",
+    registryLink(info.url)
+  )}</dl>`;
 }
 
 function whoisTextHtml(w: WhoisText): string {
-  return '<dl class="facts">' +
-    row("registrar", esc(w.registrar)) +
-    "</dl>";
+  return `<dl class="facts">${row("registrar", esc(w.registrar))}</dl>`;
 }
 
 /** One check's card: title, verdict, the record as published, and what we make of it. */
-function cardHtml(id: string, title: string, verdict: Verdict, body: string): string {
-  return '<section class="card" data-check="' + id + '"><div class="card-head"><span class="card-title">' + title + "</span>" +
-    verdictPill(verdict) + '</div><div class="card-body">' + body + "</div></section>";
+function cardHtml(
+  id: string,
+  title: string,
+  verdict: Verdict,
+  body: string
+): string {
+  return `<section class="card" data-check="${
+    id
+  }"><div class="card-head"><span class="card-title">${
+    title
+  }</span>${verdictPill(verdict)}</div><div class="card-body">${
+    body
+  }</div></section>`;
 }
 
 /** The records pane body for one Response: answer, or why there is none, plus any authority section. */
-function responseHtml(name: string, type: string, r: DnsResponse, withAuthority: boolean): string {
+function responseHtml(
+  name: string,
+  type: string,
+  r: DnsResponse,
+  withAuthority: boolean
+): string {
   let html = "";
   switch (outcomeOf(r)) {
-    case "records":
+    case "records": {
       html += tableHtml(r.Answer);
       break;
-    case "empty":
-      html += '<p class="note">No ' + esc(type) + " records for " + esc(name) + ".</p>";
+    }
+    case "empty": {
+      html += `<p class="note">No ${esc(type)} records for ${esc(name)}.</p>`;
       break;
-    case "nxdomain":
-      html += '<p class="note">' + esc(name) + " does not exist (NXDOMAIN).</p>";
+    }
+    case "nxdomain": {
+      html += `<p class="note">${esc(name)} does not exist (NXDOMAIN).</p>`;
       break;
-    case "failed":
-      html += '<div class="error-box">The resolver answered ' + esc(rcodeName(r.Status)) +
-        (r.Comment.length ? ": " + esc(r.Comment.join("; ")) : ".") + "</div>";
+    }
+    case "failed": {
+      html += `<div class="error-box">The resolver answered ${esc(
+        rcodeName(r.Status)
+      )}${r.Comment.length ? `: ${esc(r.Comment.join("; "))}` : "."}</div>`;
       return html;
+    }
   }
-  if (withAuthority && r.Authority.length) html += '<h3 class="section">authority</h3>' + tableHtml(r.Authority);
+  if (withAuthority && r.Authority.length) {
+    html += `<h3 class="section">authority</h3>${tableHtml(r.Authority)}`;
+  }
   html += commentsHtml(r);
   return html;
 }
@@ -172,12 +311,48 @@ function responseHtml(name: string, type: string, r: DnsResponse, withAuthority:
 const tool: Tool = {
   id: "dns-lookup",
   name: "DNS Lookup",
-  subtitle: "Look up DNS records over HTTPS, find subdomains, check a domain's email setup, and read its whois.",
-  keywords: ["dns", "lookup", "dig", "nslookup", "domain", "records", "mx", "txt", "cname", "nameserver", "ns", "subdomains", "reverse", "ptr", "doh", "dnssec", "resolver", "ip", "email", "spf", "dmarc", "dkim", "bimi", "mail", "whois", "rdap", "registrar", "expiry"],
+  subtitle:
+    "Look up DNS records over HTTPS, find subdomains, check a domain's email setup, and read its whois.",
+  keywords: [
+    "dns",
+    "lookup",
+    "dig",
+    "nslookup",
+    "domain",
+    "records",
+    "mx",
+    "txt",
+    "cname",
+    "nameserver",
+    "ns",
+    "subdomains",
+    "reverse",
+    "ptr",
+    "doh",
+    "dnssec",
+    "resolver",
+    "ip",
+    "email",
+    "spf",
+    "dmarc",
+    "dkim",
+    "bimi",
+    "mail",
+    "whois",
+    "rdap",
+    "registrar",
+    "expiry",
+  ],
   mount(el, ctx) {
-    const typeOptions = TYPE_GROUPS.map((g) =>
-      '<optgroup label="' + g.label + '">' + g.types.map((t) => '<option value="' + t + '">' + t + "</option>").join("") + "</optgroup>").join("");
-    const resolverOptions = RESOLVERS.map((r) => '<option value="' + r.id + '">' + esc(r.label) + "</option>").join("");
+    const typeOptions = TYPE_GROUPS.map(
+      (g) =>
+        `<optgroup label="${g.label}">${g.types
+          .map((t) => `<option value="${t}">${t}</option>`)
+          .join("")}</optgroup>`
+    ).join("");
+    const resolverOptions = RESOLVERS.map(
+      (r) => `<option value="${r.id}">${esc(r.label)}</option>`
+    ).join("");
 
     el.innerHTML = `
       <div class="query">
@@ -225,20 +400,25 @@ const tool: Tool = {
     const $statusText = $(".status-text");
     const $raw = $(".raw");
     const $btnCopy = $(".btn-copy") as HTMLButtonElement;
-    const buttons = [...el.querySelectorAll(".actions button")] as HTMLButtonElement[];
+    const buttons = [
+      ...el.querySelectorAll(".actions button"),
+    ] as HTMLButtonElement[];
 
     function setStatus(kind: string, msg: string) {
-      $status.className = "statusbar " + kind;
+      $status.className = `statusbar ${kind}`;
       $statusText.textContent = msg;
     }
 
     function showRaw(value: unknown) {
-      $raw.textContent = value === undefined ? "" : JSON.stringify(value, null, 2);
+      $raw.textContent =
+        value === undefined ? "" : JSON.stringify(value, null, 2);
       $btnCopy.disabled = !$raw.textContent;
     }
 
     function currentType(): string | null {
-      if ($type.value !== "custom") return $type.value;
+      if ($type.value !== "custom") {
+        return $type.value;
+      }
       return validCustomType($custom.value);
     }
 
@@ -247,13 +427,29 @@ const tool: Tool = {
     }
 
     /** The last query that ran; what the Deep Link reproduces. */
-    let last: { resolver: string; opts: QueryOptions; action: Action; type: string; name: string } | null = null;
+    let last: {
+      resolver: string;
+      opts: QueryOptions;
+      action: Action;
+      type: string;
+      name: string;
+    } | null = null;
 
     /** State layout: `<resolver>.<cd><do>.<action>.<type>.<name, URI-encoded>`. */
     function publishState() {
-      if (!last) return;
+      if (!last) {
+        return;
+      }
       const flags = (last.opts.cd ? "1" : "0") + (last.opts.do ? "1" : "0");
-      ctx.setState([last.resolver, flags, last.action, last.type, encodeURIComponent(last.name)].join("."));
+      ctx.setState(
+        [
+          last.resolver,
+          flags,
+          last.action,
+          last.type,
+          encodeURIComponent(last.name),
+        ].join(".")
+      );
     }
 
     let inflight: AbortController | null = null;
@@ -263,27 +459,41 @@ const tool: Tool = {
       inflight?.abort();
       const ctrl = new AbortController();
       inflight = ctrl;
-      for (const b of buttons) b.disabled = true;
+      for (const b of buttons) {
+        b.disabled = true;
+      }
       return ctrl;
     }
 
     function finish(ctrl: AbortController) {
-      if (inflight !== ctrl) return;
+      if (inflight !== ctrl) {
+        return;
+      }
       inflight = null;
-      for (const b of buttons) b.disabled = false;
+      for (const b of buttons) {
+        b.disabled = false;
+      }
     }
 
     function fail(ctrl: AbortController, e: unknown) {
-      if (ctrl.signal.aborted) return;
-      const msg = e instanceof LookupError || e instanceof Error ? e.message : String(e);
-      $results.innerHTML = '<div class="error-box">' + esc(msg) + "</div>";
+      if (ctrl.signal.aborted) {
+        return;
+      }
+      const msg =
+        e instanceof LookupError || e instanceof Error ? e.message : String(e);
+      $results.innerHTML = `<div class="error-box">${esc(msg)}</div>`;
       $flags.innerHTML = "";
       showRaw(undefined);
       setStatus("error", msg);
     }
 
     /** Validate the input and, if usable, record it as the last query. Returns null after showing the problem. */
-    function prepare(action: Action): { name: string; type: string; resolver: Resolver; opts: QueryOptions } | null {
+    function prepare(action: Action): {
+      name: string;
+      type: string;
+      resolver: Resolver;
+      opts: QueryOptions;
+    } | null {
       const name = normalizeName($name.value);
       if (!name) {
         setStatus("error", "Enter a domain name or IP address.");
@@ -292,7 +502,10 @@ const tool: Tool = {
       }
       const type = currentType();
       if (type === null) {
-        setStatus("error", "Enter a record type name or number, e.g. TLSA or 65.");
+        setStatus(
+          "error",
+          "Enter a record type name or number, e.g. TLSA or 65."
+        );
         $custom.focus();
         return null;
       }
@@ -306,25 +519,42 @@ const tool: Tool = {
 
     async function runLookup() {
       const q = prepare("lookup");
-      if (!q) return;
+      if (!q) {
+        return;
+      }
       const ctrl = begin();
       const arpa = reverseName(q.name);
       const qname = arpa ?? q.name;
       const qtype = arpa ? "PTR" : q.type;
       $resultsTitle.textContent = arpa ? "Reverse lookup" : "Records";
-      setStatus("", "Querying " + qname + " " + qtype + " via " + q.resolver.label + "…");
+      setStatus("", `Querying ${qname} ${qtype} via ${q.resolver.label}…`);
       try {
-        const { response, ms } = await lookup(q.resolver, qname, qtype, q.opts, ctrl.signal);
-        if (ctrl.signal.aborted) return;
+        const { response, ms } = await lookup(
+          q.resolver,
+          qname,
+          qtype,
+          q.opts,
+          ctrl.signal
+        );
+        if (ctrl.signal.aborted) {
+          return;
+        }
         $results.innerHTML = responseHtml(qname, qtype, response, true);
         $flags.innerHTML = flagsHtml(response);
         showRaw(response);
         const n = response.Answer.length;
-        setStatus(outcomeOf(response) === "failed" ? "error" : "ok",
-          (n ? plural(n, "record") : outcomeOf(response) === "nxdomain" ? "NXDOMAIN" : "no records") +
-          " · " + ms + " ms · " + q.resolver.label);
-      } catch (e) {
-        fail(ctrl, e);
+        setStatus(
+          outcomeOf(response) === "failed" ? "error" : "ok",
+          `${
+            n
+              ? plural(n, "record")
+              : outcomeOf(response) === "nxdomain"
+                ? "NXDOMAIN"
+                : "no records"
+          } · ${ms} ms · ${q.resolver.label}`
+        );
+      } catch (error) {
+        fail(ctrl, error);
       } finally {
         finish(ctrl);
       }
@@ -332,7 +562,9 @@ const tool: Tool = {
 
     async function runAll() {
       const q = prepare("all");
-      if (!q) return;
+      if (!q) {
+        return;
+      }
       if (reverseName(q.name)) {
         // Every type of an arpa name is noise; an address only has its PTR.
         await runLookup();
@@ -341,33 +573,55 @@ const tool: Tool = {
       const ctrl = begin();
       $resultsTitle.textContent = "All types";
       $flags.innerHTML = "";
-      $results.innerHTML = '<div class="groups">' + COMMON_TYPES.map((t) =>
-        '<details class="group" data-type="' + t + '"><summary><span class="type-badge">' + t +
-        '</span><span class="count">…</span><span class="spacer"></span><span class="group-flags"></span></summary><div class="group-body"></div></details>').join("") + "</div>";
+      $results.innerHTML = `<div class="groups">${COMMON_TYPES.map(
+        (t) =>
+          `<details class="group" data-type="${
+            t
+          }"><summary><span class="type-badge">${
+            t
+          }</span><span class="count">…</span><span class="spacer"></span><span class="group-flags"></span></summary><div class="group-body"></div></details>`
+      ).join("")}</div>`;
       showRaw(undefined);
       const started = performance.now();
       const raw: Record<string, DnsResponse | { error: string }> = {};
       let done = 0;
       let total = 0;
-      setStatus("", "Querying " + q.name + " for " + COMMON_TYPES.length + " types via " + q.resolver.label + "… 0/" + COMMON_TYPES.length);
+      setStatus(
+        "",
+        `Querying ${q.name} for ${COMMON_TYPES.length} types via ${
+          q.resolver.label
+        }… 0/${COMMON_TYPES.length}`
+      );
       try {
         await pool(COMMON_TYPES, CONCURRENCY, async (type) => {
-          const group = $results.querySelector('.group[data-type="' + type + '"]') as HTMLDetailsElement;
+          const group = $results.querySelector(
+            `.group[data-type="${type}"]`
+          ) as HTMLDetailsElement;
           const $count = group.querySelector(".count") as HTMLElement;
           const $body = group.querySelector(".group-body") as HTMLElement;
           let result: LookupResult | null = null;
           try {
-            result = await lookup(q.resolver, q.name, type, q.opts, ctrl.signal);
-          } catch (e) {
-            if (ctrl.signal.aborted) return;
-            const msg = (e as Error).message;
+            result = await lookup(
+              q.resolver,
+              q.name,
+              type,
+              q.opts,
+              ctrl.signal
+            );
+          } catch (error) {
+            if (ctrl.signal.aborted) {
+              return;
+            }
+            const msg = (error as Error).message;
             raw[type] = { error: msg };
             group.open = true;
             group.classList.add("failed");
             $count.textContent = "failed";
-            $body.innerHTML = '<div class="error-box">' + esc(msg) + "</div>";
+            $body.innerHTML = `<div class="error-box">${esc(msg)}</div>`;
           }
-          if (ctrl.signal.aborted) return;
+          if (ctrl.signal.aborted) {
+            return;
+          }
           if (result) {
             const r = result.response;
             raw[type] = r;
@@ -376,85 +630,171 @@ const tool: Tool = {
             group.open = outcome === "records" || outcome === "failed";
             group.classList.toggle("empty", outcome !== "records");
             group.classList.toggle("failed", outcome === "failed");
-            $count.textContent = outcome === "records" ? plural(r.Answer.length, "record") : outcome === "empty" ? "none" : rcodeName(r.Status);
-            (group.querySelector(".group-flags") as HTMLElement).innerHTML = flagsHtml(r);
+            $count.textContent =
+              outcome === "records"
+                ? plural(r.Answer.length, "record")
+                : outcome === "empty"
+                  ? "none"
+                  : rcodeName(r.Status);
+            (group.querySelector(".group-flags") as HTMLElement).innerHTML =
+              flagsHtml(r);
             $body.innerHTML = responseHtml(q.name, type, r, false);
           }
-          done++;
-          setStatus("", "Querying " + q.name + " for " + COMMON_TYPES.length + " types via " + q.resolver.label + "… " + done + "/" + COMMON_TYPES.length);
+          done += 1;
+          setStatus(
+            "",
+            `Querying ${q.name} for ${COMMON_TYPES.length} types via ${
+              q.resolver.label
+            }… ${done}/${COMMON_TYPES.length}`
+          );
         });
-        if (ctrl.signal.aborted) return;
+        if (ctrl.signal.aborted) {
+          return;
+        }
         showRaw(raw);
         const failed = Object.values(raw).filter((r) => "error" in r).length;
-        setStatus(failed ? "error" : "ok",
-          COMMON_TYPES.length + " types · " + plural(total, "record") + (failed ? " · " + plural(failed, "failure") : "") +
-          " · " + Math.round(performance.now() - started) + " ms · " + q.resolver.label);
-      } catch (e) {
-        fail(ctrl, e);
+        setStatus(
+          failed ? "error" : "ok",
+          `${COMMON_TYPES.length} types · ${plural(total, "record")}${
+            failed ? ` · ${plural(failed, "failure")}` : ""
+          } · ${Math.round(performance.now() - started)} ms · ${
+            q.resolver.label
+          }`
+        );
+      } catch (error) {
+        fail(ctrl, error);
       } finally {
         finish(ctrl);
       }
     }
 
-    function subdomainsHtml(hits: SubdomainHit[], errors: { label: string; message: string }[]): string {
-      let html = errors.map((e) => '<div class="error-box">' + esc(e.label) + ": " + esc(e.message) + "</div>").join("");
+    function subdomainsHtml(
+      hits: SubdomainHit[],
+      errors: { label: string; message: string }[]
+    ): string {
+      let html = errors
+        .map(
+          (e) =>
+            `<div class="error-box">${esc(e.label)}: ${esc(e.message)}</div>`
+        )
+        .join("");
       if (!hits.length) {
-        html += '<p class="note">' + (errors.length ? "No subdomains from the sources that answered." : "No subdomains found.") + "</p>";
+        html += `<p class="note">${
+          errors.length
+            ? "No subdomains from the sources that answered."
+            : "No subdomains found."
+        }</p>`;
         return html;
       }
-      html += '<table class="records subs"><thead><tr><th>Name</th><th>IP</th></tr></thead><tbody>' +
-        hits.map((h) =>
-          '<tr><td class="c-name"><button type="button" class="link" data-name="' + esc(h.name) + '" title="Look up ' + esc(h.name) + '">' + esc(h.name) + "</button></td>" +
-          '<td class="c-ip">' + esc(h.ip) + "</td></tr>").join("") +
-        "</tbody></table>";
+      html += `<table class="records subs"><thead><tr><th>Name</th><th>IP</th></tr></thead><tbody>${hits
+        .map(
+          (h) =>
+            `<tr><td class="c-name"><button type="button" class="link" data-name="${esc(
+              h.name
+            )}" title="Look up ${esc(h.name)}">${esc(h.name)}</button></td>` +
+            `<td class="c-ip">${esc(h.ip)}</td></tr>`
+        )
+        .join("")}</tbody></table>`;
       return html;
     }
 
     async function runSubdomains() {
       const q = prepare("subs");
-      if (!q) return;
+      if (!q) {
+        return;
+      }
       if (reverseName(q.name)) {
-        setStatus("error", "Subdomain search needs a domain name, not an IP address.");
+        setStatus(
+          "error",
+          "Subdomain search needs a domain name, not an IP address."
+        );
         return;
       }
       const ctrl = begin();
       const name = subdomainSearchName(q.name);
-      $resultsTitle.textContent = "Subdomains of " + name;
+      $resultsTitle.textContent = `Subdomains of ${name}`;
       $flags.innerHTML = "";
       $results.innerHTML = "";
       showRaw(undefined);
-      setStatus("", "Searching " + SUBDOMAIN_SOURCES.map((s) => s.label).join(" and ") + " for " + name + "…");
+      setStatus(
+        "",
+        `Searching ${SUBDOMAIN_SOURCES.map((s) => s.label).join(" and ")} for ${
+          name
+        }…`
+      );
       const started = performance.now();
       try {
-        const settled = await Promise.all(SUBDOMAIN_SOURCES.map(async (source) => {
-          try {
-            return { source, hosts: await source.fetch(name, ctrl.signal), error: "" };
-          } catch (e) {
-            if (ctrl.signal.aborted) throw e;
-            return { source, hosts: [], error: (e as Error).message };
-          }
-        }));
-        if (ctrl.signal.aborted) return;
-        const errors = settled.filter((s) => s.error).map((s) => ({ label: s.source.label, message: s.error }));
-        const hits = mergeSubdomains(name, settled.filter((s) => !s.error));
+        const settled = await Promise.all(
+          SUBDOMAIN_SOURCES.map(async (source) => {
+            try {
+              return {
+                source,
+                hosts: await source.fetch(name, ctrl.signal),
+                error: "",
+              };
+            } catch (error) {
+              if (ctrl.signal.aborted) {
+                throw error;
+              }
+              return { source, hosts: [], error: (error as Error).message };
+            }
+          })
+        );
+        if (ctrl.signal.aborted) {
+          return;
+        }
+        const errors = settled
+          .filter((s) => s.error)
+          .map((s) => ({ label: s.source.label, message: s.error }));
+        const hits = mergeSubdomains(
+          name,
+          settled.filter((s) => !s.error)
+        );
         $results.innerHTML = subdomainsHtml(hits, errors);
-        showRaw(Object.fromEntries(settled.map((s) => [s.source.label, s.error ? { error: s.error } : s.hosts])));
-        const perSource = settled.map((s) => s.source.label + " " + (s.error ? "failed" : s.hosts.length)).join(" · ");
-        setStatus(errors.length === settled.length ? "error" : "ok",
-          plural(hits.length, "subdomain") + " · " + perSource + " · " + Math.round(performance.now() - started) + " ms");
-      } catch (e) {
-        fail(ctrl, e);
+        showRaw(
+          Object.fromEntries(
+            settled.map((s) => [
+              s.source.label,
+              s.error ? { error: s.error } : s.hosts,
+            ])
+          )
+        );
+        const perSource = settled
+          .map(
+            (s) => `${s.source.label} ${s.error ? "failed" : s.hosts.length}`
+          )
+          .join(" · ");
+        setStatus(
+          errors.length === settled.length ? "error" : "ok",
+          `${plural(hits.length, "subdomain")} · ${perSource} · ${Math.round(
+            performance.now() - started
+          )} ms`
+        );
+      } catch (error) {
+        fail(ctrl, error);
       } finally {
         finish(ctrl);
       }
     }
 
     /** TXT strings at a name through the current resolver, recording every response in `raw`. */
-    function txtResolver(q: { resolver: Resolver; opts: QueryOptions }, raw: Record<string, unknown>, signal: AbortSignal): TxtResolver {
+    function txtResolver(
+      q: { resolver: Resolver; opts: QueryOptions },
+      raw: Record<string, unknown>,
+      signal: AbortSignal
+    ): TxtResolver {
       return async (name) => {
-        const { response } = await lookup(q.resolver, name, "TXT", q.opts, signal);
-        raw[name + " TXT"] = response;
-        return response.Answer.filter((r) => r.type === 16).map((r) => unquoteTxt(r.data));
+        const { response } = await lookup(
+          q.resolver,
+          name,
+          "TXT",
+          q.opts,
+          signal
+        );
+        raw[`${name} TXT`] = response;
+        return response.Answer.filter((r) => r.type === 16).map((r) =>
+          unquoteTxt(r.data)
+        );
       };
     }
 
@@ -463,33 +803,47 @@ const tool: Tool = {
       return async (url) => {
         try {
           const res = await fetch(url, { signal, redirect: "follow" });
-          return { ok: res.ok, status: res.status, body: res.ok ? await res.text() : "" };
-        } catch (e) {
-          if (signal.aborted) throw e;
+          return {
+            ok: res.ok,
+            status: res.status,
+            body: res.ok ? await res.text() : "",
+          };
+        } catch (error) {
+          if (signal.aborted) {
+            throw error;
+          }
           return { ok: false, status: 0, body: "" };
         }
       };
     }
 
     function dkimProbeHtml(): string {
-      return '<div class="dkim-probe"><input type="text" class="dkim-selector" placeholder="another selector, e.g. selector1"' +
+      return (
+        '<div class="dkim-probe"><input type="text" class="dkim-selector" placeholder="another selector, e.g. selector1"' +
         ' spellcheck="false" autocapitalize="off" autocomplete="off" aria-label="DKIM selector">' +
-        '<button type="button" class="btn-dkim">Check selector</button></div><div class="dkim-extra"></div>';
+        '<button type="button" class="btn-dkim">Check selector</button></div><div class="dkim-extra"></div>'
+      );
     }
 
     async function runEmail() {
       const q = prepare("email");
-      if (!q) return;
+      if (!q) {
+        return;
+      }
       if (reverseName(q.name)) {
-        setStatus("error", "Email check needs a domain name, not an IP address.");
+        setStatus(
+          "error",
+          "Email check needs a domain name, not an IP address."
+        );
         return;
       }
       const ctrl = begin();
-      $resultsTitle.textContent = "Email authentication for " + q.name;
+      $resultsTitle.textContent = `Email authentication for ${q.name}`;
       $flags.innerHTML = "";
-      $results.innerHTML = '<p class="note">Checking MX, SPF, DMARC, DKIM, and BIMI…</p>';
+      $results.innerHTML =
+        '<p class="note">Checking MX, SPF, DMARC, DKIM, and BIMI…</p>';
       showRaw(undefined);
-      setStatus("", "Checking " + q.name + " via " + q.resolver.label + "…");
+      setStatus("", `Checking ${q.name} via ${q.resolver.label}…`);
       const started = performance.now();
       const raw: Record<string, unknown> = {};
       const txt = txtResolver(q, raw, ctrl.signal);
@@ -501,26 +855,69 @@ const tool: Tool = {
           checkDkim(q.name, txt, (items, fn) => pool(items, CONCURRENCY, fn)),
         ]);
         // BIMI is judged against the DMARC policy, so it waits for that.
-        const bimi = await checkBimi(q.name, txt, assetFetcher(ctrl.signal), dmarc.tags);
-        if (ctrl.signal.aborted) return;
-        raw[q.name + " MX"] = mxRes.response;
-        const mx = evaluateMx(mxRes.response.Answer.filter((r) => r.type === 15).map((r) => r.data));
-        const mxBody = (mx.hosts.length && mx.hosts[0]!.host
-          ? '<ul class="mx-list">' + mx.hosts.map((h) => "<li><span class=\"prio\">" + h.priority + "</span> " + esc(h.host) + "</li>").join("") + "</ul>"
-          : "") + findingsHtml(mx.findings);
+        const bimi = await checkBimi(
+          q.name,
+          txt,
+          assetFetcher(ctrl.signal),
+          dmarc.tags
+        );
+        if (ctrl.signal.aborted) {
+          return;
+        }
+        raw[`${q.name} MX`] = mxRes.response;
+        const mx = evaluateMx(
+          mxRes.response.Answer.filter((r) => r.type === 15).map((r) => r.data)
+        );
+        const mxBody =
+          (mx.hosts.length && mx.hosts[0]!.host
+            ? `<ul class="mx-list">${mx.hosts
+                .map(
+                  (h) =>
+                    `<li><span class="prio">${h.priority}</span> ${esc(
+                      h.host
+                    )}</li>`
+                )
+                .join("")}</ul>`
+            : "") + findingsHtml(mx.findings);
         $results.innerHTML =
           cardHtml("mx", "MX", mx.verdict, mxBody) +
-          cardHtml("spf", "SPF", spf.verdict, recordLine(spf.record) + findingsHtml(spf.findings)) +
-          cardHtml("dmarc", "DMARC", dmarc.verdict, recordLine(dmarc.record) + findingsHtml(dmarc.findings)) +
-          cardHtml("dkim", "DKIM", dkim.verdict, findingsHtml(dkim.findings) + dkim.keys.map(dkimKeyHtml).join("") + dkimProbeHtml()) +
+          cardHtml(
+            "spf",
+            "SPF",
+            spf.verdict,
+            recordLine(spf.record) + findingsHtml(spf.findings)
+          ) +
+          cardHtml(
+            "dmarc",
+            "DMARC",
+            dmarc.verdict,
+            recordLine(dmarc.record) + findingsHtml(dmarc.findings)
+          ) +
+          cardHtml(
+            "dkim",
+            "DKIM",
+            dkim.verdict,
+            findingsHtml(dkim.findings) +
+              dkim.keys.map(dkimKeyHtml).join("") +
+              dkimProbeHtml()
+          ) +
           cardHtml("bimi", "BIMI", bimi.verdict, bimiHtml(bimi));
         showRaw({ mx, spf, dmarc, dkim, bimi, responses: raw });
-        const summary = ["SPF " + VERDICT_LABEL[spf.verdict], "DMARC " + VERDICT_LABEL[dmarc.verdict], "DKIM " + VERDICT_LABEL[dkim.verdict],
-          "BIMI " + VERDICT_LABEL[bimi.verdict]].join(" · ");
+        const summary = [
+          `SPF ${VERDICT_LABEL[spf.verdict]}`,
+          `DMARC ${VERDICT_LABEL[dmarc.verdict]}`,
+          `DKIM ${VERDICT_LABEL[dkim.verdict]}`,
+          `BIMI ${VERDICT_LABEL[bimi.verdict]}`,
+        ].join(" · ");
         const bad = [spf, dmarc].some((r) => r.verdict === "fail");
-        setStatus(bad ? "error" : "ok", summary + " · " + Math.round(performance.now() - started) + " ms · " + q.resolver.label);
-      } catch (e) {
-        fail(ctrl, e);
+        setStatus(
+          bad ? "error" : "ok",
+          `${summary} · ${Math.round(performance.now() - started)} ms · ${
+            q.resolver.label
+          }`
+        );
+      } catch (error) {
+        fail(ctrl, error);
       } finally {
         finish(ctrl);
       }
@@ -528,12 +925,25 @@ const tool: Tool = {
 
     /** Look up one more DKIM selector the common list did not cover. */
     async function probeDkim() {
-      const $sel = $results.querySelector(".dkim-selector") as HTMLInputElement | null;
-      const $extra = $results.querySelector(".dkim-extra") as HTMLElement | null;
-      if (!$sel || !$extra || !last) return;
+      const $sel = $results.querySelector(
+        ".dkim-selector"
+      ) as HTMLInputElement | null;
+      const $extra = $results.querySelector(
+        ".dkim-extra"
+      ) as HTMLElement | null;
+      if (!$sel || !$extra || !last) {
+        return;
+      }
       const selector = $sel.value.trim().toLowerCase().replace(/\.$/, "");
-      if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/.test(selector)) {
-        setStatus("error", "Enter a DKIM selector: the part before ._domainkey in the signing record.");
+      if (
+        !/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/.test(
+          selector
+        )
+      ) {
+        setStatus(
+          "error",
+          "Enter a DKIM selector: the part before ._domainkey in the signing record."
+        );
         $sel.focus();
         return;
       }
@@ -541,92 +951,180 @@ const tool: Tool = {
       const q = { resolver: resolverById(last.resolver), opts: last.opts };
       const raw: Record<string, unknown> = {};
       try {
-        const key = await checkDkimSelector(last.name, selector, txtResolver(q, raw, ctrl.signal));
-        if (ctrl.signal.aborted) return;
-        $extra.insertAdjacentHTML("afterbegin", key
-          ? dkimKeyHtml(key)
-          : '<p class="note">No DKIM key at ' + esc(selector) + "._domainkey." + esc(last.name) + ".</p>");
-        setStatus(key ? "ok" : "", key ? "Key found at selector " + selector : "No key at selector " + selector);
-      } catch (e) {
-        fail(ctrl, e);
+        const key = await checkDkimSelector(
+          last.name,
+          selector,
+          txtResolver(q, raw, ctrl.signal)
+        );
+        if (ctrl.signal.aborted) {
+          return;
+        }
+        $extra.insertAdjacentHTML(
+          "afterbegin",
+          key
+            ? dkimKeyHtml(key)
+            : `<p class="note">No DKIM key at ${esc(selector)}._domainkey.${esc(
+                last.name
+              )}.</p>`
+        );
+        setStatus(
+          key ? "ok" : "",
+          key
+            ? `Key found at selector ${selector}`
+            : `No key at selector ${selector}`
+        );
+      } catch (error) {
+        fail(ctrl, error);
       } finally {
         finish(ctrl);
       }
     }
 
     /** RDAP GET that keeps every registry answer for the raw pane (the bootstrap files are just plumbing). */
-    function recordingRdap(raw: Record<string, unknown>, signal: AbortSignal): RdapFetch {
+    function recordingRdap(
+      raw: Record<string, unknown>,
+      signal: AbortSignal
+    ): RdapFetch {
       return async (url) => {
         const res = await rdapFetch(url, signal);
-        if (res.json !== null && !url.startsWith("https://data.iana.org/")) raw[url] = res.json;
+        if (res.json !== null && !url.startsWith("https://data.iana.org/")) {
+          raw[url] = res.json;
+        }
         return res;
       };
     }
 
     async function runWhois() {
       const q = prepare("whois");
-      if (!q) return;
+      if (!q) {
+        return;
+      }
       const ctrl = begin();
       const isIp = reverseName(q.name) !== null;
-      $resultsTitle.textContent = "Whois for " + q.name;
+      $resultsTitle.textContent = `Whois for ${q.name}`;
       $flags.innerHTML = "";
       $results.innerHTML = '<p class="note">Asking the registry…</p>';
       showRaw(undefined);
-      setStatus("", "Looking up " + q.name + " in RDAP…");
+      setStatus("", `Looking up ${q.name} in RDAP…`);
       const started = performance.now();
       const raw: Record<string, unknown> = {};
       const fetcher = recordingRdap(raw, ctrl.signal);
       try {
         if (isIp) {
-          const bootstrap = await loadBootstrap(q.name.includes(":") ? BOOTSTRAP_URLS.ipv6 : BOOTSTRAP_URLS.ipv4, fetcher);
+          const bootstrap = await loadBootstrap(
+            q.name.includes(":") ? BOOTSTRAP_URLS.ipv6 : BOOTSTRAP_URLS.ipv4,
+            fetcher
+          );
           const res = await lookupIp(q.name, bootstrap, fetcher);
-          if (ctrl.signal.aborted) return;
-          if (res.kind === "error") throw new LookupError(res.message);
-          const info = res.info;
-          const events = info.events.map((e) => ({ level: "none" as Verdict, text: e.action + " " + e.date.slice(0, 10) + "." }));
-          $results.innerHTML = cardHtml("whois", "IP NETWORK", "none", ipInfoHtml(info) + findingsHtml(events));
+          if (ctrl.signal.aborted) {
+            return;
+          }
+          if (res.kind === "error") {
+            throw new LookupError(res.message);
+          }
+          const { info } = res;
+          const events = info.events.map((e) => ({
+            level: "none" as Verdict,
+            text: `${e.action} ${e.date.slice(0, 10)}.`,
+          }));
+          $results.innerHTML = cardHtml(
+            "whois",
+            "IP NETWORK",
+            "none",
+            ipInfoHtml(info) + findingsHtml(events)
+          );
           showRaw(raw);
-          setStatus("ok", (info.holder?.name || info.name || info.handle) + " · " + (info.cidrs[0] ?? info.handle) + " · " + Math.round(performance.now() - started) + " ms");
+          setStatus(
+            "ok",
+            `${info.holder?.name || info.name || info.handle} · ${
+              info.cidrs[0] ?? info.handle
+            } · ${Math.round(performance.now() - started)} ms`
+          );
           return;
         }
         const bootstrap = await loadBootstrap(BOOTSTRAP_URLS.dns, fetcher);
         const res = await lookupDomain(q.name, bootstrap, fetcher);
-        if (ctrl.signal.aborted) return;
-        if (res.kind === "error" && !res.unreadable) throw new LookupError(res.message);
+        if (ctrl.signal.aborted) {
+          return;
+        }
+        if (res.kind === "error" && !res.unreadable) {
+          throw new LookupError(res.message);
+        }
         if (res.kind === "no-rdap" || res.kind === "error") {
           // No browser-readable RDAP for this TLD: fall back to raw WHOIS through a proxy.
-          await runWhoisText(q.name, res.kind === "no-rdap" ? res.tld : q.name.split(".").pop()!, ctrl, raw, started);
+          await runWhoisText(
+            q.name,
+            res.kind === "no-rdap" ? res.tld : q.name.split(".").pop()!,
+            ctrl,
+            raw,
+            started
+          );
           return;
         }
         if (res.kind === "not-found") {
-          $results.innerHTML = cardHtml("whois", "WHOIS", "none",
-            '<p class="note">The registry has no record for ' + esc(res.tried.at(-1)!) + ": it is not registered, or the registry knows it under a different name.</p>");
+          $results.innerHTML = cardHtml(
+            "whois",
+            "WHOIS",
+            "none",
+            `<p class="note">The registry has no record for ${esc(
+              res.tried.at(-1)!
+            )}: it is not registered, or the registry knows it under a different name.</p>`
+          );
           showRaw(raw);
-          setStatus("", "Not registered · " + Math.round(performance.now() - started) + " ms");
+          setStatus(
+            "",
+            `Not registered · ${Math.round(performance.now() - started)} ms`
+          );
           return;
         }
         // The zone's own NS set, for comparison with what the registry delegates to.
         let zoneNs: string[] | null = null;
         try {
-          const ns = await lookup(q.resolver, res.info.name, "NS", q.opts, ctrl.signal);
-          raw[res.info.name + " NS"] = ns.response;
-          zoneNs = ns.response.Answer.filter((r) => r.type === 2).map((r) => r.data);
+          const ns = await lookup(
+            q.resolver,
+            res.info.name,
+            "NS",
+            q.opts,
+            ctrl.signal
+          );
+          raw[`${res.info.name} NS`] = ns.response;
+          zoneNs = ns.response.Answer.filter((r) => r.type === 2).map(
+            (r) => r.data
+          );
         } catch {
           // No NS comparison then; the registry data still stands on its own.
         }
-        if (ctrl.signal.aborted) return;
+        if (ctrl.signal.aborted) {
+          return;
+        }
         const report = judgeDomain(res.info, zoneNs);
-        const walked = res.tried.length > 1
-          ? '<p class="note">Registered name: ' + esc(res.info.name) + " (looked up on behalf of " + esc(q.name) + ").</p>"
-          : "";
-        $results.innerHTML = cardHtml("whois", "WHOIS", report.verdict, walked + domainInfoHtml(res.info) + findingsHtml(report.findings));
+        const walked =
+          res.tried.length > 1
+            ? `<p class="note">Registered name: ${esc(
+                res.info.name
+              )} (looked up on behalf of ${esc(q.name)}).</p>`
+            : "";
+        $results.innerHTML = cardHtml(
+          "whois",
+          "WHOIS",
+          report.verdict,
+          walked + domainInfoHtml(res.info) + findingsHtml(report.findings)
+        );
         showRaw(raw);
-        const expiry = report.findings.find((f) => f.text.startsWith("Expires") || f.text.startsWith("Expired"));
-        setStatus(report.verdict === "fail" ? "error" : "ok",
-          (res.info.registrar?.name ? "registrar " + res.info.registrar.name : "registered") +
-          (expiry ? " · " + expiry.text.replace(/\.$/, "").toLowerCase() : "") + " · " + Math.round(performance.now() - started) + " ms");
-      } catch (e) {
-        fail(ctrl, e);
+        const expiry = report.findings.find(
+          (f) => f.text.startsWith("Expires") || f.text.startsWith("Expired")
+        );
+        setStatus(
+          report.verdict === "fail" ? "error" : "ok",
+          `${
+            (res.info.registrar?.name
+              ? `registrar ${res.info.registrar.name}`
+              : "registered") +
+            (expiry ? ` · ${expiry.text.replace(/\.$/, "").toLowerCase()}` : "")
+          } · ${Math.round(performance.now() - started)} ms`
+        );
+      } catch (error) {
+        fail(ctrl, error);
       } finally {
         finish(ctrl);
       }
@@ -637,44 +1135,89 @@ const tool: Tool = {
         try {
           const res = await fetch(url, { signal });
           return { status: res.status, text: await res.text() };
-        } catch (e) {
-          if (signal.aborted) throw e;
+        } catch (error) {
+          if (signal.aborted) {
+            throw error;
+          }
           return { status: 0, text: "" };
         }
       };
     }
 
     /** Raw WHOIS via the whois.vu proxy, for TLDs whose registry offers no RDAP a browser can read. */
-    async function runWhoisText(name: string, tld: string, ctrl: AbortController, raw: Record<string, unknown>, started: number) {
-      setStatus("", "No RDAP for ." + tld + "; asking the WHOIS proxy…");
+    async function runWhoisText(
+      name: string,
+      tld: string,
+      ctrl: AbortController,
+      raw: Record<string, unknown>,
+      started: number
+    ) {
+      setStatus("", `No RDAP for .${tld}; asking the WHOIS proxy…`);
       let w: WhoisText;
       try {
         w = await lookupWhoisText(name, textFetcher(ctrl.signal));
-      } catch (e) {
-        if (ctrl.signal.aborted) return;
-        $results.innerHTML = cardHtml("whois", "WHOIS", "none",
-          '<p class="note">The .' + esc(tld) + " registry publishes no RDAP a browser can read, and the WHOIS proxy failed: " + esc((e as Error).message) + " " +
-          '<a class="asset-url" href="' + esc(ianaTldPage(name)) + '" target="_blank" rel="noreferrer">IANA\'s page for .' + esc(tld) + "</a> names the registry's WHOIS server.</p>");
-        setStatus("error", "No RDAP for ." + tld + " and the WHOIS proxy failed");
+      } catch (error) {
+        if (ctrl.signal.aborted) {
+          return;
+        }
+        $results.innerHTML = cardHtml(
+          "whois",
+          "WHOIS",
+          "none",
+          `<p class="note">The .${esc(
+            tld
+          )} registry publishes no RDAP a browser can read, and the WHOIS proxy failed: ${esc(
+            (error as Error).message
+          )} ` +
+            `<a class="asset-url" href="${esc(
+              ianaTldPage(name)
+            )}" target="_blank" rel="noreferrer">IANA's page for .${esc(
+              tld
+            )}</a> names the registry's WHOIS server.</p>`
+        );
+        setStatus("error", `No RDAP for .${tld} and the WHOIS proxy failed`);
         return;
       }
-      if (ctrl.signal.aborted) return;
-      raw["whois.vu " + name] = w;
+      if (ctrl.signal.aborted) {
+        return;
+      }
+      raw[`whois.vu ${name}`] = w;
       const report = judgeWhoisText(w);
-      $results.innerHTML = cardHtml("whois", "RAW WHOIS", report.verdict,
-        whoisTextHtml(w) + findingsHtml(report.findings) + '<pre class="whois-text">' + esc(w.text) + "</pre>");
+      $results.innerHTML = cardHtml(
+        "whois",
+        "RAW WHOIS",
+        report.verdict,
+        `${
+          whoisTextHtml(w) + findingsHtml(report.findings)
+        }<pre class="whois-text">${esc(w.text)}</pre>`
+      );
       showRaw(raw);
-      setStatus(report.verdict === "fail" ? "error" : w.available === true ? "" : "ok",
-        (w.available === true ? "not registered" : w.registrar ? "registrar " + w.registrar : "registered") +
-        (w.expires ? " · expires " + w.expires : "") + " · raw WHOIS via whois.vu · " + Math.round(performance.now() - started) + " ms");
+      setStatus(
+        report.verdict === "fail" ? "error" : w.available === true ? "" : "ok",
+        `${
+          (w.available === true
+            ? "not registered"
+            : w.registrar
+              ? `registrar ${w.registrar}`
+              : "registered") + (w.expires ? ` · expires ${w.expires}` : "")
+        } · raw WHOIS via whois.vu · ${Math.round(
+          performance.now() - started
+        )} ms`
+      );
     }
 
     function run(action: Action) {
-      if (action === "all") void runAll();
-      else if (action === "whois") void runWhois();
-      else if (action === "email") void runEmail();
-      else if (action === "subs") void runSubdomains();
-      else void runLookup();
+      if (action === "all") {
+        void runAll();
+      } else if (action === "whois") {
+        void runWhois();
+      } else if (action === "email") {
+        void runEmail();
+      } else if (action === "subs") {
+        void runSubdomains();
+      } else {
+        void runLookup();
+      }
     }
 
     function syncCustom() {
@@ -684,9 +1227,15 @@ const tool: Tool = {
     ctx.onRestore((payload) => {
       const [resolver, flags, action, type, ...rest] = payload.split(".");
       const name = (() => {
-        try { return decodeURIComponent(rest.join(".")); } catch { return ""; }
+        try {
+          return decodeURIComponent(rest.join("."));
+        } catch {
+          return "";
+        }
       })();
-      if (RESOLVERS.some((r) => r.id === resolver)) $resolver.value = resolver!;
+      if (RESOLVERS.some((r) => r.id === resolver)) {
+        $resolver.value = resolver!;
+      }
       if (/^[01]{2}$/.test(flags ?? "")) {
         $cd.checked = flags![0] === "1";
         $do.checked = flags![1] === "1";
@@ -706,10 +1255,20 @@ const tool: Tool = {
 
     $type.addEventListener("change", () => {
       syncCustom();
-      if ($type.value === "custom") $custom.focus();
+      if ($type.value === "custom") {
+        $custom.focus();
+      }
     });
-    $name.addEventListener("keydown", (e) => { if (e.key === "Enter") run("lookup"); });
-    $custom.addEventListener("keydown", (e) => { if (e.key === "Enter") run("lookup"); });
+    $name.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        run("lookup");
+      }
+    });
+    $custom.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        run("lookup");
+      }
+    });
     $(".btn-lookup").addEventListener("click", () => run("lookup"));
     $(".btn-all").addEventListener("click", () => run("all"));
     $(".btn-subs").addEventListener("click", () => run("subs"));
@@ -724,25 +1283,42 @@ const tool: Tool = {
         return;
       }
       const btn = target.closest("button.link") as HTMLButtonElement | null;
-      if (!btn || !btn.dataset.name) return;
+      if (!btn || !btn.dataset.name) {
+        return;
+      }
       $name.value = btn.dataset.name;
       run("lookup");
     });
     // A logo that will not load (blocked, 404) just disappears; the findings already say why.
-    $results.addEventListener("error", (e) => {
-      const t = e.target as HTMLElement;
-      if (t.classList?.contains("bimi-logo")) t.hidden = true;
-    }, true);
+    $results.addEventListener(
+      "error",
+      (e) => {
+        const t = e.target as HTMLElement;
+        if (t.classList?.contains("bimi-logo")) {
+          t.hidden = true;
+        }
+      },
+      true
+    );
     $results.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" && (e.target as HTMLElement).classList.contains("dkim-selector")) void probeDkim();
+      if (
+        e.key === "Enter" &&
+        (e.target as HTMLElement).classList.contains("dkim-selector")
+      ) {
+        void probeDkim();
+      }
     });
 
     $btnCopy.addEventListener("click", () => {
-      if (!$raw.textContent) return;
+      if (!$raw.textContent) {
+        return;
+      }
       navigator.clipboard.writeText($raw.textContent).then(() => {
         const old = $btnCopy.textContent;
         $btnCopy.textContent = "Copied";
-        setTimeout(() => { $btnCopy.textContent = old; }, 1200);
+        setTimeout(() => {
+          $btnCopy.textContent = old;
+        }, 1200);
       });
     });
   },

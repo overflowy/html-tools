@@ -10,6 +10,7 @@
 // patched, when the Environment or the Mirror changes.
 
 import type * as Monaco from "monaco-editor";
+
 import { scriptBlobUrl, scriptDataUrl } from "../../shared/script-url";
 
 type Json = Record<string, unknown>;
@@ -46,10 +47,16 @@ const DROPPED = new Set([
 const PYTHON_FILE = /\.pyi?$/i;
 
 /** JSON-RPC's code for a failure inside the server, as opposed to a request it refuses. */
-const LSP_INTERNAL_ERROR = -32603;
+const LSP_INTERNAL_ERROR = -32_603;
 
 /** Requests whose answers point at files: those files need Monaco models before the client sees them. */
-const LOCATING = new Set(["textDocument/definition", "textDocument/typeDefinition", "textDocument/declaration", "textDocument/implementation", "textDocument/references"]);
+const LOCATING = new Set([
+  "textDocument/definition",
+  "textDocument/typeDefinition",
+  "textDocument/declaration",
+  "textDocument/implementation",
+  "textDocument/references",
+]);
 
 export interface CheckerOptions {
   /** Absolute virtual paths to text: the Project's text files, the Mirror, the stubs. */
@@ -89,18 +96,23 @@ export class Checker {
   private workers: Worker[] = [];
   private listener: Listener | undefined;
   private closed = false;
-  private features: { dispose(): void } | null = null;
+  private features: { dispose: () => void } | null = null;
   private client: Monaco.lsp.MonacoLspClient | null = null;
   /** Ids of in-flight requests in LOCATING. */
   private locating = new Set<number | string>();
   /** The file each in-flight textDocument request is about, so an answer about a file since closed can be dropped. */
   private about = new Map<number | string, string>();
   /** Where each in-flight completion request was made, for the ranges its items lack. */
-  private completing = new Map<number | string, { uri: string; line: number; character: number }>();
+  private completing = new Map<
+    number | string,
+    { uri: string; line: number; character: number }
+  >();
   private initId: number | string | null = null;
   private resolveReady: (() => void) | null = null;
   /** Resolves when the server answered `initialize`. */
-  readonly ready = new Promise<void>((resolve) => (this.resolveReady = resolve));
+  readonly ready = new Promise<void>(
+    (resolve) => (this.resolveReady = resolve)
+  );
   isReady = false;
   /** Resolves on the foreground worker's first message: its script has been evaluated. */
   private started: Promise<void>;
@@ -113,19 +125,34 @@ export class Checker {
   private realUris = new Map<string, string>();
 
   /** `script` is the worker script's URL, blob: or data: (see loadPyrightScript). */
-  constructor(private monaco: typeof Monaco, private script: string, private options: CheckerOptions) {
+  constructor(
+    private monaco: typeof Monaco,
+    private script: string,
+    private options: CheckerOptions
+  ) {
     this.started = new Promise((resolve) => (this.resolveStarted = resolve));
   }
 
   start() {
     const foreground = this.spawn("pyright-foreground");
-    foreground.addEventListener("message", (ev: MessageEvent) => this.receive(foreground, ev.data));
+    foreground.addEventListener("message", (ev: MessageEvent) =>
+      this.receive(foreground, ev.data)
+    );
     foreground.postMessage({ type: "browser/boot", mode: "foreground" });
 
-    for (const path of Object.keys(this.options.files)) this.remember(path);
+    for (const path of Object.keys(this.options.files)) {
+      this.remember(path);
+    }
 
     const transport = {
-      state: { value: { state: "open" as const }, onChange: () => ({ dispose() {} }) },
+      state: {
+        value: { state: "open" as const },
+        onChange: () => ({
+          dispose() {
+            // The state never changes, so no listener was registered.
+          },
+        }),
+      },
       send: (message: Message) => {
         this.send(foreground, message);
         return Promise.resolve();
@@ -140,7 +167,8 @@ export class Checker {
     // The client registers its Monaco providers in the constructor and keeps
     // no handle on them; a restart would register a second set. Catch the
     // disposable on the way past.
-    const capture = (features: { dispose(): void }) => (this.features = features);
+    const capture = (features: { dispose: () => void }) =>
+      (this.features = features);
     class Client extends Base {
       protected override createFeatures() {
         const features = super.createFeatures();
@@ -148,12 +176,16 @@ export class Checker {
         return features;
       }
     }
-    this.client = new Client(transport as unknown as ConstructorParameters<typeof Base>[0]);
+    this.client = new Client(
+      transport as unknown as ConstructorParameters<typeof Base>[0]
+    );
   }
 
   private spawn(name: string): Worker {
     let url = BOOTSTRAP_DATA_URL;
-    if (this.script.startsWith("blob:")) url = bootstrapBlobUrl ||= scriptBlobUrl(BOOTSTRAP);
+    if (this.script.startsWith("blob:")) {
+      url = bootstrapBlobUrl ||= scriptBlobUrl(BOOTSTRAP);
+    }
     const worker = new Worker(url, { type: "module", name });
     this.workers.push(worker);
     worker.postMessage({ load: this.script });
@@ -182,51 +214,86 @@ export class Checker {
    * `uri` and `targetUri` values, and the keys of a workspace edit's `changes`.
    */
   private toClient(value: unknown) {
-    if (!value || typeof value !== "object") return;
+    if (!value || typeof value !== "object") {
+      return;
+    }
     if (Array.isArray(value)) {
-      for (const v of value) this.toClient(v);
+      for (const v of value) {
+        this.toClient(v);
+      }
       return;
     }
     const obj = value as Json;
     for (const key of Object.keys(obj)) {
       const v = obj[key];
-      if ((key === "uri" || key === "targetUri") && typeof v === "string") obj[key] = this.clientUri(v);
-      else if (key === "changes" && v && typeof v === "object" && !Array.isArray(v)) {
+      if ((key === "uri" || key === "targetUri") && typeof v === "string") {
+        obj[key] = this.clientUri(v);
+      } else if (
+        key === "changes" &&
+        v &&
+        typeof v === "object" &&
+        !Array.isArray(v)
+      ) {
         const changes = v as Json;
-        obj[key] = Object.fromEntries(Object.entries(changes).map(([uri, edits]) => {
-          this.toClient(edits);
-          return [this.clientUri(uri), edits];
-        }));
-      } else this.toClient(v);
+        obj[key] = Object.fromEntries(
+          Object.entries(changes).map(([uri, edits]) => {
+            this.toClient(edits);
+            return [this.clientUri(uri), edits];
+          })
+        );
+      } else {
+        this.toClient(v);
+      }
     }
   }
 
   private receive(foreground: Worker, data: unknown) {
     this.resolveStarted?.();
-    if (this.closed || !data || typeof data !== "object") return;
-    const msg = data as Message & { type?: string; initialData?: unknown; port?: MessagePort };
+    if (this.closed || !data || typeof data !== "object") {
+      return;
+    }
+    const msg = data as Message & {
+      type?: string;
+      initialData?: unknown;
+      port?: MessagePort;
+    };
     if (msg.type === "browser/bootstrapError") {
-      console.error("Pyright could not load: " + (msg as { message?: string }).message);
+      console.error(
+        `Pyright could not load: ${(msg as { message?: string }).message}`
+      );
       return;
     }
     if (msg.type === "browser/newWorker") {
-      const background = this.spawn("pyright-background-" + this.workers.length);
-      background.postMessage({ type: "browser/boot", mode: "background", initialData: msg.initialData, port: msg.port }, [msg.port as MessagePort]);
+      const background = this.spawn(
+        `pyright-background-${this.workers.length}`
+      );
+      background.postMessage(
+        {
+          type: "browser/boot",
+          mode: "background",
+          initialData: msg.initialData,
+          port: msg.port,
+        },
+        [msg.port as MessagePort]
+      );
       return;
     }
-    if (msg.jsonrpc !== "2.0") return;
-    if (msg.method !== undefined) {
-      if (msg.id !== undefined && msg.method in ANSWERED) {
-        foreground.postMessage({ jsonrpc: "2.0", id: msg.id, result: ANSWERED[msg.method]!(msg.params) });
-        return;
-      }
-      if (msg.id === undefined && DROPPED.has(msg.method)) return;
-      this.toClient(msg.params);
-    } else {
-      if (msg.id !== undefined && msg.id !== null && this.locating.has(msg.id)) {
+    if (msg.jsonrpc !== "2.0") {
+      return;
+    }
+    if (msg.method === undefined) {
+      if (
+        msg.id !== undefined &&
+        msg.id !== null &&
+        this.locating.has(msg.id)
+      ) {
         this.locating.delete(msg.id);
         this.ensureModels(msg.result);
-      } else if (msg.id !== undefined && msg.id !== null && this.completing.has(msg.id)) {
+      } else if (
+        msg.id !== undefined &&
+        msg.id !== null &&
+        this.completing.has(msg.id)
+      ) {
         this.giveCompletionsRanges(msg.result, this.completing.get(msg.id)!);
         this.completing.delete(msg.id);
       } else if (msg.id !== undefined && msg.id === this.initId) {
@@ -234,18 +301,40 @@ export class Checker {
         this.resolveReady?.();
       }
       this.toClient(msg.result);
+    } else {
+      if (msg.id !== undefined && msg.method in ANSWERED) {
+        foreground.postMessage({
+          jsonrpc: "2.0",
+          id: msg.id,
+          result: ANSWERED[msg.method]!(msg.params),
+        });
+        return;
+      }
+      if (msg.id === undefined && DROPPED.has(msg.method)) {
+        return;
+      }
+      this.toClient(msg.params);
     }
     if (msg.id !== undefined && msg.id !== null && this.about.has(msg.id)) {
       const uri = this.about.get(msg.id)!;
       this.about.delete(msg.id);
-      const error = msg.error as { code?: number; message?: string } | undefined;
+      const error = msg.error as
+        | { code?: number; message?: string }
+        | undefined;
       // Monaco's client cannot place an answer about a model that was disposed
       // meanwhile (a file moved or deleted with a request in flight) and throws;
       // it gets nothing instead. The same for Pyright failing inside itself on
       // a request made while the Project changed under it: a code action or a
       // hover that is not there is what the client can take, an exception is not.
-      if (!this.monaco.editor.getModel(this.monaco.Uri.parse(uri)) || error?.code === LSP_INTERNAL_ERROR) {
-        if (error) console.warn(`Pyright: ${error.message ?? "internal error"} (${uri})`);
+      if (
+        !this.monaco.editor.getModel(this.monaco.Uri.parse(uri)) ||
+        error?.code === LSP_INTERNAL_ERROR
+      ) {
+        if (error) {
+          console.warn(
+            `Pyright: ${error.message ?? "internal error"} (${uri})`
+          );
+        }
         delete msg.error;
         msg.result = null;
       }
@@ -254,7 +343,9 @@ export class Checker {
   }
 
   private send(foreground: Worker, message: Message) {
-    if (this.closed) return;
+    if (this.closed) {
+      return;
+    }
     // The client keeps its request's textDocument and uses that URI to place
     // returned ranges. Pyright needs another URI form, so only the copy sent
     // to its worker may be rewritten.
@@ -265,49 +356,79 @@ export class Checker {
       params.rootPath = "/project";
       params.workspaceFolders = [{ uri: PROJECT_URI, name: "project" }];
       params.initializationOptions = {
-        files: { ...this.options.files, "/project/pyrightconfig.json": JSON.stringify(this.options.config) },
+        files: {
+          ...this.options.files,
+          "/project/pyrightconfig.json": JSON.stringify(this.options.config),
+        },
       };
       // With pull diagnostics offered, basedpyright answers the pulls only
       // once its background analysis settles, which it never reports here;
       // without them it publishes diagnostics as they come, which is what we want.
-      const textDocument = (params.capabilities as { textDocument?: Json } | undefined)?.textDocument;
-      if (textDocument) delete textDocument.diagnostic;
+      const textDocument = (
+        params.capabilities as { textDocument?: Json } | undefined
+      )?.textDocument;
+      if (textDocument) {
+        delete textDocument.diagnostic;
+      }
       message.params = params;
       this.initId = message.id ?? null;
     } else if (message.method?.startsWith("textDocument/")) {
-      const params = message.params as { textDocument?: { uri?: string; languageId?: string } } | undefined;
+      const params = message.params as
+        | { textDocument?: { uri?: string; languageId?: string } }
+        | undefined;
       const doc = params?.textDocument;
       if (doc?.uri) {
         // Only Python reaches Pyright; the Project's other text files are Monaco's alone.
         const real = this.realUris.get(doc.uri) ?? doc.uri;
         if (!PYTHON_FILE.test(real)) {
           // Answer a request about a non-Python file ourselves, so the client is not left waiting.
-          if (message.id !== undefined) queueMicrotask(() => this.listener?.({ jsonrpc: "2.0", id: message.id, result: null }));
+          if (message.id !== undefined) {
+            queueMicrotask(() =>
+              this.listener?.({ jsonrpc: "2.0", id: message.id, result: null })
+            );
+          }
           return;
         }
         this.rewriteUris(message.params);
         if (message.id !== undefined && message.id !== null) {
           this.about.set(message.id, real);
-          const position = (params as { position?: { line: number; character: number } }).position;
-          if (message.method === "textDocument/completion" && position) this.completing.set(message.id, { uri: real, ...position });
+          const { position } = params as {
+            position?: { line: number; character: number };
+          };
+          if (message.method === "textDocument/completion" && position) {
+            this.completing.set(message.id, { uri: real, ...position });
+          }
         }
       }
-      if (message.id !== undefined && message.id !== null && LOCATING.has(message.method)) this.locating.add(message.id);
+      if (
+        message.id !== undefined &&
+        message.id !== null &&
+        LOCATING.has(message.method)
+      ) {
+        this.locating.add(message.id);
+      }
     }
     foreground.postMessage(message);
   }
 
   private rewriteUris(value: unknown) {
-    if (!value || typeof value !== "object") return;
+    if (!value || typeof value !== "object") {
+      return;
+    }
     if (Array.isArray(value)) {
-      for (const v of value) this.rewriteUris(v);
+      for (const v of value) {
+        this.rewriteUris(v);
+      }
       return;
     }
     const obj = value as Json;
     for (const key of Object.keys(obj)) {
       const v = obj[key];
-      if (key === "uri" && typeof v === "string") obj[key] = this.realUris.get(v) ?? v;
-      else this.rewriteUris(v);
+      if (key === "uri" && typeof v === "string") {
+        obj[key] = this.realUris.get(v) ?? v;
+      } else {
+        this.rewriteUris(v);
+      }
     }
   }
 
@@ -318,21 +439,47 @@ export class Checker {
    * Pyright sends most items that way, so each one gets an edit over the
    * word before the cursor, or the list's default range when it has one.
    */
-  private giveCompletionsRanges(result: unknown, at: { uri: string; line: number; character: number }) {
-    if (!result || typeof result !== "object") return;
-    const list = result as { items?: Json[]; itemDefaults?: { editRange?: unknown } };
+  private giveCompletionsRanges(
+    result: unknown,
+    at: { uri: string; line: number; character: number }
+  ) {
+    if (!result || typeof result !== "object") {
+      return;
+    }
+    const list = result as {
+      items?: Json[];
+      itemDefaults?: { editRange?: unknown };
+    };
     const items = Array.isArray(result) ? (result as Json[]) : list.items;
-    if (!items) return;
+    if (!items) {
+      return;
+    }
     let range = list.itemDefaults?.editRange;
     if (!range) {
       const model = this.monaco.editor.getModel(this.monaco.Uri.parse(at.uri));
-      if (!model) return;
-      const word = model.getWordUntilPosition({ lineNumber: at.line + 1, column: at.character + 1 });
-      range = { start: { line: at.line, character: word.startColumn - 1 }, end: { line: at.line, character: at.character } };
+      if (!model) {
+        return;
+      }
+      const word = model.getWordUntilPosition({
+        lineNumber: at.line + 1,
+        column: at.character + 1,
+      });
+      range = {
+        start: { line: at.line, character: word.startColumn - 1 },
+        end: { line: at.line, character: at.character },
+      };
     }
     for (const item of items) {
-      if (item.textEdit) continue;
-      item.textEdit = { range, newText: typeof item.insertText === "string" ? item.insertText : (item.textEditText ?? item.label) };
+      if (item.textEdit) {
+        continue;
+      }
+      item.textEdit = {
+        range,
+        newText:
+          typeof item.insertText === "string"
+            ? item.insertText
+            : (item.textEditText ?? item.label),
+      };
     }
   }
 
@@ -344,19 +491,30 @@ export class Checker {
   private ensureModels(result: unknown) {
     const uris = new Set<string>();
     const walk = (value: unknown) => {
-      if (!value || typeof value !== "object") return;
-      if (Array.isArray(value)) return value.forEach(walk);
+      if (!value || typeof value !== "object") {
+        return;
+      }
+      if (Array.isArray(value)) {
+        return value.forEach(walk);
+      }
       for (const [key, v] of Object.entries(value as Json)) {
-        if ((key === "uri" || key === "targetUri") && typeof v === "string") uris.add(v);
-        else walk(v);
+        if ((key === "uri" || key === "targetUri") && typeof v === "string") {
+          uris.add(v);
+        } else {
+          walk(v);
+        }
       }
     };
     walk(result);
     for (const uri of uris) {
       const parsed = this.monaco.Uri.parse(uri);
-      if (this.monaco.editor.getModel(parsed)) continue;
+      if (this.monaco.editor.getModel(parsed)) {
+        continue;
+      }
       const text = this.options.files[parsed.path];
-      if (text === undefined) continue;
+      if (text === undefined) {
+        continue;
+      }
       this.monaco.editor.createModel(text, "python", parsed);
     }
   }
@@ -364,12 +522,20 @@ export class Checker {
   /** A file the Project gained after start: tell Pyright it exists, so `import` of it resolves. */
   fileCreated(path: string) {
     const uri = this.remember(path);
-    this.workers[0]?.postMessage({ jsonrpc: "2.0", method: "pyright/createFile", params: { uri } });
+    this.workers[0]?.postMessage({
+      jsonrpc: "2.0",
+      method: "pyright/createFile",
+      params: { uri },
+    });
   }
 
   fileDeleted(path: string) {
     const uri = this.monaco.Uri.file(path).toString();
-    this.workers[0]?.postMessage({ jsonrpc: "2.0", method: "pyright/deleteFile", params: { uri } });
+    this.workers[0]?.postMessage({
+      jsonrpc: "2.0",
+      method: "pyright/deleteFile",
+      params: { uri },
+    });
   }
 
   /**
@@ -385,15 +551,21 @@ export class Checker {
     this.features?.dispose();
     this.features = null;
     this.client = null;
-    const workers = this.workers;
+    const { workers } = this;
     this.workers = [];
     const foreground = workers[0];
-    if (!foreground) return;
+    if (!foreground) {
+      return;
+    }
     let done = false;
     const finish = () => {
-      if (done) return;
+      if (done) {
+        return;
+      }
       done = true;
-      for (const w of workers) w.terminate();
+      for (const w of workers) {
+        w.terminate();
+      }
     };
     foreground.addEventListener("message", (ev: MessageEvent) => {
       const msg = ev.data as Message | undefined;
@@ -403,8 +575,15 @@ export class Checker {
         setTimeout(finish, 2000);
       }
     });
-    void Promise.race([this.started, new Promise((r) => setTimeout(r, 10000))]).then(() => {
-      foreground.postMessage({ jsonrpc: "2.0", id: "shutdown", method: "shutdown" });
+    void Promise.race([
+      this.started,
+      new Promise((r) => setTimeout(r, 10_000)),
+    ]).then(() => {
+      foreground.postMessage({
+        jsonrpc: "2.0",
+        id: "shutdown",
+        method: "shutdown",
+      });
       setTimeout(finish, 5000);
     });
   }

@@ -7,10 +7,10 @@ import { ICON_CHEVRON, ICON_TRASH } from "./icons";
 import { basename, dirname } from "./project";
 
 export interface TreeCallbacks {
-  onOpen(path: string): void;
-  onToggle(folder: string): void;
-  onMenu(path: string, isFolder: boolean, x: number, y: number): void;
-  onDrop(paths: string[], intoFolder: string): void;
+  onOpen: (path: string) => void;
+  onToggle: (folder: string) => void;
+  onMenu: (path: string, isFolder: boolean, x: number, y: number) => void;
+  onDrop: (paths: string[], intoFolder: string) => void;
 }
 
 interface Node {
@@ -25,15 +25,21 @@ function buildTree(files: Iterable<string>, folders: Set<string>): Node {
   const byPath = new Map<string, Node>([["", root]]);
   const ensure = (dir: string): Node => {
     let node = byPath.get(dir);
-    if (node) return node;
+    if (node) {
+      return node;
+    }
     const parent = ensure(dirname(dir));
     node = { name: basename(dir), path: dir, folders: [], files: [] };
     parent.folders.push(node);
     byPath.set(dir, node);
     return node;
   };
-  for (const f of folders) ensure(f);
-  for (const path of files) ensure(dirname(path)).files.push(path);
+  for (const f of folders) {
+    ensure(f);
+  }
+  for (const path of files) {
+    ensure(dirname(path)).files.push(path);
+  }
   const sort = (n: Node) => {
     n.folders.sort((a, b) => a.name.localeCompare(b.name));
     n.files.sort((a, b) => basename(a).localeCompare(basename(b)));
@@ -49,7 +55,7 @@ export function renderTree(
   folders: Set<string>,
   expanded: Set<string>,
   active: string | null,
-  cb: TreeCallbacks,
+  cb: TreeCallbacks
 ) {
   const root = buildTree(files, folders);
   container.replaceChildren();
@@ -58,7 +64,7 @@ export function renderTree(
     for (const child of node.folders) {
       const open = expanded.has(child.path);
       const row = document.createElement("div");
-      row.className = "tree-row folder" + (open ? " open" : "");
+      row.className = `tree-row folder${open ? " open" : ""}`;
       row.style.setProperty("--depth", String(depth));
       row.dataset.path = child.path;
       row.innerHTML = `<span class="chev">${ICON_CHEVRON}</span><span class="icon">${open ? ICON_FOLDER_OPEN : ICON_FOLDER}</span><span class="name"></span>`;
@@ -70,13 +76,17 @@ export function renderTree(
       });
       bindDrop(row, child.path, cb);
       row.draggable = true;
-      row.addEventListener("dragstart", (e) => e.dataTransfer?.setData("text/x-pyide-path", child.path));
-      frag.appendChild(row);
-      if (open) render(child, depth + 1);
+      row.addEventListener("dragstart", (e) =>
+        e.dataTransfer?.setData("text/x-pyide-path", child.path)
+      );
+      frag.append(row);
+      if (open) {
+        render(child, depth + 1);
+      }
     }
     for (const path of node.files) {
       const row = document.createElement("div");
-      row.className = "tree-row file" + (path === active ? " active" : "");
+      row.className = `tree-row file${path === active ? " active" : ""}`;
       row.style.setProperty("--depth", String(depth));
       row.dataset.path = path;
       row.innerHTML = `<span class="chev"></span><span class="icon">${fileIcon(path)}</span><span class="name"></span>`;
@@ -87,12 +97,14 @@ export function renderTree(
         cb.onMenu(path, false, e.clientX, e.clientY);
       });
       row.draggable = true;
-      row.addEventListener("dragstart", (e) => e.dataTransfer?.setData("text/x-pyide-path", path));
-      frag.appendChild(row);
+      row.addEventListener("dragstart", (e) =>
+        e.dataTransfer?.setData("text/x-pyide-path", path)
+      );
+      frag.append(row);
     }
   };
   render(root, 0);
-  container.appendChild(frag);
+  container.append(frag);
   bindDrop(container, "", cb);
 }
 
@@ -108,7 +120,9 @@ function bindDrop(el: HTMLElement, folder: string, cb: TreeCallbacks) {
   el.addEventListener("drop", (e) => {
     const path = e.dataTransfer?.getData("text/x-pyide-path");
     el.classList.remove("drop-target");
-    if (!path) return;
+    if (!path) {
+      return;
+    }
     e.preventDefault();
     e.stopPropagation();
     cb.onDrop([path], folder);
@@ -125,8 +139,8 @@ export interface PackageRow {
 }
 
 export interface PackagesCallbacks {
-  onRemove(spec: string): void;
-  onMenu(spec: string, x: number, y: number): void;
+  onRemove: (spec: string) => void;
+  onMenu: (spec: string, x: number, y: number) => void;
 }
 
 /** The distribution name a spec names: `requests==2.33` gives `requests`. */
@@ -140,7 +154,7 @@ export function renderPackages(
   transitive: HTMLElement,
   specs: string[],
   installed: PackageRow[],
-  cb: PackagesCallbacks,
+  cb: PackagesCallbacks
 ) {
   const byName = new Map(installed.map((p) => [specName(p.name), p]));
   direct.replaceChildren();
@@ -150,36 +164,48 @@ export function renderPackages(
     directNames.add(name);
     const p = byName.get(name);
     const row = document.createElement("div");
-    row.className = "pkg-row" + (p ? "" : " pending");
+    row.className = `pkg-row${p ? "" : " pending"}`;
     // The badge and the remove button share one slot: hovering the row swaps them, and nothing shifts.
     row.innerHTML = `<span class="pkg-name"></span><span class="pkg-version"></span><span class="pkg-end"><span class="pkg-origin"></span><button type="button" class="icon pkg-remove" title="Remove from the project">${ICON_TRASH}</button></span>`;
     row.querySelector(".pkg-name")!.textContent = spec;
-    row.querySelector(".pkg-version")!.textContent = p ? p.version : "not installed";
+    row.querySelector(".pkg-version")!.textContent = p
+      ? p.version
+      : "not installed";
     const origin = row.querySelector(".pkg-origin")!;
-    origin.textContent = p ? { catalog: "prebuilt", pypi: "PyPI", wasm: "PyPI wasm" }[p.origin] : "";
-    row.querySelector(".pkg-remove")!.addEventListener("click", () => cb.onRemove(spec));
+    origin.textContent = p
+      ? { catalog: "prebuilt", pypi: "PyPI", wasm: "PyPI wasm" }[p.origin]
+      : "";
+    row
+      .querySelector(".pkg-remove")!
+      .addEventListener("click", () => cb.onRemove(spec));
     row.addEventListener("contextmenu", (e) => {
       e.preventDefault();
       cb.onMenu(spec, e.clientX, e.clientY);
     });
-    direct.appendChild(row);
+    direct.append(row);
   }
   if (specs.length === 0) {
     const empty = document.createElement("div");
     empty.className = "pkg-empty";
     empty.textContent = "No dependencies";
-    direct.appendChild(empty);
+    direct.append(empty);
   }
   transitive.replaceChildren();
-  const rest = installed.filter((p) => !directNames.has(specName(p.name)) && p.name !== "micropip").toSorted((a, b) => a.name.localeCompare(b.name));
+  const rest = installed
+    .filter((p) => !directNames.has(specName(p.name)) && p.name !== "micropip")
+    .toSorted((a, b) => a.name.localeCompare(b.name));
   for (const p of rest) {
     const row = document.createElement("div");
     row.className = "pkg-row transitive";
     row.innerHTML = `<span class="pkg-name"></span><span class="pkg-version"></span>`;
     row.querySelector(".pkg-name")!.textContent = p.name;
     row.querySelector(".pkg-version")!.textContent = p.version;
-    transitive.appendChild(row);
+    transitive.append(row);
   }
   const summary = transitive.parentElement?.querySelector("summary");
-  if (summary) summary.textContent = rest.length ? `${rest.length} dependencies of dependencies` : "No dependencies of dependencies";
+  if (summary) {
+    summary.textContent = rest.length
+      ? `${rest.length} dependencies of dependencies`
+      : "No dependencies of dependencies";
+  }
 }

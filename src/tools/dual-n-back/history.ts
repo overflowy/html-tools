@@ -2,7 +2,8 @@
 // queries the Tool shows (today, the last 24 hours, the Level per Mode) and
 // the way in and out (JSON).
 
-import { parseModeKey, startingN, type Level, type Modality, type Tally } from "./engine";
+import { parseModeKey, startingN } from "./engine";
+import type { Level, Modality, Tally } from "./engine";
 
 export interface Session {
   /** When it ended, ms since the epoch. */
@@ -29,8 +30,11 @@ export interface Session {
 const ROLLOVER_HOURS = 4;
 
 export function dayKey(at: number): string {
-  const d = new Date(at - ROLLOVER_HOURS * 3600_000);
-  return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+  const d = new Date(at - ROLLOVER_HOURS * 3_600_000);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(
+    2,
+    "0"
+  )}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
 export function today(sessions: Session[], now: number): Session[] {
@@ -39,7 +43,7 @@ export function today(sessions: Session[], now: number): Session[] {
 }
 
 export function lastDay(sessions: Session[], now: number): Session[] {
-  return sessions.filter((s) => s.at > now - 24 * 3600_000 && s.at <= now);
+  return sessions.filter((s) => s.at > now - 24 * 3_600_000 && s.at <= now);
 }
 
 export function totalSeconds(sessions: Session[]): number {
@@ -48,9 +52,11 @@ export function totalSeconds(sessions: Session[]): number {
 
 /** Where a Mode stands: the Level after its last non-Manual Session, or its starting N. */
 export function levelFor(sessions: Session[], key: string): Level {
-  for (let i = sessions.length - 1; i >= 0; i--) {
+  for (let i = sessions.length - 1; i >= 0; i -= 1) {
     const s = sessions[i]!;
-    if (s.mode === key && !s.manual && s.level) return s.level;
+    if (s.mode === key && !s.manual && s.level) {
+      return s.level;
+    }
   }
   const m = parseModeKey(key);
   return { n: m ? startingN(m) : 2, strikes: 0 };
@@ -61,17 +67,31 @@ export function levelFor(sessions: Session[], key: string): Level {
 const KEY = "html-tools:dual-n-back:history";
 
 function valid(s: unknown): s is Session {
-  if (!s || typeof s !== "object") return false;
+  if (!s || typeof s !== "object") {
+    return false;
+  }
   const o = s as Record<string, unknown>;
-  return typeof o.at === "number" && typeof o.mode === "string" && parseModeKey(o.mode) !== null &&
-    typeof o.n === "number" && o.n >= 1 && typeof o.score === "number" && typeof o.seconds === "number" &&
-    typeof o.trials === "number" && typeof o.trialMs === "number" && typeof o.pct === "object" && o.pct !== null;
+  return (
+    typeof o.at === "number" &&
+    typeof o.mode === "string" &&
+    parseModeKey(o.mode) !== null &&
+    typeof o.n === "number" &&
+    o.n >= 1 &&
+    typeof o.score === "number" &&
+    typeof o.seconds === "number" &&
+    typeof o.trials === "number" &&
+    typeof o.trialMs === "number" &&
+    typeof o.pct === "object" &&
+    o.pct !== null
+  );
 }
 
 export function load(): Session[] {
   try {
     const raw = JSON.parse(localStorage.getItem(KEY) ?? "[]");
-    return Array.isArray(raw) ? raw.filter(valid).toSorted((a, b) => a.at - b.at) : [];
+    return Array.isArray(raw)
+      ? raw.filter(valid).toSorted((a, b) => a.at - b.at)
+      : [];
   } catch {
     return [];
   }
@@ -96,23 +116,33 @@ export function exportJson(sessions: Session[]): string {
 }
 
 /** Adds imported Sessions to the History, dropping any already there (same end time, Mode, and N). */
-export function merge(existing: Session[], incoming: Session[]): { sessions: Session[]; added: number } {
-  const id = (s: Session) => s.at + "|" + s.mode + "|" + s.n;
+export function merge(
+  existing: Session[],
+  incoming: Session[]
+): { sessions: Session[]; added: number } {
+  const id = (s: Session) => `${s.at}|${s.mode}|${s.n}`;
   const seen = new Set(existing.map(id));
   const fresh: Session[] = [];
   for (const s of incoming) {
-    if (seen.has(id(s))) continue;
+    if (seen.has(id(s))) {
+      continue;
+    }
     seen.add(id(s));
     fresh.push(s);
   }
-  return { sessions: existing.concat(fresh).toSorted((a, b) => a.at - b.at), added: fresh.length };
+  return {
+    sessions: [...existing, ...fresh].toSorted((a, b) => a.at - b.at),
+    added: fresh.length,
+  };
 }
 
 /** Our own export, or null when the text is not one. */
 export function parseJson(text: string): Session[] | null {
   try {
     const o = JSON.parse(text);
-    if (!o || o.format !== FORMAT || !Array.isArray(o.sessions)) return null;
+    if (!o || o.format !== FORMAT || !Array.isArray(o.sessions)) {
+      return null;
+    }
     return o.sessions.filter(valid);
   } catch {
     return null;

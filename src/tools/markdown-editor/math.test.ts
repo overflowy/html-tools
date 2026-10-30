@@ -1,12 +1,20 @@
 import { describe, expect, test } from "bun:test";
+
 import { extractMath } from "./math";
 
 const PH = /M\d+/g;
 
 describe("extractMath", () => {
   test("inline and display delimiters", () => {
-    const { src, math } = extractMath("Inline $a_1 * b$ then \\(x\\) and \\[y\\]\n$$\nz\n$$\nafter");
-    expect(math.map((m) => [m.tex, m.display])).toEqual([["a_1 * b", false], ["x", false], ["y", true], ["\nz\n", true]]);
+    const { src, math } = extractMath(
+      "Inline $a_1 * b$ then \\(x\\) and \\[y\\]\n$$\nz\n$$\nafter"
+    );
+    expect(math.map((m) => [m.tex, m.display])).toEqual([
+      ["a_1 * b", false],
+      ["x", false],
+      ["y", true],
+      ["\nz\n", true],
+    ]);
     expect(src.match(PH)!.length).toBe(4);
     expect(src).not.toContain("$");
   });
@@ -17,14 +25,18 @@ describe("extractMath", () => {
   });
 
   test("leaves code alone", () => {
-    const { src, math } = extractMath("`$x$` and\n\n```\n$y$\n```\n\n~~~\n$z$\n~~~\n");
+    const { src, math } = extractMath(
+      "`$x$` and\n\n```\n$y$\n```\n\n~~~\n$z$\n~~~\n"
+    );
     expect(math).toEqual([]);
     expect(src).toContain("`$x$`");
     expect(src).toContain("$y$");
   });
 
   test("currency and spaced dollars are not math", () => {
-    const { src, math } = extractMath("Costs $5.00 or $ 7 $ and $12,000$ total");
+    const { src, math } = extractMath(
+      "Costs $5.00 or $ 7 $ and $12,000$ total"
+    );
     expect(math).toEqual([]);
     expect(src).toBe("Costs $5.00 or $ 7 $ and $12,000$ total");
   });

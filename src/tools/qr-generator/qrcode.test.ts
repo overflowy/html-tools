@@ -2,8 +2,10 @@
 // fixtures.json holds expected module matrices for a battery of inputs
 // (spec-determined data: any conforming encoder produces these exact matrices).
 import { describe, expect, test } from "bun:test";
-import { encode, maxBytes, pickMode, type Ecl } from "./qrcode";
+
 import fixtures from "./fixtures.json";
+import { encode, maxBytes, pickMode } from "./qrcode";
+import type { Ecl } from "./qrcode";
 
 interface Fixture {
   text: string;
@@ -16,25 +18,32 @@ interface Fixture {
 
 function rowsOf(qr: ReturnType<typeof encode>): string[] {
   const rows: string[] = [];
-  for (let y = 0; y < qr.size; y++) {
+  for (let y = 0; y < qr.size; y += 1) {
     let row = "";
-    for (let x = 0; x < qr.size; x++) row += qr.matrix[y * qr.size + x] ? "1" : "0";
+    for (let x = 0; x < qr.size; x += 1) {
+      row += qr.matrix[y * qr.size + x] ? "1" : "0";
+    }
     rows.push(row);
   }
   return rows;
 }
 
 describe("mode selection", () => {
-  test("digits are numeric", () => expect(pickMode("0123456789")).toBe("numeric"));
-  test("uppercase charset is alphanumeric", () => expect(pickMode("HELLO WORLD $1/2")).toBe("alphanumeric"));
-  test("lowercase falls back to byte", () => expect(pickMode("hello")).toBe("byte"));
-  test("non-ASCII falls back to byte", () => expect(pickMode("héllo")).toBe("byte"));
+  test("digits are numeric", () =>
+    expect(pickMode("0123456789")).toBe("numeric"));
+  test("uppercase charset is alphanumeric", () =>
+    expect(pickMode("HELLO WORLD $1/2")).toBe("alphanumeric"));
+  test("lowercase falls back to byte", () =>
+    expect(pickMode("hello")).toBe("byte"));
+  test("non-ASCII falls back to byte", () =>
+    expect(pickMode("héllo")).toBe("byte"));
 });
 
 describe("fixture matrices", () => {
   for (const f of fixtures as Fixture[]) {
-    const label = JSON.stringify(f.text.slice(0, 30)) + " " + f.ecl +
-      (f.mask >= 0 ? " mask " + f.mask : "");
+    const label = `${JSON.stringify(f.text.slice(0, 30))} ${
+      f.ecl
+    }${f.mask >= 0 ? ` mask ${f.mask}` : ""}`;
     test(label, () => {
       const qr = encode(f.text, f.ecl as Ecl, f.mask);
       expect(qr.version).toBe(f.version);

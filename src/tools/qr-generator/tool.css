@@ -92,8 +92,9 @@
   color: var(--text-muted);
 }
 
-.tool-qr-generator .pane-head .spacer { flex: 1; }
-
+.tool-qr-generator .pane-head .spacer {
+  flex: 1;
+}
 
 .tool-qr-generator .forms {
   flex: 1;
@@ -111,9 +112,13 @@
   padding: 14px;
 }
 
-.tool-qr-generator .form[data-form="text"] { padding: 0; }
+.tool-qr-generator .form[data-form="text"] {
+  padding: 0;
+}
 
-.tool-qr-generator .form[hidden] { display: none; }
+.tool-qr-generator .form[hidden] {
+  display: none;
+}
 
 .tool-qr-generator .f-text {
   flex: 1;
@@ -174,9 +179,15 @@
 }
 
 /* Nothing to report, no bar: it appears with the first result or error. */
-.tool-qr-generator .statusbar:has(.status-text:empty) { display: none; }
-.tool-qr-generator .statusbar.error { color: var(--danger-text); }
-.tool-qr-generator .statusbar.warn { color: var(--accent); }
+.tool-qr-generator .statusbar:has(.status-text:empty) {
+  display: none;
+}
+.tool-qr-generator .statusbar.error {
+  color: var(--danger-text);
+}
+.tool-qr-generator .statusbar.warn {
+  color: var(--accent);
+}
 
 .tool-qr-generator .preview-frame {
   flex: 1;
@@ -198,8 +209,12 @@
 }
 
 @media (max-width: 1000px) {
-  .tool-qr-generator .panes { grid-template-columns: 1fr; }
-  .tool-qr-generator .field-pair { grid-template-columns: 1fr; }
+  .tool-qr-generator .panes {
+    grid-template-columns: 1fr;
+  }
+  .tool-qr-generator .field-pair {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 767px) {
@@ -209,5 +224,7 @@
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(76px, 1fr));
   }
-  .tool-qr-generator .type-row button { min-height: 40px; }
+  .tool-qr-generator .type-row button {
+    min-height: 40px;
+  }
 }

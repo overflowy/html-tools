@@ -13,7 +13,10 @@ export const TRACE_URLS: Record<Protocol, string> = {
   ipv6: "https://[2606:4700:4700::1001]/cdn-cgi/trace",
 };
 
-export const PROTOCOL_LABEL: Record<Protocol, string> = { ipv4: "IPv4", ipv6: "IPv6" };
+export const PROTOCOL_LABEL: Record<Protocol, string> = {
+  ipv4: "IPv4",
+  ipv6: "IPv6",
+};
 
 /** A black-holed IPv6 route can hang a request for a minute; give up well before that. */
 export const TRACE_TIMEOUT_MS = 5000;
@@ -37,20 +40,39 @@ export function parseTrace(text: string): TraceInfo | null {
   const fields = new Map<string, string>();
   for (const line of text.split("\n")) {
     const eq = line.indexOf("=");
-    if (eq > 0) fields.set(line.slice(0, eq), line.slice(eq + 1).trim());
+    if (eq > 0) {
+      fields.set(line.slice(0, eq), line.slice(eq + 1).trim());
+    }
   }
   const ip = fields.get("ip");
   const userAgent = fields.get("uag");
   const country = fields.get("loc");
-  if (!ip || userAgent === undefined || !country) return null;
+  if (!ip || userAgent === undefined || !country) {
+    return null;
+  }
   return { ip, userAgent, country };
 }
 
 function timeoutSignal(parent: AbortSignal, ms: number): AbortSignal {
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(new DOMException("Timed out after " + ms / 1000 + " s", "TimeoutError")), ms);
-  parent.addEventListener("abort", () => { clearTimeout(timer); ctrl.abort(parent.reason); }, { once: true });
-  ctrl.signal.addEventListener("abort", () => clearTimeout(timer), { once: true });
+  const timer = setTimeout(
+    () =>
+      ctrl.abort(
+        new DOMException(`Timed out after ${ms / 1000} s`, "TimeoutError")
+      ),
+    ms
+  );
+  parent.addEventListener(
+    "abort",
+    () => {
+      clearTimeout(timer);
+      ctrl.abort(parent.reason);
+    },
+    { once: true }
+  );
+  ctrl.signal.addEventListener("abort", () => clearTimeout(timer), {
+    once: true,
+  });
   return ctrl.signal;
 }
 
@@ -60,27 +82,53 @@ function timeoutSignal(parent: AbortSignal, ms: number): AbortSignal {
  * reported as "unreachable over this protocol" and the message keeps both
  * possibilities open.
  */
-export async function fetchTrace(protocol: Protocol, signal: AbortSignal): Promise<TraceResult> {
+export async function fetchTrace(
+  protocol: Protocol,
+  signal: AbortSignal
+): Promise<TraceResult> {
   const label = PROTOCOL_LABEL[protocol];
   let res: Response;
   try {
-    res = await fetch(TRACE_URLS[protocol], { cache: "no-store", signal: timeoutSignal(signal, TRACE_TIMEOUT_MS) });
-  } catch (e) {
-    if (signal.aborted) throw e;
-    const why = e instanceof DOMException && e.name === "TimeoutError"
-      ? e.message
-      : "no " + label + " route, or the request is blocked, for instance by a content blocker";
-    return { kind: "unreachable", message: "Not reachable over " + label + " (" + why + ")." };
+    res = await fetch(TRACE_URLS[protocol], {
+      cache: "no-store",
+      signal: timeoutSignal(signal, TRACE_TIMEOUT_MS),
+    });
+  } catch (error) {
+    if (signal.aborted) {
+      throw error;
+    }
+    const why =
+      error instanceof DOMException && error.name === "TimeoutError"
+        ? error.message
+        : `no ${
+            label
+          } route, or the request is blocked, for instance by a content blocker`;
+    return {
+      kind: "unreachable",
+      message: `Not reachable over ${label} (${why}).`,
+    };
   }
-  if (!res.ok) return { kind: "unreachable", message: "Cloudflare answered HTTP " + res.status + " over " + label + "." };
+  if (!res.ok) {
+    return {
+      kind: "unreachable",
+      message: `Cloudflare answered HTTP ${res.status} over ${label}.`,
+    };
+  }
   const info = parseTrace(await res.text());
-  if (!info) return { kind: "unreachable", message: "Cloudflare's answer over " + label + " was not a trace." };
+  if (!info) {
+    return {
+      kind: "unreachable",
+      message: `Cloudflare's answer over ${label} was not a trace.`,
+    };
+  }
   return { kind: "found", info };
 }
 
 /** "IT" -> "Italy" where the browser knows the code; null for codes it does not (XX, T1). */
 export function countryName(code: string): string | null {
-  if (!/^[A-Z]{2}$/.test(code)) return null;
+  if (!/^[A-Z]{2}$/.test(code)) {
+    return null;
+  }
   try {
     const name = new Intl.DisplayNames(["en"], { type: "region" }).of(code);
     return name && name !== code ? name : null;

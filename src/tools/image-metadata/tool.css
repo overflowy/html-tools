@@ -1,6 +1,11 @@
-.tool-image-metadata { padding: 0.25rem var(--gutter) 2rem; }
+.tool-image-metadata {
+  padding: 0.25rem var(--gutter) 2rem;
+}
 
-.tool-image-metadata .container { max-width: 760px; width: 100%; }
+.tool-image-metadata .container {
+  max-width: 760px;
+  width: 100%;
+}
 
 .tool-image-metadata .toolbar {
   display: flex;
@@ -29,7 +34,10 @@
   font-size: 14px;
 }
 
-.tool-image-metadata .empty-hint strong { color: var(--text); font-weight: 500; }
+.tool-image-metadata .empty-hint strong {
+  color: var(--text);
+  font-weight: 500;
+}
 
 .tool-image-metadata .empty-hint span {
   display: block;
@@ -44,7 +52,9 @@
   border-radius: var(--radius-lg);
 }
 
-.tool-image-metadata .report { display: none; }
+.tool-image-metadata .report {
+  display: none;
+}
 
 .tool-image-metadata .summary {
   display: flex;
@@ -68,7 +78,11 @@
     linear-gradient(45deg, transparent 75%, rgba(128, 128, 128, 0.08) 75%),
     linear-gradient(-45deg, transparent 75%, rgba(128, 128, 128, 0.08) 75%);
   background-size: 16px 16px;
-  background-position: 0 0, 0 8px, 8px -8px, -8px 0px;
+  background-position:
+    0 0,
+    0 8px,
+    8px -8px,
+    -8px 0px;
 }
 
 .tool-image-metadata .preview {
@@ -88,7 +102,9 @@
   justify-content: center;
 }
 
-.tool-image-metadata .facts { min-width: 0; }
+.tool-image-metadata .facts {
+  min-width: 0;
+}
 
 .tool-image-metadata .fact-name {
   font-size: 14px;
@@ -139,7 +155,9 @@
   margin-left: 8px;
 }
 
-.tool-image-metadata .sections { margin-top: 16px; }
+.tool-image-metadata .sections {
+  margin-top: 16px;
+}
 
 .tool-image-metadata .sec-title {
   font-size: 12px;
@@ -194,14 +212,18 @@
   color: var(--text-muted);
 }
 
-.tool-image-metadata .strip-result:not(:empty) { margin-top: 12px; }
+.tool-image-metadata .strip-result:not(:empty) {
+  margin-top: 12px;
+}
 
 .tool-image-metadata .strip-sizes {
   font-size: 13px;
   font-variant-numeric: tabular-nums;
 }
 
-.tool-image-metadata .strip-sizes .saved { color: var(--ok); }
+.tool-image-metadata .strip-sizes .saved {
+  color: var(--ok);
+}
 
 .tool-image-metadata .strip-ok {
   font-size: 12.5px;
@@ -215,7 +237,9 @@
   margin-top: 4px;
 }
 
-.tool-image-metadata .kept-note { color: var(--text-muted); }
+.tool-image-metadata .kept-note {
+  color: var(--text-muted);
+}
 
 .tool-image-metadata .download-link {
   display: inline-block;
@@ -224,7 +248,9 @@
   font-size: 13px;
 }
 
-.tool-image-metadata .tags { margin-top: 20px; }
+.tool-image-metadata .tags {
+  margin-top: 20px;
+}
 
 .tool-image-metadata .tag-group {
   font-size: 12px;
@@ -255,7 +281,9 @@
   min-width: 0;
 }
 
-.tool-image-metadata .xmp { margin-top: 14px; }
+.tool-image-metadata .xmp {
+  margin-top: 14px;
+}
 
 .tool-image-metadata .xmp summary {
   font-size: 12.5px;

@@ -4,16 +4,18 @@
 // loaded, math reads as its source and a mermaid fence is a code block, and
 // the result says which Engine the Draft is waiting for.
 
-import { Marked } from "marked";
 import DOMPurify from "dompurify";
 import hljs from "highlight.js/lib/common";
-import { extractMath, injectMath, type MathItem } from "./math";
-import { katex, mermaid } from "./engines";
 import infoIcon from "lucide-static/icons/info.svg";
 import lightbulbIcon from "lucide-static/icons/lightbulb.svg";
 import messageSquareWarningIcon from "lucide-static/icons/message-square-warning.svg";
 import octagonAlertIcon from "lucide-static/icons/octagon-alert.svg";
 import triangleAlertIcon from "lucide-static/icons/triangle-alert.svg";
+import { Marked } from "marked";
+
+import { katex, mermaid } from "./engines";
+import { extractMath, injectMath } from "./math";
+import type { MathItem } from "./math";
 
 export interface RenderOptions {
   /** Light Document: diagrams bake their palette into the SVG, so they need to know. */
@@ -30,7 +32,11 @@ export interface RenderResult {
 }
 
 export function escapeHtml(s: string) {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  return s
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
 }
 
 /* ---- footnotes ----
@@ -50,45 +56,61 @@ md.use({
       fnDefs = new Map();
       fnOrder = [];
       // "[^label]: body", continued by indented lines
-      return src.replace(/^\[\^([^\]\n]+)\]:[ \t]*([^\n]*(?:\n(?:[ \t]{2,}|\t)[^\n]*)*)/gm, (_m, label: string, body: string) => {
-        fnDefs.set(label.trim(), body.replace(/\n[ \t]+/g, "\n").trim());
-        return "";
-      });
+      return src.replaceAll(
+        /^\[\^([^\]\n]+)\]:[ \t]*([^\n]*(?:\n(?:[ \t]{2,}|\t)[^\n]*)*)/gm,
+        (_m, label: string, body: string) => {
+          fnDefs.set(label.trim(), body.replaceAll(/\n[ \t]+/g, "\n").trim());
+          return "";
+        }
+      );
     },
     postprocess(html) {
-      if (!fnOrder.length) return html;
+      if (!fnOrder.length) {
+        return html;
+      }
       let out = '<section class="footnotes"><ol>';
       fnOrder.forEach((label, i) => {
         const n = i + 1;
-        out += '<li id="fn-' + n + '">' + (plain.parseInline(fnDefs.get(label) ?? "") as string) +
-          ' <a class="fn-back" href="#fnref-' + n + '" title="Back to text">&#8617;</a></li>';
+        out += `<li id="fn-${n}">${
+          plain.parseInline(fnDefs.get(label) ?? "") as string
+        } <a class="fn-back" href="#fnref-${
+          n
+        }" title="Back to text">&#8617;</a></li>`;
       });
-      return html + out + "</ol></section>";
+      return `${html + out}</ol></section>`;
     },
   },
-  extensions: [{
-    name: "footnoteRef",
-    level: "inline",
-    start(src) {
-      return src.indexOf("[^");
+  extensions: [
+    {
+      name: "footnoteRef",
+      level: "inline",
+      start(src) {
+        return src.indexOf("[^");
+      },
+      tokenizer(src) {
+        const m = /^\[\^([^\]\n]+)\]/.exec(src);
+        if (!m) {
+          return;
+        }
+        const label = m[1]!.trim();
+        if (!fnDefs.has(label)) {
+          return;
+        }
+        return { type: "footnoteRef", raw: m[0], label };
+      },
+      renderer(token) {
+        let i = fnOrder.indexOf(token.label as string);
+        if (i === -1) {
+          fnOrder.push(token.label as string);
+          i = fnOrder.length - 1;
+        }
+        const n = i + 1;
+        return `<sup class="fn-ref" id="fnref-${n}"><a href="#fn-${n}">${
+          n
+        }</a></sup>`;
+      },
     },
-    tokenizer(src) {
-      const m = /^\[\^([^\]\n]+)\]/.exec(src);
-      if (!m) return undefined;
-      const label = m[1]!.trim();
-      if (!fnDefs.has(label)) return undefined;
-      return { type: "footnoteRef", raw: m[0], label };
-    },
-    renderer(token) {
-      let i = fnOrder.indexOf(token.label as string);
-      if (i === -1) {
-        fnOrder.push(token.label as string);
-        i = fnOrder.length - 1;
-      }
-      const n = i + 1;
-      return '<sup class="fn-ref" id="fnref-' + n + '"><a href="#fn-' + n + '">' + n + "</a></sup>";
-    },
-  }],
+  ],
 });
 
 /* ---- callouts: > [!NOTE] and its kin ---- */
@@ -107,15 +129,32 @@ function transformCallouts(root: HTMLElement) {
   root.querySelectorAll("blockquote").forEach((bq) => {
     const p = bq.firstElementChild;
     const first = p?.firstChild;
-    if (!p || p.tagName !== "P" || !first || first.nodeType !== Node.TEXT_NODE) return;
-    const m = /^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]\s*/i.exec(first.nodeValue ?? "");
-    if (!m) return;
+    if (
+      !p ||
+      p.tagName !== "P" ||
+      !first ||
+      first.nodeType !== Node.TEXT_NODE
+    ) {
+      return;
+    }
+    const m = /^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]\s*/i.exec(
+      first.nodeValue ?? ""
+    );
+    if (!m) {
+      return;
+    }
     const kind = m[1]!.toLowerCase();
     first.nodeValue = (first.nodeValue ?? "").slice(m[0].length);
-    if (!first.nodeValue) first.remove();
-    if (p.firstChild && p.firstChild.nodeName === "BR") p.firstChild.remove();
-    if (!p.hasChildNodes()) p.remove();
-    bq.classList.add("callout", "callout-" + kind);
+    if (!first.nodeValue) {
+      first.remove();
+    }
+    if (p.firstChild && p.firstChild.nodeName === "BR") {
+      p.firstChild.remove();
+    }
+    if (!p.hasChildNodes()) {
+      p.remove();
+    }
+    bq.classList.add("callout", `callout-${kind}`);
     const title = document.createElement("div");
     title.className = "callout-title";
     title.innerHTML = CALLOUTS[kind]![1] + CALLOUTS[kind]![0];
@@ -130,12 +169,12 @@ function transformCallouts(root: HTMLElement) {
 
 function namespaceIds(root: HTMLElement) {
   root.querySelectorAll<HTMLElement>("[id]").forEach((el) => {
-    el.id = "md-" + el.id;
+    el.id = `md-${el.id}`;
   });
   root.querySelectorAll<HTMLAnchorElement>("a[href]").forEach((a) => {
     const href = a.getAttribute("href") ?? "";
     if (href.startsWith("#")) {
-      a.setAttribute("href", "#md-" + href.slice(1));
+      a.setAttribute("href", `#md-${href.slice(1)}`);
     } else {
       a.setAttribute("target", "_blank");
       a.setAttribute("rel", "noopener noreferrer");
@@ -145,25 +184,38 @@ function namespaceIds(root: HTMLElement) {
 
 function renderMathItem(item: MathItem): Node {
   const api = katex();
-  if (!api) return document.createTextNode(item.raw);
+  if (!api) {
+    return document.createTextNode(item.raw);
+  }
   const holder = document.createElement(item.display ? "div" : "span");
-  if (item.display) holder.className = "katex-block";
+  if (item.display) {
+    holder.className = "katex-block";
+  }
   let html: string;
   try {
-    html = api.renderToString(item.tex, { displayMode: item.display, throwOnError: false });
+    html = api.renderToString(item.tex, {
+      displayMode: item.display,
+      throwOnError: false,
+    });
   } catch {
-    html = '<span class="math-err">' + escapeHtml(item.tex) + "</span>";
+    html = `<span class="math-err">${escapeHtml(item.tex)}</span>`;
   }
-  holder.innerHTML = DOMPurify.sanitize(html, { USE_PROFILES: { html: true, mathMl: true, svg: true } });
+  holder.innerHTML = DOMPurify.sanitize(html, {
+    USE_PROFILES: { html: true, mathMl: true, svg: true },
+  });
   return holder;
 }
 
 function highlight(root: HTMLElement) {
   root.querySelectorAll<HTMLElement>("pre > code").forEach((code) => {
     const lang = /language-([\w-]+)/.exec(code.className)?.[1];
-    if (!lang || lang === "mermaid" || !hljs.getLanguage(lang)) return;
+    if (!lang || lang === "mermaid" || !hljs.getLanguage(lang)) {
+      return;
+    }
     try {
-      code.innerHTML = hljs.highlight(code.textContent ?? "", { language: lang }).value;
+      code.innerHTML = hljs.highlight(code.textContent ?? "", {
+        language: lang,
+      }).value;
       code.classList.add("hljs");
     } catch {
       // left plain
@@ -173,12 +225,19 @@ function highlight(root: HTMLElement) {
 
 let mermaidSeq = 0;
 
-async function drawDiagrams(jobs: { div: HTMLElement; src: string }[], light: boolean) {
+async function drawDiagrams(
+  jobs: { div: HTMLElement; src: string }[],
+  light: boolean
+) {
   const api = mermaid();
-  if (!api) return;
-  const sans = getComputedStyle(document.documentElement).getPropertyValue("--sans").trim();
+  if (!api) {
+    return;
+  }
+  const sans = getComputedStyle(document.documentElement)
+    .getPropertyValue("--sans")
+    .trim();
   // Mermaid sizes every box to its label as measured now, so the face has to be in.
-  await document.fonts.load("16px " + sans);
+  await document.fonts.load(`16px ${sans}`);
   api.initialize({
     startOnLoad: false,
     securityLevel: "strict",
@@ -186,34 +245,48 @@ async function drawDiagrams(jobs: { div: HTMLElement; src: string }[], light: bo
     fontFamily: sans,
   });
   for (const { div, src } of jobs) {
-    const id = "mmd-" + ++mermaidSeq;
+    const id = `mmd-${++mermaidSeq}`;
     try {
       const { svg } = await api.render(id, src);
-      if (!div.isConnected) return; // a newer render replaced the document meanwhile
+      if (!div.isConnected) {
+        return;
+      } // a newer render replaced the document meanwhile
       div.innerHTML = svg;
-    } catch (e) {
+    } catch (error) {
       // mermaid leaves its scratch element behind when a diagram fails to parse
-      document.getElementById("d" + id)?.remove();
+      document.getElementById(`d${id}`)?.remove();
       const pre = document.createElement("pre");
       pre.className = "mermaid-err";
-      pre.textContent = src + "\n\n" + (e instanceof Error ? e.message : "The diagram could not be drawn.");
+      pre.textContent = `${src}\n\n${
+        error instanceof Error
+          ? error.message
+          : "The diagram could not be drawn."
+      }`;
       div.replaceChildren(pre);
     }
   }
 }
 
 /** Renders `src` into `root`, replacing what was there. */
-export function renderMarkdown(src: string, root: HTMLElement, opts: RenderOptions): RenderResult {
+export function renderMarkdown(
+  src: string,
+  root: HTMLElement,
+  opts: RenderOptions
+): RenderResult {
   const { src: stripped, math } = extractMath(src);
   root.innerHTML = DOMPurify.sanitize(md.parse(stripped) as string);
   namespaceIds(root);
   injectMath(root, math, renderMathItem);
   transformCallouts(root);
   highlight(root);
-  root.querySelectorAll('li > input[type="checkbox"]').forEach((cb) => cb.closest("li")?.classList.add("task"));
+  root
+    .querySelectorAll('li > input[type="checkbox"]')
+    .forEach((cb) => cb.closest("li")?.classList.add("task"));
 
   const jobs: { div: HTMLElement; src: string }[] = [];
-  const fences = root.querySelectorAll<HTMLElement>("pre > code.language-mermaid");
+  const fences = root.querySelectorAll<HTMLElement>(
+    "pre > code.language-mermaid"
+  );
   if (mermaid()) {
     fences.forEach((code) => {
       const div = document.createElement("div");
@@ -227,13 +300,13 @@ export function renderMarkdown(src: string, root: HTMLElement, opts: RenderOptio
     const wrap = document.createElement("div");
     wrap.className = "code-wrap";
     pre.replaceWith(wrap);
-    wrap.appendChild(pre);
+    wrap.append(pre);
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "copy-btn inline";
     btn.textContent = "Copy";
     btn.title = "Copy this code block";
-    wrap.appendChild(btn);
+    wrap.append(btn);
   });
   return {
     needsMath: math.length > 0 && !katex(),
@@ -254,8 +327,15 @@ export function headings(root: HTMLElement): Heading[] {
   const out: Heading[] = [];
   root.querySelectorAll<HTMLHeadingElement>("h1, h2, h3, h4").forEach((h) => {
     const text = (h.textContent ?? "").trim();
-    let id = "md-" + (text.toLowerCase().replace(/[^\wÀ-￿]+/g, "-").replace(/^-+|-+$/g, "") || "section");
-    while (used.has(id)) id += "-";
+    let id = `md-${
+      text
+        .toLowerCase()
+        .replaceAll(/[^\wÀ-￿]+/g, "-")
+        .replaceAll(/^-+|-+$/g, "") || "section"
+    }`;
+    while (used.has(id)) {
+      id += "-";
+    }
     used.add(id);
     h.id = id;
     out.push({ id, level: +h.tagName[1]!, text });

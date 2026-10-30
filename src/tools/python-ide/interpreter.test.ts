@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { Interpreter, type InterpreterEvents } from "./interpreter";
+
+import { Interpreter } from "./interpreter";
+import type { InterpreterEvents } from "./interpreter";
 
 const RealWorker = globalThis.Worker;
 
@@ -18,7 +20,9 @@ class FakeWorker {
 
 beforeEach(() => {
   globalThis.Worker = FakeWorker as unknown as typeof Worker;
-  (globalThis as typeof globalThis & { PYIDE_PY_WORKER_SRC: string }).PYIDE_PY_WORKER_SRC = "";
+  (
+    globalThis as typeof globalThis & { PYIDE_PY_WORKER_SRC: string }
+  ).PYIDE_PY_WORKER_SRC = "";
 });
 
 afterEach(() => {

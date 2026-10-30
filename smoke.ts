@@ -3,53 +3,96 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { chromium } from "playwright-core";
+
 import jsQR from "jsqr";
-import dnsFixtures from "./src/tools/dns-lookup/fixtures.json";
-import { DKIM_SELECTORS } from "./src/tools/dns-lookup/email";
+import { chromium } from "playwright-core";
+
 import osvFixtures from "./src/tools/dependency-audit/fixtures/osv.json";
+import { DKIM_SELECTORS } from "./src/tools/dns-lookup/email";
+import dnsFixtures from "./src/tools/dns-lookup/fixtures.json";
 import { buildDocx, buildPdf } from "./src/tools/doc-to-markdown/fixtures";
 
 const exe =
   process.env.CHROMIUM_PATH ??
-  process.env.HOME + "/Library/Caches/ms-playwright/chromium_headless_shell-1234/chrome-headless-shell-mac-arm64/chrome-headless-shell";
+  `${
+    process.env.HOME
+  }/Library/Caches/ms-playwright/chromium_headless_shell-1234/chrome-headless-shell-mac-arm64/chrome-headless-shell`;
 
 // Speech to Text's fixtures: speech synthesized by macOS `say` as 16 kHz
 // 16-bit WAV, so no audio is committed. The English clip is also what the
 // fake microphone hears.
 const speechDir = mkdtempSync(join(tmpdir(), "html-tools-speech-"));
 const SPEECH: Record<string, [voice: string, rate: string, text: string]> = {
-  en: ["Samantha", "175", "The quick brown fox jumps over the lazy dog. Please turn off the kitchen lights at nine thirty."],
-  de: ["Anna", "175", "Der Zug nach Berlin fährt heute um halb zehn vom zweiten Gleis ab."],
-  long: ["Samantha", "105", "Welcome to the weekly planning meeting. First, the release is scheduled for the twelfth of March. The design team finished the new onboarding screens last Friday. Second, we still need volunteers for the customer interviews next week. Please send me an email if you can help. Third, the office will be closed on Monday because of the public holiday. The kitchen renovation should be done by the end of the month. Finally, remember that the quarterly report is due on Thursday afternoon. If anything is unclear, ask in the team channel. Thank you all, and have a great week. One more thing: the parking garage will be repainted on Wednesday, so please park on the street that day."],
+  en: [
+    "Samantha",
+    "175",
+    "The quick brown fox jumps over the lazy dog. Please turn off the kitchen lights at nine thirty.",
+  ],
+  de: [
+    "Anna",
+    "175",
+    "Der Zug nach Berlin fährt heute um halb zehn vom zweiten Gleis ab.",
+  ],
+  long: [
+    "Samantha",
+    "105",
+    "Welcome to the weekly planning meeting. First, the release is scheduled for the twelfth of March. The design team finished the new onboarding screens last Friday. Second, we still need volunteers for the customer interviews next week. Please send me an email if you can help. Third, the office will be closed on Monday because of the public holiday. The kitchen renovation should be done by the end of the month. Finally, remember that the quarterly report is due on Thursday afternoon. If anything is unclear, ask in the team channel. Thank you all, and have a great week. One more thing: the parking garage will be repainted on Wednesday, so please park on the street that day.",
+  ],
 };
 for (const [name, [voice, rate, text]] of Object.entries(SPEECH)) {
-  const aiff = join(speechDir, name + ".aiff");
-  for (const cmd of [["say", "-v", voice, "-r", rate, "-o", aiff, text], ["afconvert", "-f", "WAVE", "-d", "LEI16@16000", "-c", "1", aiff, join(speechDir, name + ".wav")]]) {
+  const aiff = join(speechDir, `${name}.aiff`);
+  for (const cmd of [
+    ["say", "-v", voice, "-r", rate, "-o", aiff, text],
+    [
+      "afconvert",
+      "-f",
+      "WAVE",
+      "-d",
+      "LEI16@16000",
+      "-c",
+      "1",
+      aiff,
+      join(speechDir, `${name}.wav`),
+    ],
+  ]) {
     const run = Bun.spawnSync(cmd);
-    if (run.exitCode !== 0) throw new Error(cmd[0] + " failed: " + run.stderr.toString());
+    if (run.exitCode !== 0) {
+      throw new Error(`${cmd[0]} failed: ${run.stderr.toString()}`);
+    }
   }
 }
 
 const browser = await chromium.launch({
   executablePath: exe,
-  args: ["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream", `--use-file-for-fake-audio-capture=${join(speechDir, "en.wav")}%noloop`],
+  args: [
+    "--use-fake-ui-for-media-stream",
+    "--use-fake-device-for-media-stream",
+    `--use-file-for-fake-audio-capture=${join(speechDir, "en.wav")}%noloop`,
+  ],
 });
 const page = await browser.newPage();
 const errors: string[] = [];
-page.on("pageerror", (e) => errors.push("pageerror: " + e.message));
+page.on("pageerror", (e) => errors.push(`pageerror: ${e.message}`));
 page.on("console", (m) => {
   // Probing a repository for lockfiles that are not there is a 404 by design, and the
   // Whoami test cuts the IPv6 trace on purpose; the browser logs each one.
-  const byDesign = m.location().url.startsWith("https://raw.githubusercontent.com/") || m.location().url.startsWith("https://[2606:4700:4700::1001]/");
-  if (m.type() === "error" && !byDesign) errors.push("console: " + m.text());
+  const byDesign =
+    m.location().url.startsWith("https://raw.githubusercontent.com/") ||
+    m.location().url.startsWith("https://[2606:4700:4700::1001]/");
+  if (m.type() === "error" && !byDesign) {
+    errors.push(`console: ${m.text()}`);
+  }
 });
 
-const url = "file://" + import.meta.dir + "/dist/index.html";
+const url = `file://${import.meta.dir}/dist/index.html`;
 let failed = false;
 function check(label: string, ok: boolean, detail = "") {
-  console.log((ok ? "ok  " : "FAIL") + "  " + label + (detail ? "  [" + detail + "]" : ""));
-  if (!ok) failed = true;
+  console.log(
+    `${ok ? "ok  " : "FAIL"}  ${label}${detail ? `  [${detail}]` : ""}`
+  );
+  if (!ok) {
+    failed = true;
+  }
 }
 
 await page.goto(url);
@@ -57,21 +100,45 @@ const names = await page.locator(".tool-list button").allTextContents();
 check("sidebar lists all tools", names.length === 15, names.join(", "));
 
 // base64 tool: paste a tiny valid png via direct input.
-await page.goto(url + "#base64-to-image");
-await page.locator(".b64-input").fill("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==");
-await page.waitForSelector(".tool-base64-to-image .output", { state: "visible" });
-check("base64 decodes", (await page.locator(".tool-base64-to-image .meta").textContent())!.includes("image/png"));
+await page.goto(`${url}#base64-to-image`);
+await page
+  .locator(".b64-input")
+  .fill(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+  );
+await page.waitForSelector(".tool-base64-to-image .output", {
+  state: "visible",
+});
+check(
+  "base64 decodes",
+  (await page.locator(".tool-base64-to-image .meta").textContent())!.includes(
+    "image/png"
+  )
+);
 
 // image paste -> base64 (encode direction), via a synthetic clipboard event
 await page.evaluate((b64: string) => {
   const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
   const dt = new DataTransfer();
   dt.items.add(new File([bytes], "pixel.png", { type: "image/png" }));
-  document.dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true }));
+  document.dispatchEvent(
+    new ClipboardEvent("paste", {
+      clipboardData: dt,
+      bubbles: true,
+      cancelable: true,
+    })
+  );
 }, "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==");
 await page.waitForFunction(() =>
-  (document.querySelector(".tool-base64-to-image .b64-input") as HTMLTextAreaElement).value.startsWith("data:image/png;base64,"));
-await page.waitForSelector(".tool-base64-to-image .output", { state: "visible" });
+  (
+    document.querySelector(
+      ".tool-base64-to-image .b64-input"
+    ) as HTMLTextAreaElement
+  ).value.startsWith("data:image/png;base64,")
+);
+await page.waitForSelector(".tool-base64-to-image .output", {
+  state: "visible",
+});
 check("pasted image encodes to base64", true);
 
 // image drop -> base64
@@ -80,35 +147,75 @@ await page.evaluate((b64: string) => {
   const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
   const dt = new DataTransfer();
   dt.items.add(new File([bytes], "pixel.png", { type: "image/png" }));
-  document.querySelector(".tool-base64-to-image")!
-    .dispatchEvent(new DragEvent("drop", { dataTransfer: dt, bubbles: true, cancelable: true }));
+  document.querySelector(".tool-base64-to-image")!.dispatchEvent(
+    new DragEvent("drop", {
+      dataTransfer: dt,
+      bubbles: true,
+      cancelable: true,
+    })
+  );
 }, "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==");
 await page.waitForFunction(() =>
-  (document.querySelector(".tool-base64-to-image .b64-input") as HTMLTextAreaElement).value.startsWith("data:image/png;base64,"));
+  (
+    document.querySelector(
+      ".tool-base64-to-image .b64-input"
+    ) as HTMLTextAreaElement
+  ).value.startsWith("data:image/png;base64,")
+);
 check("dropped image encodes to base64", true);
 
 // jsonc tool: sort a snippet with a comment.
-await page.goto(url + "#jsonc-sorter");
-await page.locator(".tool-jsonc-sorter .src").fill('{\n  // b first\n  "b": 1,\n  "a": 2\n}');
+await page.goto(`${url}#jsonc-sorter`);
+await page
+  .locator(".tool-jsonc-sorter .src")
+  .fill('{\n  // b first\n  "b": 1,\n  "a": 2\n}');
 await page.waitForSelector(".tool-jsonc-sorter .statusbar.ok");
-check("jsonc sorts", (await page.locator(".tool-jsonc-sorter .status-text").textContent())!.includes("2 keys sorted · 1 comment preserved"));
+check(
+  "jsonc sorts",
+  (await page
+    .locator(".tool-jsonc-sorter .status-text")
+    .textContent())!.includes("2 keys sorted · 1 comment preserved")
+);
 
 // Plain JSON, with trailing commas at every depth, comes out as strict JSON.
-await page.locator(".tool-jsonc-sorter .src").fill('{"b": [1, {"y": 2, "x": 3,},], "a": {"d": {"f": 1,}, "c": 2,},}');
-await page.waitForFunction(() => document.querySelector(".tool-jsonc-sorter .status-text")!.textContent!.includes("7 keys"));
-const jsonOut = (await page.locator(".tool-jsonc-sorter .output").textContent())!;
+await page
+  .locator(".tool-jsonc-sorter .src")
+  .fill('{"b": [1, {"y": 2, "x": 3,},], "a": {"d": {"f": 1,}, "c": 2,},}');
+await page.waitForFunction(() =>
+  document
+    .querySelector(".tool-jsonc-sorter .status-text")!
+    .textContent!.includes("7 keys")
+);
+const jsonOut = (await page
+  .locator(".tool-jsonc-sorter .output")
+  .textContent())!;
 let jsonOk = false;
-try { jsonOk = JSON.stringify(JSON.parse(jsonOut)) === '{"a":{"c":2,"d":{"f":1}},"b":[1,{"x":3,"y":2}]}'; } catch { /* invalid */ }
-check("jsonc accepts plain JSON, drops nested trailing commas", jsonOk, jsonOut.replace(/\s+/g, " "));
-check("jsonc status omits comment count when there are none",
-  (await page.locator(".tool-jsonc-sorter .status-text").textContent()) === "7 keys sorted");
+try {
+  jsonOk =
+    JSON.stringify(JSON.parse(jsonOut)) ===
+    '{"a":{"c":2,"d":{"f":1}},"b":[1,{"x":3,"y":2}]}';
+} catch {
+  /* invalid */
+}
+check(
+  "jsonc accepts plain JSON, drops nested trailing commas",
+  jsonOk,
+  jsonOut.replaceAll(/\s+/g, " ")
+);
+check(
+  "jsonc status omits comment count when there are none",
+  (await page.locator(".tool-jsonc-sorter .status-text").textContent()) ===
+    "7 keys sorted"
+);
 
 // save decoder: encode JSON on the right, verify base64 appears, then round-trip it back.
-await page.goto(url + "#save-decoder");
-await page.locator(".tool-save-decoder .dec").fill('{"resources": {"catnip": 5000}, "day": 12}');
+await page.goto(`${url}#save-decoder`);
+await page
+  .locator(".tool-save-decoder .dec")
+  .fill('{"resources": {"catnip": 5000}, "day": 12}');
 await page.waitForSelector(".tool-save-decoder .dec-status.ok");
 const encoded = await page.locator(".tool-save-decoder .enc").inputValue();
-check("save encodes", encoded.length > 0, encoded.slice(0, 24) + "…");
+check("save encodes", encoded.length > 0, `${encoded.slice(0, 24)}…`);
 await page.locator(".tool-save-decoder .dec").fill("");
 await page.locator(".tool-save-decoder .enc").fill(encoded);
 await page.waitForSelector(".tool-save-decoder .enc-status.ok");
@@ -124,11 +231,22 @@ check("invalid save reports error", true);
 await page.reload();
 await page.locator(".tool-save-decoder .enc").fill(encoded);
 await page.waitForSelector(".tool-save-decoder .enc-status.ok");
-await page.locator(".tool-save-decoder .dec").fill('{\n    resources: "unquoted key"\n}');
+await page
+  .locator(".tool-save-decoder .dec")
+  .fill('{\n    resources: "unquoted key"\n}');
 await page.waitForSelector(".tool-save-decoder .dec-status.error");
-const decErr = await page.locator(".tool-save-decoder .dec-status .status-text").textContent();
-check("invalid JSON refuses to encode", decErr!.includes("Not valid JSON"), decErr!.slice(0, 60));
-check("encoded pane untouched on bad JSON", (await page.locator(".tool-save-decoder .enc").inputValue()) === encoded);
+const decErr = await page
+  .locator(".tool-save-decoder .dec-status .status-text")
+  .textContent();
+check(
+  "invalid JSON refuses to encode",
+  decErr!.includes("Not valid JSON"),
+  decErr!.slice(0, 60)
+);
+check(
+  "encoded pane untouched on bad JSON",
+  (await page.locator(".tool-save-decoder .enc").inputValue()) === encoded
+);
 
 // image metadata: minimal hand-crafted fixtures, one per container, each with
 // EXIF GPS 52.520008 N, 13.404954 E. Drop each one, expect the GPS highlight,
@@ -146,41 +264,86 @@ const FIXTURES: Record<string, string> = {
   heic: "AAAAGGZ0eXBoZWljAAAAAG1pZjFoZWljAAAA8W1ldGEAAAAAAAAAIWhkbHIAAAAAAAAAAHBpY3QAAAAAAAAAAAAAAAAAAAAADnBpdG0AAAAAAAEAAAA4aWluZgAAAAAAAgAAABVpbmZlAgAAAAABAABodmMxAAAAABVpbmZlAgAAAAACAABFeGlmAAAAABppcmVmAAAAAAAAAA5jZHNjAAIAAQABAAAAOGlwcnAAAAAcaXBjbwAAABRpc3BlAAAAAAAAAEAAAAAwAAAAFGlwbWEAAAAAAAAAAQABAYEAAAAsaWxvYwAAAABEAAACAAEAAAABAAABEQAAABAAAgAAAAEAAAEhAAABHAAAATRtZGF0RkFLRUhFVkNQQVlMT0FEIQAAAAZFeGlmAABJSSoACAAAAAYADwECAAUAAABWAAAAEAECAAkAAABcAAAAEgEDAAEAAAABAAAAMgECABQAAABmAAAAaYcEAAEAAAB6AAAAJYgEAAEAAACgAAAAAAAAAEFjbWUAAENhbSA5MDAwAAAyMDI0OjA1OjAxIDEyOjAwOjAwAAEAA5ACABQAAACMAAAAAAAAADIwMjQ6MDU6MDEgMTI6MDA6MDAABQABAAIAAgAAAE4AAAACAAUAAwAAAOIAAAADAAIAAgAAAEUAAAAEAAUAAwAAAPoAAAAFAAEAAQAAAAAAAAAAAAAANAAAAAEAAAAfAAAAAQAAAODVAQAQJwAADQAAAAEAAAAYAAAAAQAAAKi4AgAQJwAA",
 };
 
-await page.goto(url + "#image-metadata");
+await page.goto(`${url}#image-metadata`);
 for (const [fmt, b64] of Object.entries(FIXTURES)) {
-  await page.evaluate(([n, s]) => {
-    const bytes = Uint8Array.from(atob(s!), (c) => c.charCodeAt(0));
-    const dt = new DataTransfer();
-    dt.items.add(new File([bytes], "fixture." + n, { type: "application/octet-stream" }));
-    document.querySelector(".tool-image-metadata")!
-      .dispatchEvent(new DragEvent("drop", { dataTransfer: dt, bubbles: true, cancelable: true }));
-  }, [fmt, b64]);
+  await page.evaluate(
+    ([n, s]) => {
+      const bytes = Uint8Array.from(atob(s!), (c) => c.charCodeAt(0));
+      const dt = new DataTransfer();
+      dt.items.add(
+        new File([bytes], `fixture.${n}`, { type: "application/octet-stream" })
+      );
+      document.querySelector(".tool-image-metadata")!.dispatchEvent(
+        new DragEvent("drop", {
+          dataTransfer: dt,
+          bubbles: true,
+          cancelable: true,
+        })
+      );
+    },
+    [fmt, b64]
+  );
   await page.waitForFunction(
-    (n) => document.querySelector(".tool-image-metadata .status")?.textContent === "fixture." + n, fmt);
-  const gpsText = await page.locator(".tool-image-metadata .hl.gps .hl-val").textContent();
-  check(fmt + " shows GPS coordinates", gpsText!.includes("52.520008") && gpsText!.includes("13.404954"), gpsText!.trim().slice(0, 40));
-  const hlText = await page.locator(".tool-image-metadata .highlights").textContent();
-  check(fmt + " shows dashed date", hlText!.includes("2024-05-01 12:00:00"), hlText!.trim().slice(0, 60));
+    (n) =>
+      document.querySelector(".tool-image-metadata .status")?.textContent ===
+      `fixture.${n}`,
+    fmt
+  );
+  const gpsText = await page
+    .locator(".tool-image-metadata .hl.gps .hl-val")
+    .textContent();
+  check(
+    `${fmt} shows GPS coordinates`,
+    gpsText!.includes("52.520008") && gpsText!.includes("13.404954"),
+    gpsText!.trim().slice(0, 40)
+  );
+  const hlText = await page
+    .locator(".tool-image-metadata .highlights")
+    .textContent();
+  check(
+    `${fmt} shows dashed date`,
+    hlText!.includes("2024-05-01 12:00:00"),
+    hlText!.trim().slice(0, 60)
+  );
   await page.locator(".tool-image-metadata .strip-btn").click();
   await page.waitForSelector(".tool-image-metadata .strip-ok");
-  const verdict = await page.locator(".tool-image-metadata .strip-ok").textContent();
-  check(fmt + " strips clean", verdict!.startsWith("Re-parsed the stripped copy"), verdict!.slice(0, 70));
+  const verdict = await page
+    .locator(".tool-image-metadata .strip-ok")
+    .textContent();
+  check(
+    `${fmt} strips clean`,
+    verdict!.startsWith("Re-parsed the stripped copy"),
+    verdict!.slice(0, 70)
+  );
   if (fmt === "jpeg") {
     // The JPEG fixture has Orientation 6: the strip must keep it and say so.
-    check("jpeg keeps orientation", verdict!.includes("orientation (6)"), verdict!.slice(0, 90));
+    check(
+      "jpeg keeps orientation",
+      verdict!.includes("orientation (6)"),
+      verdict!.slice(0, 90)
+    );
   }
 }
 
 // qr generator: render codes for every payload type and error correction level,
 // then prove they scan by decoding the canvas pixels with jsQR.
-async function decodeQrCanvas(): Promise<{ text: string; bytes: Uint8Array } | null> {
+async function decodeQrCanvas(): Promise<{
+  text: string;
+  bytes: Uint8Array;
+} | null> {
   const img = await page.evaluate(() => {
-    const c = document.querySelector(".tool-qr-generator .qr-canvas") as HTMLCanvasElement | null;
-    if (!c || c.hidden) return null;
+    const c = document.querySelector(
+      ".tool-qr-generator .qr-canvas"
+    ) as HTMLCanvasElement | null;
+    if (!c || c.hidden) {
+      return null;
+    }
     const d = c.getContext("2d")!.getImageData(0, 0, c.width, c.height);
-    return { data: Array.from(d.data), width: d.width, height: d.height };
+    return { data: [...d.data], width: d.width, height: d.height };
   });
-  if (!img) return null;
+  if (!img) {
+    return null;
+  }
   const res = jsQR(new Uint8ClampedArray(img.data), img.width, img.height);
   return res ? { text: res.data, bytes: new Uint8Array(res.binaryData) } : null;
 }
@@ -191,20 +354,29 @@ async function checkQrDecodes(label: string, expected: string, utf8 = false) {
   let got = "";
   for (;;) {
     const res = await decodeQrCanvas();
-    if (res) got = utf8 ? new TextDecoder().decode(res.bytes) : res.text;
-    if (got === expected || Date.now() > deadline) break;
+    if (res) {
+      got = utf8 ? new TextDecoder().decode(res.bytes) : res.text;
+    }
+    if (got === expected || Date.now() > deadline) {
+      break;
+    }
     await new Promise((r) => setTimeout(r, 100));
   }
   check(label, got === expected, got.slice(0, 50) || "(no decode)");
 }
 
-await page.goto(url + "#qr-generator");
+await page.goto(`${url}#qr-generator`);
 await page.locator(".tool-qr-generator .opt-size").fill("192");
-await page.locator(".tool-qr-generator .f-text").fill("https://example.com/some/path?q=1");
+await page
+  .locator(".tool-qr-generator .f-text")
+  .fill("https://example.com/some/path?q=1");
 await checkQrDecodes("qr text scans back", "https://example.com/some/path?q=1");
 for (const ecl of ["L", "Q", "H", "M"]) {
   await page.locator(".tool-qr-generator .opt-ecl").selectOption(ecl);
-  await checkQrDecodes("qr scans at level " + ecl, "https://example.com/some/path?q=1");
+  await checkQrDecodes(
+    `qr scans at level ${ecl}`,
+    "https://example.com/some/path?q=1"
+  );
 }
 await page.locator(".tool-qr-generator .f-text").fill("Grüße, 世界! \u{1F389}");
 await checkQrDecodes("qr utf-8 scans back", "Grüße, 世界! \u{1F389}", true);
@@ -216,25 +388,36 @@ await page.locator('.tool-qr-generator [data-type="wifi"]').click();
 await page.locator(".tool-qr-generator .f-wifi-ssid").fill("Home Network");
 await page.locator(".tool-qr-generator .f-wifi-pass").fill("s3cret;pass");
 await page.locator(".tool-qr-generator .f-wifi-hidden").check();
-await checkQrDecodes("qr wifi payload scans back", "WIFI:T:WPA;S:Home Network;P:s3cret\\;pass;H:true;;");
+await checkQrDecodes(
+  "qr wifi payload scans back",
+  "WIFI:T:WPA;S:Home Network;P:s3cret\\;pass;H:true;;"
+);
 
 await page.locator('.tool-qr-generator [data-type="contact"]').click();
 await page.locator(".tool-qr-generator .f-ct-first").fill("Jane");
 await page.locator(".tool-qr-generator .f-ct-last").fill("Doe");
 await page.locator(".tool-qr-generator .f-ct-phone").fill("+1 555 0100");
 await page.locator(".tool-qr-generator .f-ct-email").fill("jane@example.com");
-await checkQrDecodes("qr vcard payload scans back",
-  "BEGIN:VCARD\r\nVERSION:3.0\r\nN:Doe;Jane;;;\r\nFN:Jane Doe\r\nTEL:+1 555 0100\r\nEMAIL:jane@example.com\r\nEND:VCARD");
+await checkQrDecodes(
+  "qr vcard payload scans back",
+  "BEGIN:VCARD\r\nVERSION:3.0\r\nN:Doe;Jane;;;\r\nFN:Jane Doe\r\nTEL:+1 555 0100\r\nEMAIL:jane@example.com\r\nEND:VCARD"
+);
 
 await page.locator('.tool-qr-generator [data-type="email"]').click();
 await page.locator(".tool-qr-generator .f-em-to").fill("jane@example.com");
 await page.locator(".tool-qr-generator .f-em-subject").fill("Hi there");
-await checkQrDecodes("qr email payload scans back", "mailto:jane@example.com?subject=Hi%20there");
+await checkQrDecodes(
+  "qr email payload scans back",
+  "mailto:jane@example.com?subject=Hi%20there"
+);
 
 await page.locator('.tool-qr-generator [data-type="sms"]').click();
 await page.locator(".tool-qr-generator .f-sms-num").fill("+1 555 0100");
 await page.locator(".tool-qr-generator .f-sms-msg").fill("See you at 6");
-await checkQrDecodes("qr sms payload scans back", "SMSTO:+15550100:See you at 6");
+await checkQrDecodes(
+  "qr sms payload scans back",
+  "SMSTO:+15550100:See you at 6"
+);
 
 await page.locator('.tool-qr-generator [data-type="phone"]').click();
 await page.locator(".tool-qr-generator .f-ph-num").fill("+1 555 0100");
@@ -249,24 +432,36 @@ await checkQrDecodes("qr geo payload scans back", "geo:52.520008,13.404954");
 await page.locator('.tool-qr-generator [data-type="text"]').click();
 await page.locator(".tool-qr-generator .f-text").fill("x".repeat(3200));
 await page.waitForSelector(".tool-qr-generator .statusbar.error");
-check("qr too-long payload reports error",
-  (await page.locator(".tool-qr-generator .status-text").textContent())!.includes("too long"));
+check(
+  "qr too-long payload reports error",
+  (await page
+    .locator(".tool-qr-generator .status-text")
+    .textContent())!.includes("too long")
+);
 
 // inverted colors get a warning
 await page.locator(".tool-qr-generator .f-text").fill("contrast check");
 await page.evaluate(() => {
-  const fg = document.querySelector(".tool-qr-generator .opt-fg") as HTMLInputElement;
-  const bg = document.querySelector(".tool-qr-generator .opt-bg") as HTMLInputElement;
+  const fg = document.querySelector(
+    ".tool-qr-generator .opt-fg"
+  ) as HTMLInputElement;
+  const bg = document.querySelector(
+    ".tool-qr-generator .opt-bg"
+  ) as HTMLInputElement;
   fg.value = "#ffffff";
   bg.value = "#000000";
   fg.dispatchEvent(new Event("input", { bubbles: true }));
 });
 await page.waitForSelector(".tool-qr-generator .statusbar.warn");
-check("qr inverted colors warn",
-  (await page.locator(".tool-qr-generator .status-text").textContent())!.includes("inverted"));
+check(
+  "qr inverted colors warn",
+  (await page
+    .locator(".tool-qr-generator .status-text")
+    .textContent())!.includes("inverted")
+);
 
 // Deep links: a tool's state lives in the URL hash and a fresh load restores it.
-await page.goto(url + "#jsonc-sorter");
+await page.goto(`${url}#jsonc-sorter`);
 await page.locator(".tool-jsonc-sorter .src").fill('{"z": 1, "a": 2}');
 await page.locator(".tool-jsonc-sorter .opt-order").selectOption("desc");
 await page.waitForSelector(".tool-jsonc-sorter .statusbar.ok");
@@ -275,10 +470,23 @@ const jsoncLink = await page.evaluate(() => location.href);
 await page.goto("about:blank");
 await page.goto(jsoncLink);
 await page.waitForSelector(".tool-jsonc-sorter .statusbar.ok");
-check("jsonc deep link restores input", (await page.locator(".tool-jsonc-sorter .src").inputValue()) === '{"z": 1, "a": 2}');
-check("jsonc deep link restores options", (await page.locator(".tool-jsonc-sorter .opt-order").inputValue()) === "desc");
-const sortedOut = await page.locator(".tool-jsonc-sorter .output").textContent();
-check("jsonc deep link sorts on load", sortedOut!.indexOf('"z"') !== -1 && sortedOut!.indexOf('"z"') < sortedOut!.indexOf('"a"'));
+check(
+  "jsonc deep link restores input",
+  (await page.locator(".tool-jsonc-sorter .src").inputValue()) ===
+    '{"z": 1, "a": 2}'
+);
+check(
+  "jsonc deep link restores options",
+  (await page.locator(".tool-jsonc-sorter .opt-order").inputValue()) === "desc"
+);
+const sortedOut = await page
+  .locator(".tool-jsonc-sorter .output")
+  .textContent();
+check(
+  "jsonc deep link sorts on load",
+  sortedOut!.includes('"z"') &&
+    sortedOut!.indexOf('"z"') < sortedOut!.indexOf('"a"')
+);
 
 // Switching tools via the sidebar keeps each tool's state in its deep link.
 await page.locator(".tool-list button", { hasText: "Base64" }).click();
@@ -287,7 +495,7 @@ await page.locator(".tool-list button", { hasText: "JSONC" }).click();
 await page.waitForFunction(() => location.hash.startsWith("#jsonc-sorter/"));
 check("switching tools keeps state in the deep link", true);
 
-await page.goto(url + "#save-decoder");
+await page.goto(`${url}#save-decoder`);
 await page.locator(".tool-save-decoder .dec").fill('{"day": 7}');
 await page.waitForSelector(".tool-save-decoder .dec-status.ok");
 const savedEnc = await page.locator(".tool-save-decoder .enc").inputValue();
@@ -296,132 +504,322 @@ const saveLink = await page.evaluate(() => location.href);
 await page.goto("about:blank");
 await page.goto(saveLink);
 await page.waitForSelector(".tool-save-decoder .enc-status.ok");
-check("save deep link restores encoded pane", (await page.locator(".tool-save-decoder .enc").inputValue()) === savedEnc);
-check("save deep link decodes on load", JSON.parse(await page.locator(".tool-save-decoder .dec").inputValue()).day === 7);
+check(
+  "save deep link restores encoded pane",
+  (await page.locator(".tool-save-decoder .enc").inputValue()) === savedEnc
+);
+check(
+  "save deep link decodes on load",
+  JSON.parse(await page.locator(".tool-save-decoder .dec").inputValue()).day ===
+    7
+);
 
-await page.goto(url + "#qr-generator");
+await page.goto(`${url}#qr-generator`);
 await page.locator('.tool-qr-generator [data-type="wifi"]').click();
 await page.locator(".tool-qr-generator .f-wifi-ssid").fill("Cafe Guest");
 await page.locator(".tool-qr-generator .f-wifi-pass").fill("espresso99");
 await page.locator(".tool-qr-generator .opt-ecl").selectOption("Q");
-await page.waitForFunction(() => location.hash.startsWith("#qr-generator/wifi."));
+await page.waitForFunction(() =>
+  location.hash.startsWith("#qr-generator/wifi.")
+);
 await page.waitForSelector(".tool-qr-generator .statusbar.ok");
 const qrLink = await page.evaluate(() => location.href);
 await page.goto("about:blank");
 await page.goto(qrLink);
 await page.waitForSelector(".tool-qr-generator .statusbar.ok");
-check("qr deep link restores type", await page.locator('.tool-qr-generator [data-type="wifi"]').evaluate((b) => b.classList.contains("active")));
-check("qr deep link restores fields", (await page.locator(".tool-qr-generator .f-wifi-ssid").inputValue()) === "Cafe Guest" &&
-  (await page.locator(".tool-qr-generator .f-wifi-pass").inputValue()) === "espresso99");
-check("qr deep link restores options", (await page.locator(".tool-qr-generator .opt-ecl").inputValue()) === "Q");
-await checkQrDecodes("qr deep link renders a scannable code", "WIFI:T:WPA;S:Cafe Guest;P:espresso99;;");
+check(
+  "qr deep link restores type",
+  await page
+    .locator('.tool-qr-generator [data-type="wifi"]')
+    .evaluate((b) => b.classList.contains("active"))
+);
+check(
+  "qr deep link restores fields",
+  (await page.locator(".tool-qr-generator .f-wifi-ssid").inputValue()) ===
+    "Cafe Guest" &&
+    (await page.locator(".tool-qr-generator .f-wifi-pass").inputValue()) ===
+      "espresso99"
+);
+check(
+  "qr deep link restores options",
+  (await page.locator(".tool-qr-generator .opt-ecl").inputValue()) === "Q"
+);
+await checkQrDecodes(
+  "qr deep link renders a scannable code",
+  "WIFI:T:WPA;S:Cafe Guest;P:espresso99;;"
+);
 
 // dns lookup: the only tool that talks to the network. Every endpoint is
 // intercepted and answered from the unit-test fixtures, so this stays offline
 // and deterministic; what it proves is the wiring from input to table to URL.
 const dnsHits: string[] = [];
 const cors = { "access-control-allow-origin": "*" };
-await page.route(/^https:\/\/(cloudflare-dns\.com|security\.cloudflare-dns\.com|family\.cloudflare-dns\.com|dns\.google)\//, (route) => {
-  const u = new URL(route.request().url());
-  const name = u.searchParams.get("name");
-  // Known types travel as numbers; map the ones this test dispatches on back to names.
-  const wire = u.searchParams.get("type")!;
-  const type = ({ "1": "A", "2": "NS", "12": "PTR", "15": "MX", "16": "TXT", "33": "SRV" } as Record<string, string>)[wire] ?? wire;
-  dnsHits.push(u.host + " " + name + " " + type + (u.searchParams.get("do") ? " do" : ""));
-  let body: unknown;
-  if (name === "doesnotexist.example.com") body = dnsFixtures.cloudflare_nxdomain;
-  else if (name === "8.8.8.8.in-addr.arpa") body = dnsFixtures.cloudflare_ptr;
-  else if (type === "A") body = u.host === "dns.google" ? dnsFixtures.google_a : dnsFixtures.cloudflare_a;
-  else if (type === "MX") body = dnsFixtures.cloudflare_mx;
-  else if (type === "NS" && name === "example.com") {
-    // Matches the delegation in the RDAP fixture, so the whois card can report agreement.
-    body = { ...dnsFixtures.cloudflare_empty, Question: [{ name, type: 2 }], Authority: [],
-      Answer: ["elliott.ns.cloudflare.com.", "hera.ns.cloudflare.com."].map((data) => ({ name, type: 2, TTL: 300, data })) };
+await page.route(
+  /^https:\/\/(cloudflare-dns\.com|security\.cloudflare-dns\.com|family\.cloudflare-dns\.com|dns\.google)\//,
+  (route) => {
+    const u = new URL(route.request().url());
+    const name = u.searchParams.get("name");
+    // Known types travel as numbers; map the ones this test dispatches on back to names.
+    const wire = u.searchParams.get("type")!;
+    const type =
+      (
+        {
+          "1": "A",
+          "2": "NS",
+          "12": "PTR",
+          "15": "MX",
+          "16": "TXT",
+          "33": "SRV",
+        } as Record<string, string>
+      )[wire] ?? wire;
+    dnsHits.push(
+      `${u.host} ${name} ${type}${u.searchParams.get("do") ? " do" : ""}`
+    );
+    let body: unknown;
+    if (name === "doesnotexist.example.com") {
+      body = dnsFixtures.cloudflare_nxdomain;
+    } else if (name === "8.8.8.8.in-addr.arpa") {
+      body = dnsFixtures.cloudflare_ptr;
+    } else if (type === "A") {
+      body =
+        u.host === "dns.google"
+          ? dnsFixtures.google_a
+          : dnsFixtures.cloudflare_a;
+    } else if (type === "MX") {
+      body = dnsFixtures.cloudflare_mx;
+    } else if (type === "NS" && name === "example.com") {
+      // Matches the delegation in the RDAP fixture, so the whois card can report agreement.
+      body = {
+        ...dnsFixtures.cloudflare_empty,
+        Question: [{ name, type: 2 }],
+        Authority: [],
+        Answer: ["elliott.ns.cloudflare.com.", "hera.ns.cloudflare.com."].map(
+          (data) => ({ name, type: 2, TTL: 300, data })
+        ),
+      };
+    } else if (type === "TXT") {
+      // TXT is served per name so the email check sees SPF, DMARC, and DKIM where they belong and nothing elsewhere.
+      const strings = (dnsFixtures.txt_by_name as Record<string, string[]>)[
+        name ?? ""
+      ];
+      body = strings
+        ? {
+            ...dnsFixtures.cloudflare_empty,
+            Question: [{ name, type: 16 }],
+            Authority: [],
+            Answer: strings.map((data) => ({ name, type: 16, TTL: 300, data })),
+          }
+        : dnsFixtures.cloudflare_empty;
+    } else if (type === "NOTIMPTYPE") {
+      body = dnsFixtures.cloudflare_notimp;
+    } else {
+      body = dnsFixtures.cloudflare_empty;
+    }
+    return route.fulfill({
+      status: 200,
+      contentType: "application/dns-json",
+      headers: cors,
+      body: JSON.stringify(body),
+    });
   }
-  else if (type === "TXT") {
-    // TXT is served per name so the email check sees SPF, DMARC, and DKIM where they belong and nothing elsewhere.
-    const strings = (dnsFixtures.txt_by_name as Record<string, string[]>)[name ?? ""];
-    body = strings
-      ? { ...dnsFixtures.cloudflare_empty, Question: [{ name, type: 16 }], Authority: [], Answer: strings.map((data) => ({ name, type: 16, TTL: 300, data })) }
-      : dnsFixtures.cloudflare_empty;
-  }
-  else if (type === "NOTIMPTYPE") body = dnsFixtures.cloudflare_notimp;
-  else body = dnsFixtures.cloudflare_empty;
-  return route.fulfill({ status: 200, contentType: "application/dns-json", headers: cors, body: JSON.stringify(body) });
-});
+);
 await page.route(/^https:\/\/api\.certspotter\.com\//, (route) => {
   const u = new URL(route.request().url());
-  dnsHits.push("certspotter " + u.searchParams.get("domain") + (u.searchParams.get("after") ? " after" : ""));
+  dnsHits.push(
+    `certspotter ${u.searchParams.get(
+      "domain"
+    )}${u.searchParams.get("after") ? " after" : ""}`
+  );
   const body = u.searchParams.get("after") ? [] : dnsFixtures.certspotter_page;
-  return route.fulfill({ status: 200, contentType: "application/json", headers: cors, body: JSON.stringify(body) });
+  return route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    headers: cors,
+    body: JSON.stringify(body),
+  });
 });
 await page.route(/^https:\/\/example\.com\/brand\//, (route) => {
   const path = new URL(route.request().url()).pathname;
-  dnsHits.push("asset " + path);
-  if (path.endsWith("logo.svg")) return route.fulfill({ status: 200, contentType: "image/svg+xml", headers: cors, body: dnsFixtures.bimi_logo });
-  if (path.endsWith("vmc.pem")) return route.fulfill({ status: 200, contentType: "application/x-pem-file", headers: cors, body: dnsFixtures.bimi_cert });
+  dnsHits.push(`asset ${path}`);
+  if (path.endsWith("logo.svg")) {
+    return route.fulfill({
+      status: 200,
+      contentType: "image/svg+xml",
+      headers: cors,
+      body: dnsFixtures.bimi_logo,
+    });
+  }
+  if (path.endsWith("vmc.pem")) {
+    return route.fulfill({
+      status: 200,
+      contentType: "application/x-pem-file",
+      headers: cors,
+      body: dnsFixtures.bimi_cert,
+    });
+  }
   return route.fulfill({ status: 404, headers: cors, body: "" });
 });
-await page.route(/^https:\/\/(data\.iana\.org|rdap\.verisign\.com|rdap\.arin\.net)\//, (route) => {
-  const u = new URL(route.request().url());
-  dnsHits.push("rdap " + u.host + u.pathname);
-  const bodies: Record<string, unknown> = {
-    "data.iana.org/rdap/dns.json": dnsFixtures.rdap_bootstrap_dns,
-    "data.iana.org/rdap/ipv4.json": dnsFixtures.rdap_bootstrap_ipv4,
-    "data.iana.org/rdap/ipv6.json": dnsFixtures.rdap_bootstrap_ipv6,
-    "rdap.verisign.com/com/v1/domain/example.com": dnsFixtures.rdap_domain,
-    "rdap.arin.net/registry/ip/8.8.8.8": dnsFixtures.rdap_ip,
-  };
-  const body = bodies[u.host + u.pathname];
-  // Unknown names get an RDAP-shaped 404 body, but a 200 status: Chromium logs a console error for
-  // any 404 and this harness treats console errors as failures. The tool keys off the status alone,
-  // so the walk-up path is covered in the unit tests instead.
-  return route.fulfill({ status: 200, contentType: "application/rdap+json", headers: cors, body: JSON.stringify(body ?? { errorCode: 404 }) });
-});
+await page.route(
+  /^https:\/\/(data\.iana\.org|rdap\.verisign\.com|rdap\.arin\.net)\//,
+  (route) => {
+    const u = new URL(route.request().url());
+    dnsHits.push(`rdap ${u.host}${u.pathname}`);
+    const bodies: Record<string, unknown> = {
+      "data.iana.org/rdap/dns.json": dnsFixtures.rdap_bootstrap_dns,
+      "data.iana.org/rdap/ipv4.json": dnsFixtures.rdap_bootstrap_ipv4,
+      "data.iana.org/rdap/ipv6.json": dnsFixtures.rdap_bootstrap_ipv6,
+      "rdap.verisign.com/com/v1/domain/example.com": dnsFixtures.rdap_domain,
+      "rdap.arin.net/registry/ip/8.8.8.8": dnsFixtures.rdap_ip,
+    };
+    const body = bodies[u.host + u.pathname];
+    // Unknown names get an RDAP-shaped 404 body, but a 200 status: Chromium logs a console error for
+    // any 404 and this harness treats console errors as failures. The tool keys off the status alone,
+    // so the walk-up path is covered in the unit tests instead.
+    return route.fulfill({
+      status: 200,
+      contentType: "application/rdap+json",
+      headers: cors,
+      body: JSON.stringify(body ?? { errorCode: 404 }),
+    });
+  }
+);
 await page.route(/^https:\/\/api\.whois\.vu\//, (route) => {
-  dnsHits.push("whois.vu " + new URL(route.request().url()).searchParams.get("q"));
-  return route.fulfill({ status: 200, contentType: "text/plain", headers: cors, body: JSON.stringify(dnsFixtures.whois_text) });
+  dnsHits.push(
+    `whois.vu ${new URL(route.request().url()).searchParams.get("q")}`
+  );
+  return route.fulfill({
+    status: 200,
+    contentType: "text/plain",
+    headers: cors,
+    body: JSON.stringify(dnsFixtures.whois_text),
+  });
 });
 await page.route(/^https:\/\/api\.hackertarget\.com\//, (route) => {
-  dnsHits.push("hackertarget " + new URL(route.request().url()).searchParams.get("q"));
-  return route.fulfill({ status: 200, contentType: "text/plain", headers: cors, body: dnsFixtures.hackertarget_text });
+  dnsHits.push(
+    `hackertarget ${new URL(route.request().url()).searchParams.get("q")}`
+  );
+  return route.fulfill({
+    status: 200,
+    contentType: "text/plain",
+    headers: cors,
+    body: dnsFixtures.hackertarget_text,
+  });
 });
 
-await page.goto(url + "#dns-lookup");
-await page.locator(".tool-dns-lookup .name").fill("https://Example.COM/some/path?x=1");
+await page.goto(`${url}#dns-lookup`);
+await page
+  .locator(".tool-dns-lookup .name")
+  .fill("https://Example.COM/some/path?x=1");
 await page.locator(".tool-dns-lookup .type").selectOption("MX");
 await page.locator(".tool-dns-lookup .btn-lookup").click();
 await page.waitForSelector(".tool-dns-lookup .statusbar.ok");
-check("dns normalizes the pasted URL to a name", (await page.locator(".tool-dns-lookup .name").inputValue()) === "example.com");
-check("dns asks the resolver for exactly that", dnsHits.at(-1) === "cloudflare-dns.com example.com MX", dnsHits.at(-1));
-check("dns renders the answer rows", (await page.locator(".tool-dns-lookup .records tbody tr").count()) === 3);
-check("dns shows the status flags", (await page.locator(".tool-dns-lookup .flags").textContent())!.startsWith("NOERROR"));
-check("dns status counts records", (await page.locator(".tool-dns-lookup .status-text").textContent())!.startsWith("3 records"));
-check("dns writes the query into the deep link", await page.evaluate(() => location.hash === "#dns-lookup/cf.00.lookup.MX.example.com"));
-check("dns raw pane holds the response", (await page.locator(".tool-dns-lookup .raw").textContent())!.includes('"data": "10 mail.example.com."'));
+check(
+  "dns normalizes the pasted URL to a name",
+  (await page.locator(".tool-dns-lookup .name").inputValue()) === "example.com"
+);
+check(
+  "dns asks the resolver for exactly that",
+  dnsHits.at(-1) === "cloudflare-dns.com example.com MX",
+  dnsHits.at(-1)
+);
+check(
+  "dns renders the answer rows",
+  (await page.locator(".tool-dns-lookup .records tbody tr").count()) === 3
+);
+check(
+  "dns shows the status flags",
+  (await page.locator(".tool-dns-lookup .flags").textContent())!.startsWith(
+    "NOERROR"
+  )
+);
+check(
+  "dns status counts records",
+  (await page
+    .locator(".tool-dns-lookup .status-text")
+    .textContent())!.startsWith("3 records")
+);
+check(
+  "dns writes the query into the deep link",
+  await page.evaluate(
+    () => location.hash === "#dns-lookup/cf.00.lookup.MX.example.com"
+  )
+);
+check(
+  "dns raw pane holds the response",
+  (await page.locator(".tool-dns-lookup .raw").textContent())!.includes(
+    '"data": "10 mail.example.com."'
+  )
+);
 
 // No records of that type is reported distinctly from NXDOMAIN, with the SOA shown.
 await page.locator(".tool-dns-lookup .type").selectOption("SRV");
 await page.locator(".tool-dns-lookup .btn-lookup").click();
-await page.waitForFunction(() => document.querySelector(".tool-dns-lookup .status-text")?.textContent?.startsWith("no records"));
-check("dns empty answer says so", (await page.locator(".tool-dns-lookup .results .note").textContent())!.includes("No SRV records for example.com"));
-check("dns empty answer still shows the authority SOA", (await page.locator(".tool-dns-lookup .results .section").textContent()) === "authority" &&
-  (await page.locator(".tool-dns-lookup .records .type-badge").first().textContent()) === "SOA");
+await page.waitForFunction(() =>
+  document
+    .querySelector(".tool-dns-lookup .status-text")
+    ?.textContent?.startsWith("no records")
+);
+check(
+  "dns empty answer says so",
+  (await page
+    .locator(".tool-dns-lookup .results .note")
+    .textContent())!.includes("No SRV records for example.com")
+);
+check(
+  "dns empty answer still shows the authority SOA",
+  (await page.locator(".tool-dns-lookup .results .section").textContent()) ===
+    "authority" &&
+    (await page
+      .locator(".tool-dns-lookup .records .type-badge")
+      .first()
+      .textContent()) === "SOA"
+);
 
 await page.locator(".tool-dns-lookup .name").fill("doesnotexist.example.com");
 await page.locator(".tool-dns-lookup .type").selectOption("A");
 await page.locator(".tool-dns-lookup .btn-lookup").click();
-await page.waitForFunction(() => document.querySelector(".tool-dns-lookup .status-text")?.textContent?.startsWith("NXDOMAIN"));
-check("dns NXDOMAIN is its own outcome", (await page.locator(".tool-dns-lookup .results .note").textContent())!.includes("does not exist (NXDOMAIN)"));
-check("dns NXDOMAIN flags show the rcode", (await page.locator(".tool-dns-lookup .flags .status").textContent()) === "NXDOMAIN");
+await page.waitForFunction(() =>
+  document
+    .querySelector(".tool-dns-lookup .status-text")
+    ?.textContent?.startsWith("NXDOMAIN")
+);
+check(
+  "dns NXDOMAIN is its own outcome",
+  (await page
+    .locator(".tool-dns-lookup .results .note")
+    .textContent())!.includes("does not exist (NXDOMAIN)")
+);
+check(
+  "dns NXDOMAIN flags show the rcode",
+  (await page.locator(".tool-dns-lookup .flags .status").textContent()) ===
+    "NXDOMAIN"
+);
 
 // An IP address becomes a reverse lookup regardless of the picked type.
 await page.locator(".tool-dns-lookup .name").fill("8.8.8.8");
 await page.locator(".tool-dns-lookup .btn-lookup").click();
-await page.waitForFunction(() => document.querySelector(".tool-dns-lookup .status-text")?.textContent?.startsWith("1 record"));
-check("dns IP input queries the arpa name for PTR", dnsHits.at(-1) === "cloudflare-dns.com 8.8.8.8.in-addr.arpa PTR", dnsHits.at(-1));
-check("dns reverse lookup is labelled", (await page.locator(".tool-dns-lookup .results-title").textContent()) === "Reverse lookup");
-check("dns reverse lookup shows the PTR", (await page.locator(".tool-dns-lookup .records .c-data").first().textContent()) === "dns.google.");
+await page.waitForFunction(() =>
+  document
+    .querySelector(".tool-dns-lookup .status-text")
+    ?.textContent?.startsWith("1 record")
+);
+check(
+  "dns IP input queries the arpa name for PTR",
+  dnsHits.at(-1) === "cloudflare-dns.com 8.8.8.8.in-addr.arpa PTR",
+  dnsHits.at(-1)
+);
+check(
+  "dns reverse lookup is labelled",
+  (await page.locator(".tool-dns-lookup .results-title").textContent()) ===
+    "Reverse lookup"
+);
+check(
+  "dns reverse lookup shows the PTR",
+  (await page
+    .locator(".tool-dns-lookup .records .c-data")
+    .first()
+    .textContent()) === "dns.google."
+);
 
 // Resolver-side failure (NOTIMP with an EDE comment) renders as an error, not as "no records".
 await page.locator(".tool-dns-lookup .name").fill("example.com");
@@ -430,22 +828,56 @@ await page.locator(".tool-dns-lookup .custom-type").fill("not a type");
 await page.locator(".tool-dns-lookup .btn-lookup").click();
 await page.waitForSelector(".tool-dns-lookup .statusbar.error");
 const hitsBefore = dnsHits.length;
-check("dns rejects a malformed custom type before querying", (await page.locator(".tool-dns-lookup .status-text").textContent())!.includes("record type name or number"));
+check(
+  "dns rejects a malformed custom type before querying",
+  (await page.locator(".tool-dns-lookup .status-text").textContent())!.includes(
+    "record type name or number"
+  )
+);
 await page.locator(".tool-dns-lookup .custom-type").fill("notimptype");
 await page.locator(".tool-dns-lookup .custom-type").press("Enter");
-await page.waitForFunction(() => document.querySelector(".tool-dns-lookup .results .error-box") !== null);
-check("dns custom type is uppercased and sent", dnsHits.length === hitsBefore + 1 && dnsHits.at(-1) === "cloudflare-dns.com example.com NOTIMPTYPE", dnsHits.at(-1));
-check("dns resolver failure shows the rcode and EDE", (await page.locator(".tool-dns-lookup .results .error-box").textContent())!.includes("NOTIMP: EDE(21): Not Supported"));
+await page.waitForFunction(
+  () => document.querySelector(".tool-dns-lookup .results .error-box") !== null
+);
+check(
+  "dns custom type is uppercased and sent",
+  dnsHits.length === hitsBefore + 1 &&
+    dnsHits.at(-1) === "cloudflare-dns.com example.com NOTIMPTYPE",
+  dnsHits.at(-1)
+);
+check(
+  "dns resolver failure shows the rcode and EDE",
+  (await page
+    .locator(".tool-dns-lookup .results .error-box")
+    .textContent())!.includes("NOTIMP: EDE(21): Not Supported")
+);
 
 // Google with DNSSEC OK: the flag reaches the wire and the string Comment is displayed.
 await page.locator(".tool-dns-lookup .type").selectOption("A");
 await page.locator(".tool-dns-lookup .resolver").selectOption("google");
 await page.locator(".tool-dns-lookup .opt-do").check();
 await page.locator(".tool-dns-lookup .btn-lookup").click();
-await page.waitForFunction(() => document.querySelector(".tool-dns-lookup .status-text")?.textContent?.includes("Google 8.8.8.8"));
-check("dns google resolver with DO", dnsHits.at(-1) === "dns.google example.com A do", dnsHits.at(-1));
-check("dns shows the resolver comment", (await page.locator(".tool-dns-lookup .results .comment").textContent()) === "Response from 108.162.195.228.");
-check("dns deep link carries resolver and flags", await page.evaluate(() => location.hash === "#dns-lookup/google.01.lookup.A.example.com"));
+await page.waitForFunction(() =>
+  document
+    .querySelector(".tool-dns-lookup .status-text")
+    ?.textContent?.includes("Google 8.8.8.8")
+);
+check(
+  "dns google resolver with DO",
+  dnsHits.at(-1) === "dns.google example.com A do",
+  dnsHits.at(-1)
+);
+check(
+  "dns shows the resolver comment",
+  (await page.locator(".tool-dns-lookup .results .comment").textContent()) ===
+    "Response from 108.162.195.228."
+);
+check(
+  "dns deep link carries resolver and flags",
+  await page.evaluate(
+    () => location.hash === "#dns-lookup/google.01.lookup.A.example.com"
+  )
+);
 
 // All Types: one collapsible group per Common Type, empties collapsed.
 await page.locator(".tool-dns-lookup .resolver").selectOption("cf");
@@ -453,210 +885,560 @@ await page.locator(".tool-dns-lookup .opt-do").uncheck();
 const allStart = dnsHits.length;
 await page.locator(".tool-dns-lookup .btn-all").click();
 await page.waitForSelector(".tool-dns-lookup .statusbar.ok");
-check("dns all types queries the 14 common types", dnsHits.length - allStart === 14, String(dnsHits.length - allStart));
-check("dns all types renders a group per type", (await page.locator(".tool-dns-lookup .group").count()) === 14);
-check("dns all types opens groups with records", await page.locator('.tool-dns-lookup .group[data-type="MX"]').evaluate((d) => (d as HTMLDetailsElement).open) &&
-  !(await page.locator('.tool-dns-lookup .group[data-type="SRV"]').evaluate((d) => (d as HTMLDetailsElement).open)));
-check("dns all types summarises", (await page.locator(".tool-dns-lookup .status-text").textContent())!.startsWith("14 types · 9 records"));
-check("dns all types deep link", await page.evaluate(() => location.hash === "#dns-lookup/cf.00.all.A.example.com"));
+check(
+  "dns all types queries the 14 common types",
+  dnsHits.length - allStart === 14,
+  String(dnsHits.length - allStart)
+);
+check(
+  "dns all types renders a group per type",
+  (await page.locator(".tool-dns-lookup .group").count()) === 14
+);
+check(
+  "dns all types opens groups with records",
+  (await page
+    .locator('.tool-dns-lookup .group[data-type="MX"]')
+    .evaluate((d) => (d as HTMLDetailsElement).open)) &&
+    !(await page
+      .locator('.tool-dns-lookup .group[data-type="SRV"]')
+      .evaluate((d) => (d as HTMLDetailsElement).open))
+);
+check(
+  "dns all types summarises",
+  (await page
+    .locator(".tool-dns-lookup .status-text")
+    .textContent())!.startsWith("14 types · 9 records")
+);
+check(
+  "dns all types deep link",
+  await page.evaluate(
+    () => location.hash === "#dns-lookup/cf.00.all.A.example.com"
+  )
+);
 
 // Subdomains: both sources queried, union rendered, www. dropped, a row click looks that name up.
 await page.locator(".tool-dns-lookup .name").fill("www.example.com");
 await page.locator(".tool-dns-lookup .btn-subs").click();
 await page.waitForSelector(".tool-dns-lookup .statusbar.ok");
-check("dns subdomains asks both sources without www.",
-  dnsHits.includes("certspotter example.com") && dnsHits.includes("hackertarget example.com"), dnsHits.slice(-3).join(" | "));
-check("dns subdomains walks cert spotter pages", dnsHits.includes("certspotter example.com after"));
-check("dns subdomains unions the sources", (await page.locator(".tool-dns-lookup .subs tbody tr").count()) === 8);
-check("dns subdomains lists the searched name first", (await page.locator(".tool-dns-lookup .subs .link").first().textContent()) === "example.com");
-check("dns subdomains status per source", (await page.locator(".tool-dns-lookup .status-text").textContent())!.includes("8 subdomains · Cert Spotter 5 · HackerTarget 5"));
-await page.locator(".tool-dns-lookup .subs .link", { hasText: "blog.example.com" }).click();
-await page.waitForFunction(() => location.hash === "#dns-lookup/cf.00.lookup.A.blog.example.com");
-check("dns subdomain row click looks the name up", dnsHits.at(-1) === "cloudflare-dns.com blog.example.com A", dnsHits.at(-1));
+check(
+  "dns subdomains asks both sources without www.",
+  dnsHits.includes("certspotter example.com") &&
+    dnsHits.includes("hackertarget example.com"),
+  dnsHits.slice(-3).join(" | ")
+);
+check(
+  "dns subdomains walks cert spotter pages",
+  dnsHits.includes("certspotter example.com after")
+);
+check(
+  "dns subdomains unions the sources",
+  (await page.locator(".tool-dns-lookup .subs tbody tr").count()) === 8
+);
+check(
+  "dns subdomains lists the searched name first",
+  (await page.locator(".tool-dns-lookup .subs .link").first().textContent()) ===
+    "example.com"
+);
+check(
+  "dns subdomains status per source",
+  (await page.locator(".tool-dns-lookup .status-text").textContent())!.includes(
+    "8 subdomains · Cert Spotter 5 · HackerTarget 5"
+  )
+);
+await page
+  .locator(".tool-dns-lookup .subs .link", { hasText: "blog.example.com" })
+  .click();
+await page.waitForFunction(
+  () => location.hash === "#dns-lookup/cf.00.lookup.A.blog.example.com"
+);
+check(
+  "dns subdomain row click looks the name up",
+  dnsHits.at(-1) === "cloudflare-dns.com blog.example.com A",
+  dnsHits.at(-1)
+);
 
 // Email check: MX, SPF (following includes), DMARC, and a DKIM selector sweep, all from the TXT fixtures.
 await page.locator(".tool-dns-lookup .name").fill("example.com");
 const emailStart = dnsHits.length;
 await page.locator(".tool-dns-lookup .btn-email").click();
-await page.waitForFunction(() => document.querySelector(".tool-dns-lookup .status-text")?.textContent?.startsWith("SPF"));
-const emailStatus = (await page.locator(".tool-dns-lookup .status-text").textContent())!;
-check("dns email verdicts", emailStatus.startsWith("SPF ok · DMARC ok · DKIM ok · BIMI ok"), emailStatus);
-check("dns email queries MX, SPF and its include, DMARC, and every selector",
-  dnsHits.slice(emailStart).filter((h) => h.endsWith(" TXT")).length === 4 + DKIM_SELECTORS.length && dnsHits.includes("cloudflare-dns.com _spf.example.net TXT") &&
-  dnsHits.includes("cloudflare-dns.com _dmarc.example.com TXT") && dnsHits.includes("cloudflare-dns.com google._domainkey.example.com TXT"),
-  String(dnsHits.length - emailStart));
-check("dns email renders the five cards", (await page.locator(".tool-dns-lookup .card").count()) === 5);
-check("dns email MX lists the exchangers", (await page.locator('.tool-dns-lookup .card[data-check="mx"] .mx-list li').count()) === 3);
-check("dns email SPF counts lookups through the include",
-  (await page.locator('.tool-dns-lookup .card[data-check="spf"]').textContent())!.includes("2 of the 10 allowed DNS lookups"));
-check("dns email DMARC reads the policy",
-  (await page.locator('.tool-dns-lookup .card[data-check="dmarc"]').textContent())!.includes("p=quarantine: failing mail goes to spam"));
-check("dns email DKIM finds the live key and the revoked one",
-  (await page.locator('.tool-dns-lookup .card[data-check="dkim"] .dkim-key').count()) === 2 &&
-  (await page.locator('.tool-dns-lookup .card[data-check="dkim"]').textContent())!.includes("2048-bit RSA key") &&
-  (await page.locator('.tool-dns-lookup .card[data-check="dkim"]').textContent())!.includes("this key is revoked"));
-check("dns email BIMI fetches both assets", dnsHits.includes("asset /brand/logo.svg") && dnsHits.includes("asset /brand/vmc.pem"));
-const bimiText = (await page.locator('.tool-dns-lookup .card[data-check="bimi"]').textContent())!;
-check("dns email BIMI judges the logo and certificate",
-  bimiText.includes("DMARC enforces p=quarantine") && bimiText.includes("SVG Tiny Portable/Secure checks pass") && bimiText.includes("Valid until 2126-08-08"));
-check("dns email BIMI shows the logo", await page.locator(".tool-dns-lookup .bimi-logo").evaluate((img) => (img as HTMLImageElement).naturalWidth > 0 && !(img as HTMLImageElement).hidden));
-check("dns email deep link", await page.evaluate(() => location.hash === "#dns-lookup/cf.00.email.A.example.com"));
+await page.waitForFunction(() =>
+  document
+    .querySelector(".tool-dns-lookup .status-text")
+    ?.textContent?.startsWith("SPF")
+);
+const emailStatus = (await page
+  .locator(".tool-dns-lookup .status-text")
+  .textContent())!;
+check(
+  "dns email verdicts",
+  emailStatus.startsWith("SPF ok · DMARC ok · DKIM ok · BIMI ok"),
+  emailStatus
+);
+check(
+  "dns email queries MX, SPF and its include, DMARC, and every selector",
+  dnsHits.slice(emailStart).filter((h) => h.endsWith(" TXT")).length ===
+    4 + DKIM_SELECTORS.length &&
+    dnsHits.includes("cloudflare-dns.com _spf.example.net TXT") &&
+    dnsHits.includes("cloudflare-dns.com _dmarc.example.com TXT") &&
+    dnsHits.includes("cloudflare-dns.com google._domainkey.example.com TXT"),
+  String(dnsHits.length - emailStart)
+);
+check(
+  "dns email renders the five cards",
+  (await page.locator(".tool-dns-lookup .card").count()) === 5
+);
+check(
+  "dns email MX lists the exchangers",
+  (await page
+    .locator('.tool-dns-lookup .card[data-check="mx"] .mx-list li')
+    .count()) === 3
+);
+check(
+  "dns email SPF counts lookups through the include",
+  (await page
+    .locator('.tool-dns-lookup .card[data-check="spf"]')
+    .textContent())!.includes("2 of the 10 allowed DNS lookups")
+);
+check(
+  "dns email DMARC reads the policy",
+  (await page
+    .locator('.tool-dns-lookup .card[data-check="dmarc"]')
+    .textContent())!.includes("p=quarantine: failing mail goes to spam")
+);
+check(
+  "dns email DKIM finds the live key and the revoked one",
+  (await page
+    .locator('.tool-dns-lookup .card[data-check="dkim"] .dkim-key')
+    .count()) === 2 &&
+    (await page
+      .locator('.tool-dns-lookup .card[data-check="dkim"]')
+      .textContent())!.includes("2048-bit RSA key") &&
+    (await page
+      .locator('.tool-dns-lookup .card[data-check="dkim"]')
+      .textContent())!.includes("this key is revoked")
+);
+check(
+  "dns email BIMI fetches both assets",
+  dnsHits.includes("asset /brand/logo.svg") &&
+    dnsHits.includes("asset /brand/vmc.pem")
+);
+const bimiText = (await page
+  .locator('.tool-dns-lookup .card[data-check="bimi"]')
+  .textContent())!;
+check(
+  "dns email BIMI judges the logo and certificate",
+  bimiText.includes("DMARC enforces p=quarantine") &&
+    bimiText.includes("SVG Tiny Portable/Secure checks pass") &&
+    bimiText.includes("Valid until 2126-08-08")
+);
+check(
+  "dns email BIMI shows the logo",
+  await page
+    .locator(".tool-dns-lookup .bimi-logo")
+    .evaluate(
+      (img) =>
+        (img as HTMLImageElement).naturalWidth > 0 &&
+        !(img as HTMLImageElement).hidden
+    )
+);
+check(
+  "dns email deep link",
+  await page.evaluate(
+    () => location.hash === "#dns-lookup/cf.00.email.A.example.com"
+  )
+);
 
 // Probing one more selector by hand.
 await page.locator(".tool-dns-lookup .dkim-selector").fill("selector1");
 await page.locator(".tool-dns-lookup .btn-dkim").click();
-await page.waitForFunction(() => document.querySelector(".tool-dns-lookup .status-text")?.textContent?.startsWith("No key at selector selector1"));
-check("dns email DKIM probe reports a missing selector", (await page.locator(".tool-dns-lookup .dkim-extra .note").textContent())!.includes("selector1._domainkey.example.com"));
+await page.waitForFunction(() =>
+  document
+    .querySelector(".tool-dns-lookup .status-text")
+    ?.textContent?.startsWith("No key at selector selector1")
+);
+check(
+  "dns email DKIM probe reports a missing selector",
+  (await page
+    .locator(".tool-dns-lookup .dkim-extra .note")
+    .textContent())!.includes("selector1._domainkey.example.com")
+);
 await page.locator(".tool-dns-lookup .dkim-selector").fill("google");
 await page.locator(".tool-dns-lookup .dkim-selector").press("Enter");
-await page.waitForFunction(() => document.querySelector(".tool-dns-lookup .status-text")?.textContent?.startsWith("Key found at selector google"));
-check("dns email DKIM probe renders a found key", (await page.locator(".tool-dns-lookup .dkim-extra .dkim-key").count()) === 1);
+await page.waitForFunction(() =>
+  document
+    .querySelector(".tool-dns-lookup .status-text")
+    ?.textContent?.startsWith("Key found at selector google")
+);
+check(
+  "dns email DKIM probe renders a found key",
+  (await page.locator(".tool-dns-lookup .dkim-extra .dkim-key").count()) === 1
+);
 
 // Whois over RDAP: the registry answer for a domain, cross-checked against the zone's NS set, and an IP network.
 await page.locator(".tool-dns-lookup .name").fill("example.com");
 await page.locator(".tool-dns-lookup .btn-whois").click();
-await page.waitForFunction(() => document.querySelector(".tool-dns-lookup .status-text")?.textContent?.startsWith("registrar "));
-const whoisText = (await page.locator('.tool-dns-lookup .card[data-check="whois"]').textContent())!;
-check("dns whois loads the bootstrap and asks the registry",
-  dnsHits.includes("rdap data.iana.org/rdap/dns.json") && dnsHits.includes("rdap rdap.verisign.com/com/v1/domain/example.com"));
-check("dns whois shows registrar and abuse contact", whoisText.includes("IANA ID 376") && whoisText.includes("abuse@registrar.example"));
-check("dns whois judges expiry, locks, and DNSSEC",
-  whoisText.includes("Expires on 2099-08-13") && whoisText.includes("Registrar lock against transfers") && whoisText.includes("delegation is signed (1 DS record at the registry)"));
-check("dns whois compares registry delegation with the zone", whoisText.includes("Nameservers at the registry match the zone's NS records"));
-check("dns whois verdict", (await page.locator('.tool-dns-lookup .card[data-check="whois"] .card-head .verdict').textContent()) === "ok");
-check("dns whois deep link", await page.evaluate(() => location.hash === "#dns-lookup/cf.00.whois.A.example.com"));
-check("dns whois raw pane skips the bootstrap", !(await page.locator(".tool-dns-lookup .raw").textContent())!.includes("data.iana.org"));
+await page.waitForFunction(() =>
+  document
+    .querySelector(".tool-dns-lookup .status-text")
+    ?.textContent?.startsWith("registrar ")
+);
+const whoisText = (await page
+  .locator('.tool-dns-lookup .card[data-check="whois"]')
+  .textContent())!;
+check(
+  "dns whois loads the bootstrap and asks the registry",
+  dnsHits.includes("rdap data.iana.org/rdap/dns.json") &&
+    dnsHits.includes("rdap rdap.verisign.com/com/v1/domain/example.com")
+);
+check(
+  "dns whois shows registrar and abuse contact",
+  whoisText.includes("IANA ID 376") &&
+    whoisText.includes("abuse@registrar.example")
+);
+check(
+  "dns whois judges expiry, locks, and DNSSEC",
+  whoisText.includes("Expires on 2099-08-13") &&
+    whoisText.includes("Registrar lock against transfers") &&
+    whoisText.includes("delegation is signed (1 DS record at the registry)")
+);
+check(
+  "dns whois compares registry delegation with the zone",
+  whoisText.includes("Nameservers at the registry match the zone's NS records")
+);
+check(
+  "dns whois verdict",
+  (await page
+    .locator('.tool-dns-lookup .card[data-check="whois"] .card-head .verdict')
+    .textContent()) === "ok"
+);
+check(
+  "dns whois deep link",
+  await page.evaluate(
+    () => location.hash === "#dns-lookup/cf.00.whois.A.example.com"
+  )
+);
+check(
+  "dns whois raw pane skips the bootstrap",
+  !(await page.locator(".tool-dns-lookup .raw").textContent())!.includes(
+    "data.iana.org"
+  )
+);
 
 await page.locator(".tool-dns-lookup .name").fill("8.8.8.8");
 await page.locator(".tool-dns-lookup .btn-whois").click();
-await page.waitForFunction(() => document.querySelector(".tool-dns-lookup .status-text")?.textContent?.startsWith("Google LLC"));
-const ipText = (await page.locator('.tool-dns-lookup .card[data-check="whois"]').textContent())!;
-check("dns whois IP goes to the RIR from the ipv4 bootstrap", dnsHits.includes("rdap rdap.arin.net/registry/ip/8.8.8.8"));
-check("dns whois IP shows the network and holder", ipText.includes("8.8.8.0/24") && ipText.includes("Google LLC") && ipText.includes("network-abuse@google.com"));
+await page.waitForFunction(() =>
+  document
+    .querySelector(".tool-dns-lookup .status-text")
+    ?.textContent?.startsWith("Google LLC")
+);
+const ipText = (await page
+  .locator('.tool-dns-lookup .card[data-check="whois"]')
+  .textContent())!;
+check(
+  "dns whois IP goes to the RIR from the ipv4 bootstrap",
+  dnsHits.includes("rdap rdap.arin.net/registry/ip/8.8.8.8")
+);
+check(
+  "dns whois IP shows the network and holder",
+  ipText.includes("8.8.8.0/24") &&
+    ipText.includes("Google LLC") &&
+    ipText.includes("network-abuse@google.com")
+);
 
 // A TLD without RDAP falls back to raw WHOIS through the proxy.
 await page.locator(".tool-dns-lookup .name").fill("google.it");
 await page.locator(".tool-dns-lookup .btn-whois").click();
-await page.waitForFunction(() => document.querySelector(".tool-dns-lookup .status-text")?.textContent?.includes("raw WHOIS via whois.vu"));
-const rawWhois = (await page.locator('.tool-dns-lookup .card[data-check="whois"]').textContent())!;
-check("dns whois falls back to the proxy for a TLD without RDAP", dnsHits.includes("whois.vu google.it") && !dnsHits.some((h) => h.includes("/domain/google.it")));
-check("dns whois fallback shows parsed fields and the registry text",
-  rawWhois.includes("MarkMonitor International Limited") && rawWhois.includes("Expires on 2099-04-21") && rawWhois.includes("Nameservers\n  ns1.google.com"));
+await page.waitForFunction(() =>
+  document
+    .querySelector(".tool-dns-lookup .status-text")
+    ?.textContent?.includes("raw WHOIS via whois.vu")
+);
+const rawWhois = (await page
+  .locator('.tool-dns-lookup .card[data-check="whois"]')
+  .textContent())!;
+check(
+  "dns whois falls back to the proxy for a TLD without RDAP",
+  dnsHits.includes("whois.vu google.it") &&
+    !dnsHits.some((h) => h.includes("/domain/google.it"))
+);
+check(
+  "dns whois fallback shows parsed fields and the registry text",
+  rawWhois.includes("MarkMonitor International Limited") &&
+    rawWhois.includes("Expires on 2099-04-21") &&
+    rawWhois.includes("Nameservers\n  ns1.google.com")
+);
 
 // A DNS deep link restores every control and runs the query on load.
 await page.goto("about:blank");
-await page.goto(url + "#dns-lookup/google.01.lookup.TXT.example.com");
+await page.goto(`${url}#dns-lookup/google.01.lookup.TXT.example.com`);
 await page.waitForSelector(".tool-dns-lookup .statusbar.ok");
-check("dns deep link restores controls",
-  (await page.locator(".tool-dns-lookup .name").inputValue()) === "example.com" &&
-  (await page.locator(".tool-dns-lookup .type").inputValue()) === "TXT" &&
-  (await page.locator(".tool-dns-lookup .resolver").inputValue()) === "google" &&
-  (await page.locator(".tool-dns-lookup .opt-do").isChecked()) && !(await page.locator(".tool-dns-lookup .opt-cd").isChecked()));
-check("dns deep link runs the lookup", dnsHits.at(-1) === "dns.google example.com TXT do" &&
-  (await page.locator(".tool-dns-lookup .records tbody tr").count()) === 2, dnsHits.at(-1));
+check(
+  "dns deep link restores controls",
+  (await page.locator(".tool-dns-lookup .name").inputValue()) ===
+    "example.com" &&
+    (await page.locator(".tool-dns-lookup .type").inputValue()) === "TXT" &&
+    (await page.locator(".tool-dns-lookup .resolver").inputValue()) ===
+      "google" &&
+    (await page.locator(".tool-dns-lookup .opt-do").isChecked()) &&
+    !(await page.locator(".tool-dns-lookup .opt-cd").isChecked())
+);
+check(
+  "dns deep link runs the lookup",
+  dnsHits.at(-1) === "dns.google example.com TXT do" &&
+    (await page.locator(".tool-dns-lookup .records tbody tr").count()) === 2,
+  dnsHits.at(-1)
+);
 
 // Dependency audit: OSV answered from the fixture's hit table, GitHub raw
 // files from the fixture lockfiles. What this proves is the wiring from
 // lockfile to OSV to cards, the filters, and the two Deep Link forms.
-const auditFixture = (name: string) => Bun.file(import.meta.dir + "/src/tools/dependency-audit/fixtures/" + name).text();
+const auditFixture = (name: string) =>
+  Bun.file(
+    `${import.meta.dir}/src/tools/dependency-audit/fixtures/${name}`
+  ).text();
 const npmLock = await auditFixture("npm-v3.lock.json");
 const uvLock = await auditFixture("uv-v1.lock");
 const osvHits: string[] = [];
 await page.route(/^https:\/\/api\.osv\.dev\//, (route) => {
   const u = new URL(route.request().url());
   if (u.pathname === "/v1/querybatch") {
-    const queries = JSON.parse(route.request().postData() ?? "{}").queries as { package: { name: string; ecosystem: string }; version: string }[];
-    osvHits.push("querybatch " + queries.length);
+    const queries = JSON.parse(route.request().postData() ?? "{}").queries as {
+      package: { name: string; ecosystem: string };
+      version: string;
+    }[];
+    osvHits.push(`querybatch ${queries.length}`);
     const hits = osvFixtures.hits as Record<string, string[]>;
-    const results = queries.map((q) => ({ vulns: (hits[q.package.ecosystem + ":" + q.package.name + "@" + q.version] ?? []).map((id) => ({ id })) }));
-    return route.fulfill({ status: 200, contentType: "application/json", headers: cors, body: JSON.stringify({ results }) });
+    const results = queries.map((q) => ({
+      vulns: (
+        hits[`${q.package.ecosystem}:${q.package.name}@${q.version}`] ?? []
+      ).map((id) => ({ id })),
+    }));
+    return route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      headers: cors,
+      body: JSON.stringify({ results }),
+    });
   }
   const id = decodeURIComponent(u.pathname.split("/").pop()!);
-  osvHits.push("vulns " + id);
+  osvHits.push(`vulns ${id}`);
   const rec = (osvFixtures.records as Record<string, unknown>)[id];
-  return route.fulfill({ status: rec ? 200 : 404, contentType: "application/json", headers: cors, body: JSON.stringify(rec ?? { message: "Bug not found." }) });
+  return route.fulfill({
+    status: rec ? 200 : 404,
+    contentType: "application/json",
+    headers: cors,
+    body: JSON.stringify(rec ?? { message: "Bug not found." }),
+  });
 });
 const rawHits: string[] = [];
 await page.route(/^https:\/\/raw\.githubusercontent\.com\//, (route) => {
   const path = new URL(route.request().url()).pathname;
   rawHits.push(path);
-  const body = path === "/acme/demo/HEAD/package-lock.json" ? npmLock : path === "/acme/demo/HEAD/uv.lock" ? uvLock : null;
-  return route.fulfill({ status: body ? 200 : 404, contentType: "text/plain", headers: cors, body: body ?? "404: Not Found" });
+  const body =
+    path === "/acme/demo/HEAD/package-lock.json"
+      ? npmLock
+      : path === "/acme/demo/HEAD/uv.lock"
+        ? uvLock
+        : null;
+  return route.fulfill({
+    status: body ? 200 : 404,
+    contentType: "text/plain",
+    headers: cors,
+    body: body ?? "404: Not Found",
+  });
 });
 
-await page.goto(url + "#dependency-audit");
+await page.goto(`${url}#dependency-audit`);
 await page.locator(".tool-dependency-audit .src").fill(npmLock);
-await page.waitForFunction(() => document.querySelector(".tool-dependency-audit .kind-label")?.textContent === "package-lock.json");
+await page.waitForFunction(
+  () =>
+    document.querySelector(".tool-dependency-audit .kind-label")
+      ?.textContent === "package-lock.json"
+);
 check("audit sniffs the pasted lockfile kind", true);
 await page.locator(".tool-dependency-audit .btn-audit").click();
-await page.waitForFunction(() => document.querySelector(".tool-dependency-audit .status-text")?.textContent?.startsWith("4 advisories in 3 packages"));
-check("audit asks OSV once for the distinct packages, then each record once",
-  osvHits.filter((h) => h.startsWith("querybatch")).join() === "querybatch 3" && osvHits.filter((h) => h.startsWith("vulns")).length === 4, osvHits.join(" | "));
-check("audit renders one card per affected package, worst first",
+await page.waitForFunction(() =>
+  document
+    .querySelector(".tool-dependency-audit .status-text")
+    ?.textContent?.startsWith("4 advisories in 3 packages")
+);
+check(
+  "audit asks OSV once for the distinct packages, then each record once",
+  osvHits.filter((h) => h.startsWith("querybatch")).join(",") ===
+    "querybatch 3" && osvHits.filter((h) => h.startsWith("vulns")).length === 4,
+  osvHits.join(" | ")
+);
+check(
+  "audit renders one card per affected package, worst first",
   (await page.locator(".tool-dependency-audit .card").count()) === 3 &&
-  (await page.locator(".tool-dependency-audit .card .pkg").first().textContent()) === "minimist@1.2.0" &&
-  (await page.locator(".tool-dependency-audit .card .card-head .sev").first().textContent()) === "critical 9.8");
-check("audit tags direct and dev, names the fix",
-  (await page.locator('.tool-dependency-audit .card[data-scope="direct"]').count()) === 2 &&
-  (await page.locator(".tool-dependency-audit .card", { hasText: "minimist@1.2.5" }).locator(".tag").allTextContents()).join(",") === "direct,dev" &&
-  (await page.locator(".tool-dependency-audit .card", { hasText: "lodash@4.17.20" }).textContent())!.includes("Fixed in 4.17.21.") &&
-  (await page.locator(".tool-dependency-audit .card", { hasText: "minimist@1.2.0" }).textContent())!.includes("Fixed in 1.2.6, affected since 1.0.0."));
-check("audit lists what was not checked, with reasons",
-  (await page.locator(".tool-dependency-audit .skipped-list li").count()) === 3 &&
-  (await page.locator(".tool-dependency-audit .skipped-list").textContent())!.includes("git dependency"));
-check("audit deep link holds filters and the compressed input", await page.evaluate(() => location.hash.startsWith("#dependency-audit/11111.a.a.lz:")));
+    (await page
+      .locator(".tool-dependency-audit .card .pkg")
+      .first()
+      .textContent()) === "minimist@1.2.0" &&
+    (await page
+      .locator(".tool-dependency-audit .card .card-head .sev")
+      .first()
+      .textContent()) === "critical 9.8"
+);
+check(
+  "audit tags direct and dev, names the fix",
+  (await page
+    .locator('.tool-dependency-audit .card[data-scope="direct"]')
+    .count()) === 2 &&
+    (
+      await page
+        .locator(".tool-dependency-audit .card", { hasText: "minimist@1.2.5" })
+        .locator(".tag")
+        .allTextContents()
+    ).join(",") === "direct,dev" &&
+    (await page
+      .locator(".tool-dependency-audit .card", { hasText: "lodash@4.17.20" })
+      .textContent())!.includes("Fixed in 4.17.21.") &&
+    (await page
+      .locator(".tool-dependency-audit .card", { hasText: "minimist@1.2.0" })
+      .textContent())!.includes("Fixed in 1.2.6, affected since 1.0.0.")
+);
+check(
+  "audit lists what was not checked, with reasons",
+  (await page.locator(".tool-dependency-audit .skipped-list li").count()) ===
+    3 &&
+    (await page
+      .locator(".tool-dependency-audit .skipped-list")
+      .textContent())!.includes("git dependency")
+);
+check(
+  "audit deep link holds filters and the compressed input",
+  await page.evaluate(() =>
+    location.hash.startsWith("#dependency-audit/11111.a.a.lz:")
+  )
+);
 
 // Filters hide advisories and packages without a new Audit.
 const hitsBeforeFilter = osvHits.length;
 await page.locator('.tool-dependency-audit .f-sev[value="moderate"]').uncheck();
-check("audit severity filter hides moderate advisories",
-  (await page.locator(".tool-dependency-audit .advisory:not([hidden])").count()) === 3 &&
-  (await page.locator(".tool-dependency-audit .card:not([hidden])").count()) === 3 &&
-  osvHits.length === hitsBeforeFilter);
+check(
+  "audit severity filter hides moderate advisories",
+  (await page
+    .locator(".tool-dependency-audit .advisory:not([hidden])")
+    .count()) === 3 &&
+    (await page
+      .locator(".tool-dependency-audit .card:not([hidden])")
+      .count()) === 3 &&
+    osvHits.length === hitsBeforeFilter
+);
 await page.locator(".tool-dependency-audit .f-scope").selectOption("d");
-check("audit scope filter hides the transitive package",
-  (await page.locator(".tool-dependency-audit .card:not([hidden])").count()) === 2 &&
-  !(await page.locator(".tool-dependency-audit .card", { hasText: "minimist@1.2.0" }).isVisible()));
-check("audit deep link tracks the filters", await page.evaluate(() => location.hash.startsWith("#dependency-audit/11011.d.a.lz:")));
+check(
+  "audit scope filter hides the transitive package",
+  (await page.locator(".tool-dependency-audit .card:not([hidden])").count()) ===
+    2 &&
+    !(await page
+      .locator(".tool-dependency-audit .card", { hasText: "minimist@1.2.0" })
+      .isVisible())
+);
+check(
+  "audit deep link tracks the filters",
+  await page.evaluate(() =>
+    location.hash.startsWith("#dependency-audit/11011.d.a.lz:")
+  )
+);
 await page.locator('.tool-dependency-audit .f-sev[value="moderate"]').check();
 await page.locator(".tool-dependency-audit .f-scope").selectOption("a");
 
 // A declaration file is refused with a pointer to the lockfile.
-await page.locator(".tool-dependency-audit .src").fill('{"name": "x", "dependencies": {"lodash": "^4"}}');
-await page.waitForFunction(() => document.querySelector(".tool-dependency-audit .kind-label")?.textContent === "not a lockfile");
+await page
+  .locator(".tool-dependency-audit .src")
+  .fill('{"name": "x", "dependencies": {"lodash": "^4"}}');
+await page.waitForFunction(
+  () =>
+    document.querySelector(".tool-dependency-audit .kind-label")
+      ?.textContent === "not a lockfile"
+);
 await page.locator(".tool-dependency-audit .btn-audit").click();
 await page.waitForSelector(".tool-dependency-audit .statusbar.error");
-check("audit refuses package.json by name", (await page.locator(".tool-dependency-audit .status-text").textContent())!.includes("package.json"));
+check(
+  "audit refuses package.json by name",
+  (await page
+    .locator(".tool-dependency-audit .status-text")
+    .textContent())!.includes("package.json")
+);
 
 // Repository Fetch: the five names tried at the root, the two present audited together.
-await page.locator(".tool-dependency-audit .repo").fill("https://github.com/acme/demo");
+await page
+  .locator(".tool-dependency-audit .repo")
+  .fill("https://github.com/acme/demo");
 await page.locator(".tool-dependency-audit .btn-fetch").click();
-await page.waitForFunction(() => document.querySelector(".tool-dependency-audit .status-text")?.textContent?.startsWith("6 advisories in 4 packages"));
-check("audit fetch tries every lockfile name at the repository root",
-  rawHits.length === 5 && rawHits.every((p) => p.startsWith("/acme/demo/HEAD/")), rawHits.join(" "));
-check("audit fetch normalizes the repo box and shows the files as chips",
-  (await page.locator(".tool-dependency-audit .repo").inputValue()) === "acme/demo" &&
-  (await page.locator(".tool-dependency-audit .chip").allTextContents()).join("|").replace(/×/g, "") === "package-lock.json|uv.lock");
-check("audit groups results by lockfile",
+await page.waitForFunction(() =>
+  document
+    .querySelector(".tool-dependency-audit .status-text")
+    ?.textContent?.startsWith("6 advisories in 4 packages")
+);
+check(
+  "audit fetch tries every lockfile name at the repository root",
+  rawHits.length === 5 &&
+    rawHits.every((p) => p.startsWith("/acme/demo/HEAD/")),
+  rawHits.join(" ")
+);
+check(
+  "audit fetch normalizes the repo box and shows the files as chips",
+  (await page.locator(".tool-dependency-audit .repo").inputValue()) ===
+    "acme/demo" &&
+    (await page.locator(".tool-dependency-audit .chip").allTextContents())
+      .join("|")
+      .replaceAll("×", "") === "package-lock.json|uv.lock"
+);
+check(
+  "audit groups results by lockfile",
   (await page.locator(".tool-dependency-audit .lockfile").count()) === 2 &&
-  (await page.locator(".tool-dependency-audit .lockfile .type-badge").allTextContents()).join() === "npm,PyPI" &&
-  (await page.locator(".tool-dependency-audit .f-file-wrap").isVisible()));
-check("audit merges records that alias each other",
-  (await page.locator(".tool-dependency-audit .card", { hasText: "requests@2.30.0" }).locator(".advisory").count()) === 2 &&
-  (await page.locator(".tool-dependency-audit .card", { hasText: "requests@2.30.0" }).textContent())!.includes("PYSEC-2023-74"));
-check("audit fetch deep link names the repository", await page.evaluate(() => location.hash === "#dependency-audit/11111.a.a.gh:acme%2Fdemo"));
-check("audit results title links the repository",
-  (await page.locator(".tool-dependency-audit .results-title a").getAttribute("href")) === "https://github.com/acme/demo");
+    (
+      await page
+        .locator(".tool-dependency-audit .lockfile .type-badge")
+        .allTextContents()
+    ).join(",") === "npm,PyPI" &&
+    (await page.locator(".tool-dependency-audit .f-file-wrap").isVisible())
+);
+check(
+  "audit merges records that alias each other",
+  (await page
+    .locator(".tool-dependency-audit .card", { hasText: "requests@2.30.0" })
+    .locator(".advisory")
+    .count()) === 2 &&
+    (await page
+      .locator(".tool-dependency-audit .card", { hasText: "requests@2.30.0" })
+      .textContent())!.includes("PYSEC-2023-74")
+);
+check(
+  "audit fetch deep link names the repository",
+  await page.evaluate(
+    () => location.hash === "#dependency-audit/11111.a.a.gh:acme%2Fdemo"
+  )
+);
+check(
+  "audit results title links the repository",
+  (await page
+    .locator(".tool-dependency-audit .results-title a")
+    .getAttribute("href")) === "https://github.com/acme/demo"
+);
 
 // A repository Deep Link fetches and audits on load, filters restored.
 await page.goto("about:blank");
-await page.goto(url + "#dependency-audit/11111.d.p.gh:acme%2Fdemo");
-await page.waitForFunction(() => document.querySelector(".tool-dependency-audit .status-text")?.textContent?.startsWith("6 advisories"));
-check("audit deep link restores the repository and filters",
-  (await page.locator(".tool-dependency-audit .repo").inputValue()) === "acme/demo" &&
-  (await page.locator(".tool-dependency-audit .f-scope").inputValue()) === "d" &&
-  (await page.locator(".tool-dependency-audit .f-group").inputValue()) === "p" &&
-  (await page.locator(".tool-dependency-audit .card:not([hidden])").count()) === 2);
+await page.goto(`${url}#dependency-audit/11111.d.p.gh:acme%2Fdemo`);
+await page.waitForFunction(() =>
+  document
+    .querySelector(".tool-dependency-audit .status-text")
+    ?.textContent?.startsWith("6 advisories")
+);
+check(
+  "audit deep link restores the repository and filters",
+  (await page.locator(".tool-dependency-audit .repo").inputValue()) ===
+    "acme/demo" &&
+    (await page.locator(".tool-dependency-audit .f-scope").inputValue()) ===
+      "d" &&
+    (await page.locator(".tool-dependency-audit .f-group").inputValue()) ===
+      "p" &&
+    (await page
+      .locator(".tool-dependency-audit .card:not([hidden])")
+      .count()) === 2
+);
 
 // Document to Markdown: real conversions over the real CDN, from file://.
 // The fixtures are built here: a text PDF, a scanned one (a JPEG of text
@@ -666,7 +1448,7 @@ check("audit deep link restores the repository and filters",
 // spliced in page order with its comment, that a cancelled run leaves a
 // clean screen, and that a second visit fetches nothing.
 await page.goto("about:blank");
-await page.goto(url + "#doc-to-markdown");
+await page.goto(`${url}#doc-to-markdown`);
 const shot = await page.evaluate(() => {
   const c = document.createElement("canvas");
   c.width = 1200;
@@ -686,7 +1468,7 @@ const shot = await page.evaluate(() => {
   fx.fillStyle = "#fff";
   fx.fillRect(0, 0, f.width, f.height);
   let seed = 7;
-  const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  const rnd = () => (seed = (seed * 16_807) % 2_147_483_647) / 2_147_483_647;
   fx.strokeStyle = "#333";
   fx.lineWidth = 2;
   fx.beginPath();
@@ -697,71 +1479,163 @@ const shot = await page.evaluate(() => {
   for (const color of ["#c00", "#06c", "#090"]) {
     fx.strokeStyle = color;
     fx.beginPath();
-    for (let i = 0; i <= 40; i++) {
-      const px = 100 + i * 25, py = 700 - rnd() * 500;
-      if (i) fx.lineTo(px, py);
-      else fx.moveTo(px, py);
+    for (let i = 0; i <= 40; i += 1) {
+      const px = 100 + i * 25;
+      const py = 700 - rnd() * 500;
+      if (i) {
+        fx.lineTo(px, py);
+      } else {
+        fx.moveTo(px, py);
+      }
     }
     fx.stroke();
   }
-  return { jpeg: c.toDataURL("image/jpeg", 0.92).split(",")[1]!, png: c.toDataURL("image/png").split(",")[1]!, w: c.width, h: c.height, figure: f.toDataURL("image/jpeg", 0.92).split(",")[1]! };
+  return {
+    jpeg: c.toDataURL("image/jpeg", 0.92).split(",")[1]!,
+    png: c.toDataURL("image/png").split(",")[1]!,
+    w: c.width,
+    h: c.height,
+    figure: f.toDataURL("image/jpeg", 0.92).split(",")[1]!,
+  };
 });
-const scanJpeg = { bytes: Uint8Array.from(atob(shot.jpeg), (ch) => ch.charCodeAt(0)), width: shot.w, height: shot.h };
-const figureJpeg = { bytes: Uint8Array.from(atob(shot.figure), (ch) => ch.charCodeAt(0)), width: 1200, height: 900 };
+const scanJpeg = {
+  bytes: Uint8Array.from(atob(shot.jpeg), (ch) => ch.charCodeAt(0)),
+  width: shot.w,
+  height: shot.h,
+};
+const figureJpeg = {
+  bytes: Uint8Array.from(atob(shot.figure), (ch) => ch.charCodeAt(0)),
+  width: 1200,
+  height: 900,
+};
 const docFixtures: Record<string, Uint8Array> = {
-  "text.pdf": buildPdf([{ text: ["Hello from a text PDF.", "Second line here.", "Third line."] }]),
+  "text.pdf": buildPdf([
+    { text: ["Hello from a text PDF.", "Second line here.", "Third line."] },
+  ]),
   "scan.pdf": buildPdf([{ jpeg: scanJpeg }]),
   "mixed.pdf": buildPdf([
-    { text: ["Page one has text.", "It goes on for a few lines,", "enough to look like a page."] },
+    {
+      text: [
+        "Page one has text.",
+        "It goes on for a few lines,",
+        "enough to look like a page.",
+      ],
+    },
     { jpeg: scanJpeg },
-    { text: ["Page three has text too.", "Also several lines long,", "so the converter trusts it."] },
+    {
+      text: [
+        "Page three has text too.",
+        "Also several lines long,",
+        "so the converter trusts it.",
+      ],
+    },
   ]),
   "refused.pdf": buildPdf([
-    { text: ["Page one has text.", "It goes on for a few lines,", "enough to look like a page."] },
+    {
+      text: [
+        "Page one has text.",
+        "It goes on for a few lines,",
+        "enough to look like a page.",
+      ],
+    },
     { jpeg: scanJpeg },
     { jpeg: scanJpeg },
   ]),
   "figure.pdf": buildPdf([
-    { text: ["Page one has text.", "It goes on for a few lines,", "enough to look like a page."] },
+    {
+      text: [
+        "Page one has text.",
+        "It goes on for a few lines,",
+        "enough to look like a page.",
+      ],
+    },
     { jpeg: scanJpeg },
     { jpeg: figureJpeg },
   ]),
   "six.pdf": buildPdf(Array.from({ length: 6 }, () => ({ jpeg: scanJpeg }))),
   "photo.png": Uint8Array.from(atob(shot.png), (ch) => ch.charCodeAt(0)),
-  "note.docx": buildDocx("A heading", ["First paragraph.", "Second paragraph."]),
+  "note.docx": buildDocx("A heading", [
+    "First paragraph.",
+    "Second paragraph.",
+  ]),
   "bad.txt": new TextEncoder().encode("hello"),
 };
 async function dropDoc(name: string) {
-  await page.evaluate(([n, s]) => {
-    const b = Uint8Array.from(atob(s!), (c) => c.charCodeAt(0));
-    const dt = new DataTransfer();
-    dt.items.add(new File([b], n!, { type: "application/octet-stream" }));
-    document.querySelector(".tool-doc-to-markdown")!.dispatchEvent(new DragEvent("drop", { dataTransfer: dt, bubbles: true, cancelable: true }));
-  }, [name, Buffer.from(docFixtures[name]!).toString("base64")]);
+  await page.evaluate(
+    ([n, s]) => {
+      const b = Uint8Array.from(atob(s!), (c) => c.charCodeAt(0));
+      const dt = new DataTransfer();
+      dt.items.add(new File([b], n!, { type: "application/octet-stream" }));
+      document.querySelector(".tool-doc-to-markdown")!.dispatchEvent(
+        new DragEvent("drop", {
+          dataTransfer: dt,
+          bubbles: true,
+          cancelable: true,
+        })
+      );
+    },
+    [name, Buffer.from(docFixtures[name]!).toString("base64")]
+  );
 }
-const docDone = () => page.waitForFunction(() => !document.querySelector(".tool-doc-to-markdown .progress")!.classList.contains("on"), null, { timeout: 180000 });
-const docOutput = () => page.locator(".tool-doc-to-markdown .output").inputValue();
-const docMeta = async () => (await page.locator(".tool-doc-to-markdown .meta").textContent()) ?? "";
-const docError = () => page.locator(".tool-doc-to-markdown .error-box").evaluate((e) => (e.classList.contains("on") ? e.textContent! : ""));
+const docDone = () =>
+  page.waitForFunction(
+    () =>
+      !document
+        .querySelector(".tool-doc-to-markdown .progress")!
+        .classList.contains("on"),
+    null,
+    { timeout: 180_000 }
+  );
+const docOutput = () =>
+  page.locator(".tool-doc-to-markdown .output").inputValue();
+const docMeta = async () =>
+  (await page.locator(".tool-doc-to-markdown .meta").textContent()) ?? "";
+const docError = () =>
+  page
+    .locator(".tool-doc-to-markdown .error-box")
+    .evaluate((e) => (e.classList.contains("on") ? e.textContent! : ""));
 const docPhases: string[] = [];
 await page.exposeFunction("docPhase", (t: string) => docPhases.push(t));
-const watchPhases = () => page.evaluate(() => {
-  const el = document.querySelector(".tool-doc-to-markdown .phase")!;
-  new MutationObserver(() => (window as unknown as { docPhase(t: string): void }).docPhase(el.textContent ?? "")).observe(el, { childList: true, characterData: true, subtree: true });
-});
+const watchPhases = () =>
+  page.evaluate(() => {
+    const el = document.querySelector(".tool-doc-to-markdown .phase")!;
+    new MutationObserver(() =>
+      (window as unknown as { docPhase: (t: string) => void }).docPhase(
+        el.textContent ?? ""
+      )
+    ).observe(el, { childList: true, characterData: true, subtree: true });
+  });
 await watchPhases();
 
 await dropDoc("note.docx");
 await docDone();
-check("docx converts through anydoc", (await docOutput()) === "# A heading\n\nFirst paragraph.\n\nSecond paragraph.\n" && (await docMeta()) === "Word", (await docOutput()).replace(/\n/g, "⏎"));
+check(
+  "docx converts through anydoc",
+  (await docOutput()) ===
+    "# A heading\n\nFirst paragraph.\n\nSecond paragraph.\n" &&
+    (await docMeta()) === "Word",
+  (await docOutput()).replaceAll("\n", "⏎")
+);
 
 await dropDoc("text.pdf");
 await docDone();
-check("text PDF converts without OCR, page marked", (await docOutput()).startsWith("<!-- page 1 -->\n\nHello from a text PDF.") && (await docMeta()) === "PDF · 1 page" && !(await docOutput()).includes("OCR"), (await docMeta()) + " " + (await docOutput()).slice(0, 60));
+check(
+  "text PDF converts without OCR, page marked",
+  (await docOutput()).startsWith("<!-- page 1 -->\n\nHello from a text PDF.") &&
+    (await docMeta()) === "PDF · 1 page" &&
+    !(await docOutput()).includes("OCR"),
+  `${await docMeta()} ${(await docOutput()).slice(0, 60)}`
+);
 
 await dropDoc("scan.pdf");
 await docDone();
-check("scanned PDF goes through OCR and is marked", (await docOutput()).startsWith("<!-- page 1, OCR -->\n\n") && /quick brown fox/.test(await docOutput()) && (await docMeta()) === "PDF · 1 page · 1 via OCR (eng)", (await docMeta()) + " " + (await docOutput()).slice(0, 80));
+check(
+  "scanned PDF goes through OCR and is marked",
+  (await docOutput()).startsWith("<!-- page 1, OCR -->\n\n") &&
+    /quick brown fox/.test(await docOutput()) &&
+    (await docMeta()) === "PDF · 1 page · 1 via OCR (eng)",
+  `${await docMeta()} ${(await docOutput()).slice(0, 80)}`
+);
 
 // A text document with a picture-only page in the middle: the converter
 // accepts it, so no page is Scanned, OCR never runs, pdf.js never loads.
@@ -769,154 +1643,343 @@ docPhases.length = 0;
 await dropDoc("mixed.pdf");
 await docDone();
 const mixedOut = await docOutput();
-const mixedOrder = [mixedOut.indexOf("<!-- page 1 -->\n\nPage one has text."), mixedOut.indexOf("<!-- page 2, no text -->"), mixedOut.indexOf("<!-- page 3 -->\n\nPage three has text too.")];
-check("mid picture page in a text PDF: converter's verdict stands, no OCR, every page marked",
-  mixedOrder.every((i, k) => i >= 0 && (k === 0 || i > mixedOrder[k - 1]!)) && !mixedOut.includes("OCR") && (await docMeta()) === "PDF · 3 pages" &&
-  !docPhases.some((p) => p.startsWith("Downloading pdf.js") || p.startsWith("Starting OCR")),
-  mixedOrder.join(",") + " " + (await docMeta()) + " | " + docPhases.join(" | ").slice(0, 120));
+const mixedOrder = [
+  mixedOut.indexOf("<!-- page 1 -->\n\nPage one has text."),
+  mixedOut.indexOf("<!-- page 2, no text -->"),
+  mixedOut.indexOf("<!-- page 3 -->\n\nPage three has text too."),
+];
+check(
+  "mid picture page in a text PDF: converter's verdict stands, no OCR, every page marked",
+  mixedOrder.every((i, k) => i >= 0 && (k === 0 || i > mixedOrder[k - 1]!)) &&
+    !mixedOut.includes("OCR") &&
+    (await docMeta()) === "PDF · 3 pages" &&
+    !docPhases.some(
+      (p) => p.startsWith("Downloading pdf.js") || p.startsWith("Starting OCR")
+    ),
+  `${mixedOrder.join(",")} ${await docMeta()} | ${docPhases
+    .join(" | ")
+    .slice(0, 120)}`
+);
 
 // One text page then two scans: the converter refuses with pages 2 and 3, which are OCR'd and spliced after page 1.
 await dropDoc("refused.pdf");
 await docDone();
 const refusedOut = await docOutput();
-const refusedOrder = [refusedOut.indexOf("<!-- page 1 -->\n\nPage one has text."), refusedOut.indexOf("<!-- page 2, OCR -->"), refusedOut.indexOf("quick brown fox"), refusedOut.indexOf("<!-- page 3, OCR -->")];
-check("refused PDF: text page converted, listed pages OCR'd, spliced in page order",
-  refusedOrder.every((i, k) => i >= 0 && (k === 0 || i > refusedOrder[k - 1]!)) && (await docMeta()) === "PDF · 3 pages · 2 via OCR (eng)",
-  refusedOrder.join(",") + " " + (await docMeta()));
+const refusedOrder = [
+  refusedOut.indexOf("<!-- page 1 -->\n\nPage one has text."),
+  refusedOut.indexOf("<!-- page 2, OCR -->"),
+  refusedOut.indexOf("quick brown fox"),
+  refusedOut.indexOf("<!-- page 3, OCR -->"),
+];
+check(
+  "refused PDF: text page converted, listed pages OCR'd, spliced in page order",
+  refusedOrder.every(
+    (i, k) => i >= 0 && (k === 0 || i > refusedOrder[k - 1]!)
+  ) && (await docMeta()) === "PDF · 3 pages · 2 via OCR (eng)",
+  `${refusedOrder.join(",")} ${await docMeta()}`
+);
 
 // Page markers off: the same PDF, not a comment in sight, and the choice rides in the Deep Link.
 await page.locator(".tool-doc-to-markdown .markers-box").uncheck();
 await dropDoc("refused.pdf");
 await docDone();
 const bareOut = await docOutput();
-check("page markers off: no comments at all, state in the Deep Link",
-  !bareOut.includes("<!--") && bareOut.startsWith("Page one has text.") && /quick brown fox/.test(bareOut) &&
-  (await page.evaluate(() => location.hash)) === "#doc-to-markdown/eng.p0" &&
-  (await page.evaluate(() => localStorage.getItem("html-tools:doc-to-markdown:markers"))) === "0",
-  (await page.evaluate(() => location.hash)) + " " + bareOut.slice(0, 40).replace(/\n/g, "⏎"));
+check(
+  "page markers off: no comments at all, state in the Deep Link",
+  !bareOut.includes("<!--") &&
+    bareOut.startsWith("Page one has text.") &&
+    /quick brown fox/.test(bareOut) &&
+    (await page.evaluate(() => location.hash)) === "#doc-to-markdown/eng.p0" &&
+    (await page.evaluate(() =>
+      localStorage.getItem("html-tools:doc-to-markdown:markers")
+    )) === "0",
+  `${await page.evaluate(() => location.hash)} ${bareOut
+    .slice(0, 40)
+    .replaceAll("\n", "⏎")}`
+);
 await page.locator(".tool-doc-to-markdown .markers-box").check();
-check("page markers back on clears the flag", (await page.evaluate(() => location.hash)) === "#doc-to-markdown");
+check(
+  "page markers back on clears the flag",
+  (await page.evaluate(() => location.hash)) === "#doc-to-markdown"
+);
 
 // Same shape, but the third page is a chart: listed by the converter and OCR'd, it yields nothing confident.
 await dropDoc("figure.pdf");
 await docDone();
 const figureOut = await docOutput();
-check("a figure page OCR'd comes out as no text, not gibberish",
-  /quick brown fox/.test(figureOut) && figureOut.includes("<!-- page 2, OCR -->") && figureOut.trimEnd().endsWith("<!-- page 3, OCR: no text found -->") && (await docMeta()) === "PDF · 3 pages · 2 via OCR (eng)",
-  figureOut.slice(-120).replace(/\n/g, "⏎"));
+check(
+  "a figure page OCR'd comes out as no text, not gibberish",
+  /quick brown fox/.test(figureOut) &&
+    figureOut.includes("<!-- page 2, OCR -->") &&
+    figureOut.trimEnd().endsWith("<!-- page 3, OCR: no text found -->") &&
+    (await docMeta()) === "PDF · 3 pages · 2 via OCR (eng)",
+  figureOut.slice(-120).replaceAll("\n", "⏎")
+);
 
 await dropDoc("photo.png");
 await docDone();
-check("image goes straight to OCR", (await docOutput()).startsWith("<!-- image, OCR -->") && /quick brown fox/.test(await docOutput()) && (await docMeta()) === "png · OCR eng", (await docMeta()));
+check(
+  "image goes straight to OCR",
+  (await docOutput()).startsWith("<!-- image, OCR -->") &&
+    /quick brown fox/.test(await docOutput()) &&
+    (await docMeta()) === "png · OCR eng",
+  await docMeta()
+);
 
 await dropDoc("bad.txt");
 await docDone();
-check("unsupported file refused by name", (await docError()).startsWith(".txt is not a supported format") &&
-  !(await page.locator(".tool-doc-to-markdown .result").evaluate((e) => e.classList.contains("on"))), await docError());
+check(
+  "unsupported file refused by name",
+  (await docError()).startsWith(".txt is not a supported format") &&
+    !(await page
+      .locator(".tool-doc-to-markdown .result")
+      .evaluate((e) => e.classList.contains("on"))),
+  await docError()
+);
 
 // Cancel mid-way through a six-page scan: no error, empty state back, and the next run is unaffected.
 await dropDoc("six.pdf");
-await page.waitForFunction(() => (document.querySelector(".tool-doc-to-markdown .phase")!.textContent ?? "").startsWith("OCR page 2"), null, { timeout: 60000 });
+await page.waitForFunction(
+  () =>
+    (
+      document.querySelector(".tool-doc-to-markdown .phase")!.textContent ?? ""
+    ).startsWith("OCR page 2"),
+  null,
+  { timeout: 60_000 }
+);
 await page.locator(".tool-doc-to-markdown .cancel-btn").click();
 await docDone();
-check("cancel leaves a clean screen", (await docError()) === "" &&
-  !(await page.locator(".tool-doc-to-markdown .result").evaluate((e) => e.classList.contains("on"))) &&
-  (await page.locator(".tool-doc-to-markdown .empty-hint").evaluate((e) => getComputedStyle(e).display)) === "block");
+check(
+  "cancel leaves a clean screen",
+  (await docError()) === "" &&
+    !(await page
+      .locator(".tool-doc-to-markdown .result")
+      .evaluate((e) => e.classList.contains("on"))) &&
+    (await page
+      .locator(".tool-doc-to-markdown .empty-hint")
+      .evaluate((e) => getComputedStyle(e).display)) === "block"
+);
 await dropDoc("scan.pdf");
 await docDone();
-check("conversion works again after cancel", (await docMeta()) === "PDF · 1 page · 1 via OCR (eng)" && /quick brown fox/.test(await docOutput()));
+check(
+  "conversion works again after cancel",
+  (await docMeta()) === "PDF · 1 page · 1 via OCR (eng)" &&
+    /quick brown fox/.test(await docOutput())
+);
 
 // Languages: picked in the picker, carried in the Deep Link and localStorage, model fetched on next OCR.
 await page.locator(".tool-doc-to-markdown .langs summary").click();
 await page.locator(".tool-doc-to-markdown .lang-filter").fill("germ");
-check("language filter narrows the list", (await page.locator(".tool-doc-to-markdown .lang-list label:not([hidden])").count()) === 2);
+check(
+  "language filter narrows the list",
+  (await page
+    .locator(".tool-doc-to-markdown .lang-list label:not([hidden])")
+    .count()) === 2
+);
 await page.locator(".tool-doc-to-markdown .lang-list input[value=deu]").check();
 await page.keyboard.press("Escape");
-check("languages picked land in the Deep Link and are remembered",
+check(
+  "languages picked land in the Deep Link and are remembered",
   (await page.evaluate(() => location.hash)) === "#doc-to-markdown/eng+deu" &&
-  (await page.evaluate(() => localStorage.getItem("html-tools:doc-to-markdown:langs"))) === "eng+deu" &&
-  (await page.locator(".tool-doc-to-markdown .langs summary").textContent()) === "OCR: English, German" &&
-  !(await page.locator(".tool-doc-to-markdown .langs").evaluate((e) => (e as HTMLDetailsElement).open)));
+    (await page.evaluate(() =>
+      localStorage.getItem("html-tools:doc-to-markdown:langs")
+    )) === "eng+deu" &&
+    (await page
+      .locator(".tool-doc-to-markdown .langs summary")
+      .textContent()) === "OCR: English, German" &&
+    !(await page
+      .locator(".tool-doc-to-markdown .langs")
+      .evaluate((e) => (e as HTMLDetailsElement).open))
+);
 docPhases.length = 0;
 await dropDoc("photo.png");
 await docDone();
-check("OCR runs with both models, fetching only the new one",
-  (await docMeta()) === "png · OCR eng+deu" && /quick brown fox/.test(await docOutput()) &&
-  docPhases.some((p) => p.startsWith("Downloading tesseract deu")) && !docPhases.some((p) => p.startsWith("Downloading tesseract eng")),
-  docPhases.filter((p) => p.startsWith("Downloading")).map((p) => p.split(" (")[0]).filter((v, i, a) => a.indexOf(v) === i).join(", "));
-await page.evaluate(() => { localStorage.removeItem("html-tools:doc-to-markdown:langs"); localStorage.removeItem("html-tools:doc-to-markdown:markers"); });
+check(
+  "OCR runs with both models, fetching only the new one",
+  (await docMeta()) === "png · OCR eng+deu" &&
+    /quick brown fox/.test(await docOutput()) &&
+    docPhases.some((p) => p.startsWith("Downloading tesseract deu")) &&
+    !docPhases.some((p) => p.startsWith("Downloading tesseract eng")),
+  docPhases
+    .filter((p) => p.startsWith("Downloading"))
+    .map((p) => p.split(" (")[0])
+    .filter((v, i, a) => a.indexOf(v) === i)
+    .join(", ")
+);
+await page.evaluate(() => {
+  localStorage.removeItem("html-tools:doc-to-markdown:langs");
+  localStorage.removeItem("html-tools:doc-to-markdown:markers");
+});
 
 // Second visit: every engine comes from IndexedDB, nothing is downloaded.
 await page.goto("about:blank");
-await page.goto(url + "#doc-to-markdown/eng+ron.p0");
-await page.waitForFunction(() => (document.querySelector(".tool-doc-to-markdown .engines-text")!.textContent ?? "").startsWith("Engines cached"));
-check("deep link restores the languages and the markers flag",
-  (await page.locator(".tool-doc-to-markdown .langs summary").textContent()) === "OCR: English, Romanian" &&
-  !(await page.locator(".tool-doc-to-markdown .markers-box").isChecked()));
+await page.goto(`${url}#doc-to-markdown/eng+ron.p0`);
+await page.waitForFunction(() =>
+  (
+    document.querySelector(".tool-doc-to-markdown .engines-text")!
+      .textContent ?? ""
+  ).startsWith("Engines cached")
+);
+check(
+  "deep link restores the languages and the markers flag",
+  (await page.locator(".tool-doc-to-markdown .langs summary").textContent()) ===
+    "OCR: English, Romanian" &&
+    !(await page.locator(".tool-doc-to-markdown .markers-box").isChecked())
+);
 await page.locator(".tool-doc-to-markdown .markers-box").check();
-await page.evaluate(() => { const b = document.querySelector(".tool-doc-to-markdown .lang-list input[value=ron]") as HTMLInputElement; b.checked = false; b.dispatchEvent(new Event("change", { bubbles: true })); });
+await page.evaluate(() => {
+  const b = document.querySelector(
+    ".tool-doc-to-markdown .lang-list input[value=ron]"
+  ) as HTMLInputElement;
+  b.checked = false;
+  b.dispatchEvent(new Event("change", { bubbles: true }));
+});
 await watchPhases();
 docPhases.length = 0;
 await dropDoc("refused.pdf");
 await docDone();
-check("second visit converts from cached engines with no download",
-  (await docMeta()) === "PDF · 3 pages · 2 via OCR (eng)" && !docPhases.some((p) => p.startsWith("Downloading")),
-  docPhases.join(" | ").slice(0, 200));
-const cachedText = await page.locator(".tool-doc-to-markdown .engines-text").textContent();
-const cachedTitle = await page.locator(".tool-doc-to-markdown .engines-text").getAttribute("title");
-check("engines footer shows the cached total, breakdown by family on hover", /^Engines cached: [\d.]+ MB$/.test(cachedText!) && /^anydoc \d/m.test(cachedTitle!) && /^tesseract \d/m.test(cachedTitle!) && !cachedTitle!.includes("tesseract eng"), cachedText! + " | " + cachedTitle!.slice(0, 60));
+check(
+  "second visit converts from cached engines with no download",
+  (await docMeta()) === "PDF · 3 pages · 2 via OCR (eng)" &&
+    !docPhases.some((p) => p.startsWith("Downloading")),
+  docPhases.join(" | ").slice(0, 200)
+);
+const cachedText = await page
+  .locator(".tool-doc-to-markdown .engines-text")
+  .textContent();
+const cachedTitle = await page
+  .locator(".tool-doc-to-markdown .engines-text")
+  .getAttribute("title");
+check(
+  "engines footer shows the cached total, breakdown by family on hover",
+  /^Engines cached: [\d.]+ MB$/.test(cachedText!) &&
+    /^anydoc \d/m.test(cachedTitle!) &&
+    /^tesseract \d/m.test(cachedTitle!) &&
+    !cachedTitle!.includes("tesseract eng"),
+  `${cachedText!} | ${cachedTitle!.slice(0, 60)}`
+);
 await page.locator(".tool-doc-to-markdown .engines-clear").click();
-await page.waitForFunction(() => (document.querySelector(".tool-doc-to-markdown .engines-text")!.textContent ?? "").startsWith("No engines cached"));
+await page.waitForFunction(() =>
+  (
+    document.querySelector(".tool-doc-to-markdown .engines-text")!
+      .textContent ?? ""
+  ).startsWith("No engines cached")
+);
 check("clear cached engines empties the store", true);
-await page.evaluate(() => { localStorage.removeItem("html-tools:doc-to-markdown:langs"); localStorage.removeItem("html-tools:doc-to-markdown:markers"); });
+await page.evaluate(() => {
+  localStorage.removeItem("html-tools:doc-to-markdown:langs");
+  localStorage.removeItem("html-tools:doc-to-markdown:markers");
+});
 
 // Whoami: both Traces answered from canned bodies, one per IP literal. What
 // this proves is that each protocol is asked on its own, that the four cards
 // fill from the traces and nothing else, and that a failed protocol is
 // reported as unreachable rather than as a missing address.
 const traceBody = (ip: string, loc: string) =>
-  "fl=1\nh=1.1.1.1\nip=" + ip + "\nts=1.0\nvisit_scheme=https\nuag=Mozilla/5.0 (smoke)\ncolo=MXP\nhttp=http/2\nloc=" + loc + "\ntls=TLSv1.3\n";
+  `fl=1\nh=1.1.1.1\nip=${
+    ip
+  }\nts=1.0\nvisit_scheme=https\nuag=Mozilla/5.0 (smoke)\ncolo=MXP\nhttp=http/2\nloc=${
+    loc
+  }\ntls=TLSv1.3\n`;
 let traceMode: "both" | "v4only" | "split" = "both";
 const traceHits: string[] = [];
-await page.route(/^https:\/\/(1\.0\.0\.1|\[2606:4700:4700::1001\])\/cdn-cgi\/trace/, (route) => {
-  const v6 = route.request().url().includes("[2606");
-  traceHits.push(v6 ? "ipv6" : "ipv4");
-  if (v6 && traceMode === "v4only") return route.abort("connectionfailed");
-  const body = v6 ? traceBody("2001:db8::1", traceMode === "split" ? "DE" : "IT") : traceBody("203.0.113.9", "IT");
-  return route.fulfill({ status: 200, contentType: "text/plain", headers: cors, body });
-});
-const whoamiValue = (row: string) => page.locator('.tool-whoami [data-row="' + row + '"] .value').textContent();
-await page.goto(url + "#whoami");
+await page.route(
+  /^https:\/\/(1\.0\.0\.1|\[2606:4700:4700::1001\])\/cdn-cgi\/trace/,
+  (route) => {
+    const v6 = route.request().url().includes("[2606");
+    traceHits.push(v6 ? "ipv6" : "ipv4");
+    if (v6 && traceMode === "v4only") {
+      return route.abort("connectionfailed");
+    }
+    const body = v6
+      ? traceBody("2001:db8::1", traceMode === "split" ? "DE" : "IT")
+      : traceBody("203.0.113.9", "IT");
+    return route.fulfill({
+      status: 200,
+      contentType: "text/plain",
+      headers: cors,
+      body,
+    });
+  }
+);
+const whoamiValue = (row: string) =>
+  page.locator(`.tool-whoami [data-row="${row}"] .value`).textContent();
+await page.goto(`${url}#whoami`);
 await page.waitForSelector(".tool-whoami .value");
-await page.waitForFunction(() => !document.querySelector(".tool-whoami .value.pending"));
-check("whoami asks each protocol once on selection", traceHits.join(",") === "ipv4,ipv6" || traceHits.join(",") === "ipv6,ipv4", traceHits.join(","));
-check("whoami shows both addresses", (await whoamiValue("ipv4")) === "203.0.113.9" && (await whoamiValue("ipv6")) === "2001:db8::1");
-check("whoami shows the user agent Cloudflare received", (await whoamiValue("ua")) === "Mozilla/5.0 (smoke)");
-check("whoami names the country", (await whoamiValue("country")) === "IT · Italy");
-check("whoami copy all lists the four rows", await page.evaluate(() => {
-  let out = "";
-  navigator.clipboard.writeText = async (t: string) => { out = t; };
-  (document.querySelector(".tool-whoami .btn-copy-all") as HTMLButtonElement).click();
-  return new Promise<boolean>((resolve) => setTimeout(() =>
-    resolve(out === "IPv4: 203.0.113.9\nIPv6: 2001:db8::1\nCountry: IT · Italy\nUser agent: Mozilla/5.0 (smoke)"), 50));
-}));
+await page.waitForFunction(
+  () => !document.querySelector(".tool-whoami .value.pending")
+);
+check(
+  "whoami asks each protocol once on selection",
+  traceHits.join(",") === "ipv4,ipv6" || traceHits.join(",") === "ipv6,ipv4",
+  traceHits.join(",")
+);
+check(
+  "whoami shows both addresses",
+  (await whoamiValue("ipv4")) === "203.0.113.9" &&
+    (await whoamiValue("ipv6")) === "2001:db8::1"
+);
+check(
+  "whoami shows the user agent Cloudflare received",
+  (await whoamiValue("ua")) === "Mozilla/5.0 (smoke)"
+);
+check(
+  "whoami names the country",
+  (await whoamiValue("country")) === "IT · Italy"
+);
+check(
+  "whoami copy all lists the four rows",
+  await page.evaluate(() => {
+    let out = "";
+    navigator.clipboard.writeText = async (t: string) => {
+      out = t;
+    };
+    (
+      document.querySelector(".tool-whoami .btn-copy-all") as HTMLButtonElement
+    ).click();
+    return new Promise<boolean>((resolve) =>
+      setTimeout(
+        () =>
+          resolve(
+            out ===
+              "IPv4: 203.0.113.9\nIPv6: 2001:db8::1\nCountry: IT · Italy\nUser agent: Mozilla/5.0 (smoke)"
+          ),
+        50
+      )
+    );
+  })
+);
 
 // IPv6 failing is "not reachable", never "no address"; the shared rows still fill from IPv4.
 traceMode = "v4only";
 await page.locator(".tool-whoami .btn-refresh").click();
-await page.waitForFunction(() => !document.querySelector(".tool-whoami .value.pending"));
-check("whoami reports an unreachable protocol without claiming no address",
+await page.waitForFunction(
+  () => !document.querySelector(".tool-whoami .value.pending")
+);
+check(
+  "whoami reports an unreachable protocol without claiming no address",
   (await whoamiValue("ipv6"))!.startsWith("Not reachable over IPv6") &&
-  (await page.locator('.tool-whoami [data-row="ipv6"] .btn-copy').isDisabled()) &&
-  (await whoamiValue("ipv4")) === "203.0.113.9" && (await whoamiValue("country")) === "IT · Italy",
-  (await whoamiValue("ipv6")) ?? "");
+    (await page
+      .locator('.tool-whoami [data-row="ipv6"] .btn-copy')
+      .isDisabled()) &&
+    (await whoamiValue("ipv4")) === "203.0.113.9" &&
+    (await whoamiValue("country")) === "IT · Italy",
+  (await whoamiValue("ipv6")) ?? ""
+);
 
 // The two traces disagreeing on the country shows both, labeled.
 traceMode = "split";
 await page.locator(".tool-whoami .btn-refresh").click();
-await page.waitForFunction(() => !document.querySelector(".tool-whoami .value.pending"));
-check("whoami shows both countries when the traces disagree",
-  (await whoamiValue("country"))!.startsWith("IT · Italy via IPv4, DE · Germany via IPv6"), (await whoamiValue("country")) ?? "");
+await page.waitForFunction(
+  () => !document.querySelector(".tool-whoami .value.pending")
+);
+check(
+  "whoami shows both countries when the traces disagree",
+  (await whoamiValue("country"))!.startsWith(
+    "IT · Italy via IPv4, DE · Germany via IPv6"
+  ),
+  (await whoamiValue("country")) ?? ""
+);
 
 // Speech to Text: real transcriptions over the real CDN, from file://. What
 // this proves is that the engine loads in its worker from a data: URL, that
@@ -926,285 +1989,664 @@ check("whoami shows both countries when the traces disagree",
 // that the microphone is transcribed while it records, and that a second
 // visit fetches nothing.
 const stt = ".tool-speech-to-text ";
-const sttProgress = () => page.evaluate(() => document.querySelector(".tool-speech-to-text .progress")!.classList.contains("on"));
-const sttDone = () => page.waitForFunction(() => !document.querySelector(".tool-speech-to-text .progress")!.classList.contains("on"), null, { timeout: 180000 });
-const sttText = () => page.evaluate(() => [...document.querySelectorAll(".tool-speech-to-text .cue p")].map((p) => p.textContent).join(" "));
-const sttMeta = () => page.locator(stt + ".meta").textContent();
-const sttError = () => page.evaluate(() => document.querySelector(".tool-speech-to-text .error-box.on")?.textContent ?? "");
+const sttProgress = () =>
+  page.evaluate(() =>
+    document
+      .querySelector(".tool-speech-to-text .progress")!
+      .classList.contains("on")
+  );
+const sttDone = () =>
+  page.waitForFunction(
+    () =>
+      !document
+        .querySelector(".tool-speech-to-text .progress")!
+        .classList.contains("on"),
+    null,
+    { timeout: 180_000 }
+  );
+const sttText = () =>
+  page.evaluate(() =>
+    [...document.querySelectorAll(".tool-speech-to-text .cue p")]
+      .map((p) => p.textContent)
+      .join(" ")
+  );
+const sttMeta = () => page.locator(`${stt}.meta`).textContent();
+const sttError = () =>
+  page.evaluate(
+    () =>
+      document.querySelector(".tool-speech-to-text .error-box.on")
+        ?.textContent ?? ""
+  );
 async function dropSpeech(name: string) {
-  const b64 = Buffer.from(await Bun.file(join(speechDir, name + ".wav")).arrayBuffer()).toString("base64");
-  await page.evaluate(([n, s]) => {
-    const b = Uint8Array.from(atob(s!), (c) => c.charCodeAt(0));
-    const dt = new DataTransfer();
-    dt.items.add(new File([b], n!, { type: "audio/wav" }));
-    document.querySelector(".tool-speech-to-text")!.dispatchEvent(new DragEvent("drop", { dataTransfer: dt, bubbles: true, cancelable: true }));
-  }, [name + ".wav", b64]);
-  await page.waitForFunction(() => document.querySelector(".tool-speech-to-text .progress")!.classList.contains("on"));
+  const b64 = Buffer.from(
+    await Bun.file(join(speechDir, `${name}.wav`)).arrayBuffer()
+  ).toString("base64");
+  await page.evaluate(
+    ([n, s]) => {
+      const b = Uint8Array.from(atob(s!), (c) => c.charCodeAt(0));
+      const dt = new DataTransfer();
+      dt.items.add(new File([b], n!, { type: "audio/wav" }));
+      document.querySelector(".tool-speech-to-text")!.dispatchEvent(
+        new DragEvent("drop", {
+          dataTransfer: dt,
+          bubbles: true,
+          cancelable: true,
+        })
+      );
+    },
+    [`${name}.wav`, b64]
+  );
+  await page.waitForFunction(() =>
+    document
+      .querySelector(".tool-speech-to-text .progress")!
+      .classList.contains("on")
+  );
 }
-async function sttDownload(format: string): Promise<{ name: string; text: string }> {
-  const [dl] = await Promise.all([page.waitForEvent("download"), page.locator(stt + `.dl[data-format=${format}]`).click()]);
-  return { name: dl.suggestedFilename(), text: await new Response(await dl.createReadStream() as unknown as ReadableStream).text() };
+async function sttDownload(
+  format: string
+): Promise<{ name: string; text: string }> {
+  const [dl] = await Promise.all([
+    page.waitForEvent("download"),
+    page.locator(`${stt}.dl[data-format=${format}]`).click(),
+  ]);
+  return {
+    name: dl.suggestedFilename(),
+    text: await new Response(
+      (await dl.createReadStream()) as unknown as ReadableStream
+    ).text(),
+  };
 }
 
 await page.goto("about:blank");
-await page.goto(url + "#speech-to-text");
-await page.waitForSelector(stt + ".empty-hint");
+await page.goto(`${url}#speech-to-text`);
+await page.waitForSelector(`${stt}.empty-hint`);
 const sttPhases: string[] = [];
 await page.exposeFunction("sttPhase", (t: string) => sttPhases.push(t));
-const watchSttPhases = () => page.evaluate(() => {
-  new MutationObserver(() => (window as unknown as { sttPhase(t: string): void }).sttPhase(document.querySelector(".tool-speech-to-text .phase")!.textContent ?? ""))
-    .observe(document.querySelector(".tool-speech-to-text .phase")!, { childList: true, characterData: true, subtree: true });
-});
+const watchSttPhases = () =>
+  page.evaluate(() => {
+    new MutationObserver(() =>
+      (window as unknown as { sttPhase: (t: string) => void }).sttPhase(
+        document.querySelector(".tool-speech-to-text .phase")!.textContent ?? ""
+      )
+    ).observe(document.querySelector(".tool-speech-to-text .phase")!, {
+      childList: true,
+      characterData: true,
+      subtree: true,
+    });
+  });
 await watchSttPhases();
 await dropSpeech("en");
 await sttDone();
-check("speech: English is detected and transcribed",
-  /quick brown fox jumps over the lazy dog\./i.test(await sttText()) && (await sttMeta())!.startsWith("English (detected) · 0:0") && !(await sttError()),
-  (await sttMeta()) + " | " + (await sttText()) + (await sttError()));
-check("speech: the engine was downloaded on first use", sttPhases.some((p) => p.startsWith("Downloading the engine")), sttPhases.slice(0, 3).join(" | "));
-check("speech: one Cue per sentence, timed from the start",
-  (await page.locator(stt + ".cue").count()) === 2 && (await page.locator(stt + ".cue .t").first().textContent()) === "0:00");
+check(
+  "speech: English is detected and transcribed",
+  /quick brown fox jumps over the lazy dog\./i.test(await sttText()) &&
+    (await sttMeta())!.startsWith("English (detected) · 0:0") &&
+    !(await sttError()),
+  `${await sttMeta()} | ${await sttText()}${await sttError()}`
+);
+check(
+  "speech: the engine was downloaded on first use",
+  sttPhases.some((p) => p.startsWith("Downloading the engine")),
+  sttPhases.slice(0, 3).join(" | ")
+);
+check(
+  "speech: one Cue per sentence, timed from the start",
+  (await page.locator(`${stt}.cue`).count()) === 2 &&
+    (await page.locator(`${stt}.cue .t`).first().textContent()) === "0:00"
+);
 
 const srt = await sttDownload("srt");
-check("speech: SRT export", srt.name === "en.srt" && /^1\n00:00:00,\d{3} --> 00:00:0\d,\d{3}\nThe quick brown fox/.test(srt.text) && srt.text.includes("\n2\n"), srt.text.slice(0, 80));
+check(
+  "speech: SRT export",
+  srt.name === "en.srt" &&
+    /^1\n00:00:00,\d{3} --> 00:00:0\d,\d{3}\nThe quick brown fox/.test(
+      srt.text
+    ) &&
+    srt.text.includes("\n2\n"),
+  srt.text.slice(0, 80)
+);
 const vtt = await sttDownload("vtt");
-check("speech: WebVTT export", vtt.name === "en.vtt" && vtt.text.startsWith("WEBVTT\n\n00:00:00."), vtt.text.slice(0, 40));
+check(
+  "speech: WebVTT export",
+  vtt.name === "en.vtt" && vtt.text.startsWith("WEBVTT\n\n00:00:00."),
+  vtt.text.slice(0, 40)
+);
 const json = JSON.parse((await sttDownload("json")).text);
-check("speech: JSON export has every Word with its times",
-  json.language === "en" && json.words.length >= 15 && json.words.every((w: { start: number; end: number }, i: number, a: { start: number }[]) => w.end >= w.start && (i === 0 || w.start >= a[i - 1]!.start)),
-  JSON.stringify(json).slice(0, 120));
+check(
+  "speech: JSON export has every Word with its times",
+  json.language === "en" &&
+    json.words.length >= 15 &&
+    json.words.every(
+      (w: { start: number; end: number }, i: number, a: { start: number }[]) =>
+        w.end >= w.start && (i === 0 || w.start >= a[i - 1]!.start)
+    ),
+  JSON.stringify(json).slice(0, 120)
+);
 const sttCopied = await page.evaluate(() => {
   let out = "";
-  navigator.clipboard.writeText = async (t: string) => { out = t; };
-  (document.querySelector(".tool-speech-to-text .copy-btn") as HTMLElement).click();
+  navigator.clipboard.writeText = async (t: string) => {
+    out = t;
+  };
+  (
+    document.querySelector(".tool-speech-to-text .copy-btn") as HTMLElement
+  ).click();
   return new Promise<string>((resolve) => setTimeout(() => resolve(out), 50));
 });
-check("speech: Copy puts the text on the clipboard", sttCopied.startsWith("The quick brown fox") && sttCopied.endsWith("\n"), sttCopied.slice(0, 40));
+check(
+  "speech: Copy puts the text on the clipboard",
+  sttCopied.startsWith("The quick brown fox") && sttCopied.endsWith("\n"),
+  sttCopied.slice(0, 40)
+);
 
 // Clicking a Word puts the player at that Word.
 const fox = json.words.find((w: { word: string }) => w.word === "fox");
-await page.locator(stt + ".w", { hasText: /^fox$/ }).click();
-await page.waitForFunction((t: number) => Math.abs((document.querySelector(".tool-speech-to-text .player") as HTMLAudioElement).currentTime - t) < 0.05, fox.start);
+await page.locator(`${stt}.w`, { hasText: /^fox$/ }).click();
+await page.waitForFunction(
+  (t: number) =>
+    Math.abs(
+      (
+        document.querySelector(
+          ".tool-speech-to-text .player"
+        ) as HTMLAudioElement
+      ).currentTime - t
+    ) < 0.05,
+  fox.start
+);
 check("speech: clicking a Word seeks the player to it", true);
 
 await dropSpeech("de");
 await sttDone();
-check("speech: German is detected and transcribed", (await sttMeta())!.startsWith("German (detected)") && /Berlin/.test(await sttText()), (await sttMeta()) + " | " + (await sttText()));
+check(
+  "speech: German is detected and transcribed",
+  (await sttMeta())!.startsWith("German (detected)") &&
+    /Berlin/.test(await sttText()),
+  `${await sttMeta()} | ${await sttText()}`
+);
 
 // Over one Window: cut at a sentence end and stitched, the times running on past 30 s.
 await dropSpeech("long");
 await sttDone();
 const sttLong = await sttText();
 const longJson = JSON.parse((await sttDownload("json")).text);
-const longStarts: number[] = longJson.words.map((w: { start: number }) => w.start);
-check("speech: audio past one Window is stitched with nothing lost or doubled",
-  sttLong.startsWith("Welcome to the weekly planning meeting.") && sttLong.endsWith("park on the street that day.") &&
-  (sttLong.match(/quarterly report/g) ?? []).length === 1 && (sttLong.match(/public holiday/g) ?? []).length === 1 &&
-  longStarts.at(-1)! > 40 && longStarts.every((s, i) => i === 0 || s >= longStarts[i - 1]!),
-  sttLong.slice(0, 60) + " … " + sttLong.slice(-60));
+const longStarts: number[] = longJson.words.map(
+  (w: { start: number }) => w.start
+);
+check(
+  "speech: audio past one Window is stitched with nothing lost or doubled",
+  sttLong.startsWith("Welcome to the weekly planning meeting.") &&
+    sttLong.endsWith("park on the street that day.") &&
+    (sttLong.match(/quarterly report/g) ?? []).length === 1 &&
+    (sttLong.match(/public holiday/g) ?? []).length === 1 &&
+    longStarts.at(-1)! > 40 &&
+    longStarts.every((s, i) => i === 0 || s >= longStarts[i - 1]!),
+  `${sttLong.slice(0, 60)} … ${sttLong.slice(-60)}`
+);
 
 // An option change transcribes the same audio again, and goes in the Deep Link.
-await page.locator(stt + ".lang-select").selectOption("en");
-await page.waitForFunction(() => document.querySelector(".tool-speech-to-text .progress")!.classList.contains("on"));
+await page.locator(`${stt}.lang-select`).selectOption("en");
+await page.waitForFunction(() =>
+  document
+    .querySelector(".tool-speech-to-text .progress")!
+    .classList.contains("on")
+);
 await sttDone();
-check("speech: picking a language transcribes again in it",
-  (await sttMeta())!.startsWith("English · 0:4") && (await page.evaluate(() => location.hash)) === "#speech-to-text/en", (await sttMeta()) + " " + (await page.evaluate(() => location.hash)));
-await page.locator(stt + ".keywords").fill("Kubernetes, Nowak");
-await page.locator(stt + ".keywords").press("Enter");
-await page.waitForFunction(() => document.querySelector(".tool-speech-to-text .progress")!.classList.contains("on"));
+check(
+  "speech: picking a language transcribes again in it",
+  (await sttMeta())!.startsWith("English · 0:4") &&
+    (await page.evaluate(() => location.hash)) === "#speech-to-text/en",
+  `${await sttMeta()} ${await page.evaluate(() => location.hash)}`
+);
+await page.locator(`${stt}.keywords`).fill("Kubernetes, Nowak");
+await page.locator(`${stt}.keywords`).press("Enter");
+await page.waitForFunction(() =>
+  document
+    .querySelector(".tool-speech-to-text .progress")!
+    .classList.contains("on")
+);
 await sttDone();
-check("speech: keywords go in the Deep Link", (await page.evaluate(() => location.hash)) === "#speech-to-text/en.Kubernetes%2C%20Nowak", await page.evaluate(() => location.hash));
+check(
+  "speech: keywords go in the Deep Link",
+  (await page.evaluate(() => location.hash)) ===
+    "#speech-to-text/en.Kubernetes%2C%20Nowak",
+  await page.evaluate(() => location.hash)
+);
 
 // Cancel mid-way: the words so far stay, with a note saying where it stopped.
 // Clicked the moment the first Window lands, since the whole clip takes about two seconds.
 await page.evaluate(() => {
   const phase = document.querySelector(".tool-speech-to-text .phase")!;
   const obs = new MutationObserver(() => {
-    if (!/Transcribing \(0:[1-9]/.test(phase.textContent ?? "")) return;
+    if (!/Transcribing \(0:[1-9]/.test(phase.textContent ?? "")) {
+      return;
+    }
     obs.disconnect();
-    (document.querySelector(".tool-speech-to-text .cancel-btn") as HTMLElement).click();
+    (
+      document.querySelector(".tool-speech-to-text .cancel-btn") as HTMLElement
+    ).click();
   });
   obs.observe(phase, { childList: true, characterData: true, subtree: true });
 });
-await page.locator(stt + ".lang-select").selectOption("");
-await page.waitForFunction(() => document.querySelector(".tool-speech-to-text .note.on"), null, { timeout: 60000 });
-check("speech: cancel keeps the words so far and says where it stopped",
-  !(await sttProgress()) && /^Stopped at 0:\d\d of 0:46/.test((await page.locator(stt + ".note").textContent())!) && (await page.locator(stt + ".cue").count()) > 0,
-  (await page.locator(stt + ".note").textContent())!);
+await page.locator(`${stt}.lang-select`).selectOption("");
+await page.waitForFunction(
+  () => document.querySelector(".tool-speech-to-text .note.on"),
+  null,
+  { timeout: 60_000 }
+);
+check(
+  "speech: cancel keeps the words so far and says where it stopped",
+  !(await sttProgress()) &&
+    /^Stopped at 0:\d\d of 0:46/.test(
+      (await page.locator(`${stt}.note`).textContent())!
+    ) &&
+    (await page.locator(`${stt}.cue`).count()) > 0,
+  (await page.locator(`${stt}.note`).textContent())!
+);
 
 // The microphone: Chromium's fake device plays the English clip once.
-await page.locator(stt + ".record-btn").click();
-await page.waitForFunction(() => /quick brown fox/i.test([...document.querySelectorAll(".tool-speech-to-text .cue p, .tool-speech-to-text .pending")].map((p) => p.textContent).join(" ")), null, { timeout: 60000 });
-check("speech: the microphone is transcribed while it records",
-  (await page.locator(stt + ".record-btn").textContent()) === "Stop" && /^Recording 0:\d\d$/.test((await page.locator(stt + ".phase").textContent())!));
+await page.locator(`${stt}.record-btn`).click();
+await page.waitForFunction(
+  () =>
+    /quick brown fox/i.test(
+      [
+        ...document.querySelectorAll(
+          ".tool-speech-to-text .cue p, .tool-speech-to-text .pending"
+        ),
+      ]
+        .map((p) => p.textContent)
+        .join(" ")
+    ),
+  null,
+  { timeout: 60_000 }
+);
+check(
+  "speech: the microphone is transcribed while it records",
+  (await page.locator(`${stt}.record-btn`).textContent()) === "Stop" &&
+    /^Recording 0:\d\d$/.test(
+      (await page.locator(`${stt}.phase`).textContent())!
+    )
+);
 // Past the clip's end (5 s), so the speaker has finished when Stop is pressed.
-await page.waitForFunction(() => /^Recording 0:0[7-9]$/.test(document.querySelector(".tool-speech-to-text .phase")!.textContent ?? ""), null, { timeout: 30000 });
-await page.locator(stt + ".record-btn").click();
+await page.waitForFunction(
+  () =>
+    /^Recording 0:0[7-9]$/.test(
+      document.querySelector(".tool-speech-to-text .phase")!.textContent ?? ""
+    ),
+  null,
+  { timeout: 30_000 }
+);
+await page.locator(`${stt}.record-btn`).click();
 await sttDone();
 const recordedText = await sttText();
-check("speech: stopping finishes the Recording and makes it playable",
-  /quick brown fox jumps over the lazy dog\. Please turn off the kitchen lights/i.test(recordedText) &&
-  (await page.locator(stt + ".status").textContent()) === "Microphone recording" &&
-  (await page.evaluate(() => (document.querySelector(".tool-speech-to-text .player") as HTMLAudioElement).src.startsWith("blob:"))) &&
-  /^recording-\d{4}-\d\d-\d\d-\d{4}\.srt$/.test((await sttDownload("srt")).name),
-  recordedText);
+check(
+  "speech: stopping finishes the Recording and makes it playable",
+  /quick brown fox jumps over the lazy dog\. Please turn off the kitchen lights/i.test(
+    recordedText
+  ) &&
+    (await page.locator(`${stt}.status`).textContent()) ===
+      "Microphone recording" &&
+    (await page.evaluate(() =>
+      (
+        document.querySelector(
+          ".tool-speech-to-text .player"
+        ) as HTMLAudioElement
+      ).src.startsWith("blob:")
+    )) &&
+    /^recording-\d{4}-\d\d-\d\d-\d{4}\.srt$/.test(
+      (await sttDownload("srt")).name
+    ),
+  recordedText
+);
 
 // Second visit: the Deep Link restores the options, and the engine comes from IndexedDB.
 await page.goto("about:blank");
-await page.goto(url + "#speech-to-text/de.Berlin");
-await page.waitForFunction(() => (document.querySelector(".tool-speech-to-text .engines-text")!.textContent ?? "").startsWith("Engines cached"));
-check("speech: a Deep Link restores language and keywords",
-  (await page.locator(stt + ".lang-select").inputValue()) === "de" && (await page.locator(stt + ".keywords").inputValue()) === "Berlin");
+await page.goto(`${url}#speech-to-text/de.Berlin`);
+await page.waitForFunction(() =>
+  (
+    document.querySelector(".tool-speech-to-text .engines-text")!.textContent ??
+    ""
+  ).startsWith("Engines cached")
+);
+check(
+  "speech: a Deep Link restores language and keywords",
+  (await page.locator(`${stt}.lang-select`).inputValue()) === "de" &&
+    (await page.locator(`${stt}.keywords`).inputValue()) === "Berlin"
+);
 const hfRequests: string[] = [];
-const hfSpy = (r: { url(): string }) => { if (r.url().includes("huggingface.co")) hfRequests.push(r.url()); };
+const hfSpy = (r: { url: () => string }) => {
+  if (r.url().includes("huggingface.co")) {
+    hfRequests.push(r.url());
+  }
+};
 page.on("request", hfSpy);
 await dropSpeech("de");
 await sttDone();
 page.off("request", hfSpy);
-check("speech: second visit transcribes from the cached engine with no download",
-  hfRequests.length === 0 && /Berlin/.test(await sttText()) && (await sttMeta())!.startsWith("German · "), hfRequests.join(" ") + " " + (await sttMeta()));
-await page.evaluate(() => { localStorage.removeItem("html-tools:speech-to-text:language"); localStorage.removeItem("html-tools:speech-to-text:keywords"); });
+check(
+  "speech: second visit transcribes from the cached engine with no download",
+  hfRequests.length === 0 &&
+    /Berlin/.test(await sttText()) &&
+    (await sttMeta())!.startsWith("German · "),
+  `${hfRequests.join(" ")} ${await sttMeta()}`
+);
+await page.evaluate(() => {
+  localStorage.removeItem("html-tools:speech-to-text:language");
+  localStorage.removeItem("html-tools:speech-to-text:keywords");
+});
 
 // Big Text: the Message fitted as large as it goes, Slides, the Countdown,
 // and Present, from the button and from a Present Link.
 const bt = ".tool-big-text ";
-const btLink = (params: Record<string, string>) => url + "#big-text/" + new URLSearchParams(params).toString();
+const btLink = (params: Record<string, string>) =>
+  `${url}#big-text/${new URLSearchParams(params).toString()}`;
 /** Whether the Slide on screen fits its area, and would not at 4% larger. */
-const btFit = () => page.evaluate(() => {
-  const slide = document.querySelector(".tool-big-text .slide") as HTMLElement;
-  const text = slide.querySelector(".text") as HTMLElement;
-  const size = parseFloat(text.style.fontSize);
-  const fits = () => text.scrollHeight <= slide.clientHeight && text.scrollWidth <= text.clientWidth;
-  text.style.overflow = "hidden";
-  const now = fits();
-  text.style.fontSize = size * 1.04 + "px";
-  const bigger = fits();
-  text.style.fontSize = size + "px";
-  text.style.overflow = "";
-  return { size, now, bigger };
-});
-const btText = () => page.evaluate(() => (document.querySelector(".tool-big-text .slide .text") as HTMLElement).innerText.trim());
+const btFit = () =>
+  page.evaluate(() => {
+    const slide = document.querySelector(
+      ".tool-big-text .slide"
+    ) as HTMLElement;
+    const text = slide.querySelector(".text") as HTMLElement;
+    const size = Number.parseFloat(text.style.fontSize);
+    const fits = () =>
+      text.scrollHeight <= slide.clientHeight &&
+      text.scrollWidth <= text.clientWidth;
+    text.style.overflow = "hidden";
+    const now = fits();
+    text.style.fontSize = `${size * 1.04}px`;
+    const bigger = fits();
+    text.style.fontSize = `${size}px`;
+    text.style.overflow = "";
+    return { size, now, bigger };
+  });
+const btText = () =>
+  page.evaluate(() =>
+    (
+      document.querySelector(".tool-big-text .slide .text") as HTMLElement
+    ).innerText.trim()
+  );
 
-await page.goto(url + "#big-text");
-await page.waitForSelector(bt + ".stage");
-check("big text: nothing to show, nothing to present or share",
-  (await page.locator(bt + ".btn-present").isDisabled()) && (await page.locator(bt + ".btn-link").isDisabled()));
-await page.locator(bt + ".o-message").fill("# Welcome\n**Big** *words* ~~small~~ `x*y*` snake_case");
+await page.goto(`${url}#big-text`);
+await page.waitForSelector(`${bt}.stage`);
+check(
+  "big text: nothing to show, nothing to present or share",
+  (await page.locator(`${bt}.btn-present`).isDisabled()) &&
+    (await page.locator(`${bt}.btn-link`).isDisabled())
+);
+await page
+  .locator(`${bt}.o-message`)
+  .fill("# Welcome\n**Big** *words* ~~small~~ `x*y*` snake_case");
 const btFirst = await btFit();
-check("big text: the message is as large as it fits", btFirst.now && !btFirst.bigger && btFirst.size > 20, JSON.stringify(btFirst));
-check("big text: markdown subset renders", await page.evaluate(() => {
-  const t = document.querySelector(".tool-big-text .slide .text")!;
-  return t.querySelector(".h1")?.textContent === "Welcome" && t.querySelector("strong")?.textContent === "Big" &&
-    t.querySelector("em")?.textContent === "words" && t.querySelector("del")?.textContent === "small" &&
-    t.querySelector("code")?.textContent === "x*y*" && t.textContent!.includes("snake_case");
-}));
-check("big text: state goes in the deep link", await page.evaluate(() => location.hash.startsWith("#big-text/m=%23+Welcome")));
+check(
+  "big text: the message is as large as it fits",
+  btFirst.now && !btFirst.bigger && btFirst.size > 20,
+  JSON.stringify(btFirst)
+);
+check(
+  "big text: markdown subset renders",
+  await page.evaluate(() => {
+    const t = document.querySelector(".tool-big-text .slide .text")!;
+    return (
+      t.querySelector(".h1")?.textContent === "Welcome" &&
+      t.querySelector("strong")?.textContent === "Big" &&
+      t.querySelector("em")?.textContent === "words" &&
+      t.querySelector("del")?.textContent === "small" &&
+      t.querySelector("code")?.textContent === "x*y*" &&
+      t.textContent!.includes("snake_case")
+    );
+  })
+);
+check(
+  "big text: state goes in the deep link",
+  await page.evaluate(() => location.hash.startsWith("#big-text/m=%23+Welcome"))
+);
 
-await page.locator(bt + ".o-message").fill("Supercalifragilisticexpialidocious");
+await page
+  .locator(`${bt}.o-message`)
+  .fill("Supercalifragilisticexpialidocious");
 const btWord = await btFit();
-check("big text: a long word shrinks, never splits", btWord.now && !btWord.bigger &&
-  await page.evaluate(() => { const t = document.querySelector(".tool-big-text .slide .text") as HTMLElement; return t.getClientRects().length === 1 && t.offsetHeight < parseFloat(t.style.fontSize) * 1.5; }), JSON.stringify(btWord));
+check(
+  "big text: a long word shrinks, never splits",
+  btWord.now &&
+    !btWord.bigger &&
+    (await page.evaluate(() => {
+      const t = document.querySelector(
+        ".tool-big-text .slide .text"
+      ) as HTMLElement;
+      return (
+        t.getClientRects().length === 1 &&
+        t.offsetHeight < Number.parseFloat(t.style.fontSize) * 1.5
+      );
+    })),
+  JSON.stringify(btWord)
+);
 
 // Slides rotate on their own, and the preview follows the caret.
 await page.goto(btLink({ m: "One || Two || Three", secs: "0.5" }));
-await page.waitForFunction(() => document.querySelector(".tool-big-text .slide-pos")!.textContent === "2 / 3");
-check("big text: slides rotate", (await page.locator(bt + ".o-secs").isVisible()) && (await page.locator(bt + ".o-trans").isVisible()));
+await page.waitForFunction(
+  () =>
+    document.querySelector(".tool-big-text .slide-pos")!.textContent === "2 / 3"
+);
+check(
+  "big text: slides rotate",
+  (await page.locator(`${bt}.o-secs`).isVisible()) &&
+    (await page.locator(`${bt}.o-trans`).isVisible())
+);
 await page.goto(btLink({ m: "One || Two || Three", secs: "60" }));
-await page.locator(bt + ".o-message").click();
+await page.locator(`${bt}.o-message`).click();
 await page.keyboard.press("End");
-await page.waitForFunction(() => document.querySelector(".tool-big-text .slide-pos")!.textContent === "3 / 3");
-check("big text: the preview shows the slide under the caret", (await btText()) === "Three");
+await page.waitForFunction(
+  () =>
+    document.querySelector(".tool-big-text .slide-pos")!.textContent === "3 / 3"
+);
+check(
+  "big text: the preview shows the slide under the caret",
+  (await btText()) === "Three"
+);
 
 // Countdown: a Timer waits at full length in the preview and runs once presented.
 await page.goto(btLink({ m: "Back in {countdown}", timer: "10m" }));
-await page.waitForSelector(bt + ".cd");
-check("big text: a timer waits at full length", (await page.locator(bt + ".cd").textContent()) === "10m\u00a00s" && (await page.locator(bt + ".o-timer").inputValue()) === "10m");
-await page.locator(bt + ".btn-present").click();
-await page.waitForFunction(() => document.querySelector(".tool-big-text .cd")?.textContent === "9m\u00a059s", null, { timeout: 3000 });
+await page.waitForSelector(`${bt}.cd`);
+check(
+  "big text: a timer waits at full length",
+  (await page.locator(`${bt}.cd`).textContent()) === "10m\u00A00s" &&
+    (await page.locator(`${bt}.o-timer`).inputValue()) === "10m"
+);
+await page.locator(`${bt}.btn-present`).click();
+await page.waitForFunction(
+  () =>
+    document.querySelector(".tool-big-text .cd")?.textContent === "9m\u00A059s",
+  null,
+  { timeout: 3000 }
+);
 check("big text: presenting starts the timer", true);
 const btCover = await page.evaluate(() => {
-  const r = document.querySelector(".tool-big-text .stage")!.getBoundingClientRect();
-  return r.x === 0 && r.y === 0 && r.width === innerWidth && r.height === innerHeight && location.hash.endsWith("&show=1");
+  const r = document
+    .querySelector(".tool-big-text .stage")!
+    .getBoundingClientRect();
+  return (
+    r.x === 0 &&
+    r.y === 0 &&
+    r.width === innerWidth &&
+    r.height === innerHeight &&
+    location.hash.endsWith("&show=1")
+  );
 });
 check("big text: present covers the window and is in the link", btCover);
 await page.keyboard.press("Escape");
-await page.waitForFunction(() => !document.querySelector(".tool-big-text .stage")!.classList.contains("presenting"));
-check("big text: escape ends it, and the timer waits again",
-  (await page.locator(bt + ".cd").textContent()) === "10m\u00a00s" && !(await page.evaluate(() => location.hash)).includes("show=1"));
+await page.waitForFunction(
+  () =>
+    !document
+      .querySelector(".tool-big-text .stage")!
+      .classList.contains("presenting")
+);
+check(
+  "big text: escape ends it, and the timer waits again",
+  (await page.locator(`${bt}.cd`).textContent()) === "10m\u00A00s" &&
+    !(await page.evaluate(() => location.hash)).includes("show=1")
+);
 
 // At zero: Until in the past swaps the Slides with the Countdown for the end text.
-await page.goto(btLink({ m: "Sale ends in {countdown} || Visit us", until: "2020-01-01T00:00:00Z", end: "text", endtext: "**Sold out**" }));
-await page.waitForSelector(bt + ".slide strong");
-check("big text: at zero the end text takes the countdown's place", (await btText()) === "Sold out" && (await page.locator(bt + ".slide-pos").textContent()) === "1 / 2");
+await page.goto(
+  btLink({
+    m: "Sale ends in {countdown} || Visit us",
+    until: "2020-01-01T00:00:00Z",
+    end: "text",
+    endtext: "**Sold out**",
+  })
+);
+await page.waitForSelector(`${bt}.slide strong`);
+check(
+  "big text: at zero the end text takes the countdown's place",
+  (await btText()) === "Sold out" &&
+    (await page.locator(`${bt}.slide-pos`).textContent()) === "1 / 2"
+);
 await page.goto(btLink({ m: "Big news", timer: "5m" }));
-await page.waitForSelector(bt + ".slide");
-check("big text: a message without {countdown} says where it goes", (await page.locator(bt + ".note").textContent())!.includes("{countdown}"));
+await page.waitForSelector(`${bt}.slide`);
+check(
+  "big text: a message without {countdown} says where it goes",
+  (await page.locator(`${bt}.note`).textContent())!.includes("{countdown}")
+);
 
 // Copy link: a Present Link, without the Shell's query string.
-await page.goto(url + "?sidebar=collapsed#big-text/" + new URLSearchParams({ m: "Hi there" }).toString());
-await page.waitForSelector(bt + ".slide");
+await page.goto(
+  `${url}?sidebar=collapsed#big-text/${new URLSearchParams({
+    m: "Hi there",
+  }).toString()}`
+);
+await page.waitForSelector(`${bt}.slide`);
 const btCopied = await page.evaluate(() => {
   let out = "";
-  navigator.clipboard.writeText = async (t: string) => { out = t; };
+  navigator.clipboard.writeText = async (t: string) => {
+    out = t;
+  };
   (document.querySelector(".tool-big-text .btn-link") as HTMLElement).click();
   return new Promise<string>((resolve) => setTimeout(() => resolve(out), 50));
 });
-check("big text: copy link makes a present link", new URL(btCopied).search === "" && new URL(btCopied).hash === "#big-text/m=Hi+there&show=1", btCopied);
-check("big text: copy link says so", (await page.locator(bt + ".btn-link").textContent()) === "Copied");
+check(
+  "big text: copy link makes a present link",
+  new URL(btCopied).search === "" &&
+    new URL(btCopied).hash === "#big-text/m=Hi+there&show=1",
+  btCopied
+);
+check(
+  "big text: copy link says so",
+  (await page.locator(`${bt}.btn-link`).textContent()) === "Copied"
+);
 
 // A Present Link opens straight onto the display; arrows step, and leaving the Tool ends it.
 await page.goto(btLink({ m: "A || B", secs: "60", show: "1" }));
-await page.waitForSelector(bt + ".stage.presenting");
-check("big text: a present link opens presenting, with the full screen hint",
-  (await btText()) === "A" && (await page.locator(bt + ".hint").isVisible()) &&
-  (await page.locator(bt + ".stage").evaluate((s) => getComputedStyle(s).userSelect)) === "none");
+await page.waitForSelector(`${bt}.stage.presenting`);
+check(
+  "big text: a present link opens presenting, with the full screen hint",
+  (await btText()) === "A" &&
+    (await page.locator(`${bt}.hint`).isVisible()) &&
+    (await page
+      .locator(`${bt}.stage`)
+      .evaluate((s) => getComputedStyle(s).userSelect)) === "none"
+);
 await page.keyboard.press("ArrowRight");
-await page.waitForFunction(() => document.querySelector(".tool-big-text .slide-pos")!.textContent === "2 / 2");
+await page.waitForFunction(
+  () =>
+    document.querySelector(".tool-big-text .slide-pos")!.textContent === "2 / 2"
+);
 await page.keyboard.press("/");
-check("big text: keys step slides and stay away from the shell", !(await page.evaluate(() => document.body.classList.contains("drawer-open"))));
+check(
+  "big text: keys step slides and stay away from the shell",
+  !(await page.evaluate(() => document.body.classList.contains("drawer-open")))
+);
 await page.keyboard.press("f");
 await page.waitForFunction(() => !!document.fullscreenElement);
 await page.mouse.click(300, 300);
-await page.waitForFunction(() => document.querySelector(".tool-big-text .slide-pos")!.textContent === "1 / 2");
-check("big text: F goes full screen, and a click moves to the next slide", !!(await page.evaluate(() => document.fullscreenElement)));
+await page.waitForFunction(
+  () =>
+    document.querySelector(".tool-big-text .slide-pos")!.textContent === "1 / 2"
+);
+check(
+  "big text: F goes full screen, and a click moves to the next slide",
+  !!(await page.evaluate(() => document.fullscreenElement))
+);
 await page.keyboard.press("Escape");
 // Firefox clears fullscreenElement before it fires fullscreenchange, so wait for the presentation itself.
-await page.waitForFunction(() => !document.fullscreenElement && !document.querySelector(".tool-big-text .stage.presenting"));
-check("big text: escape ends it", !(await page.locator(bt + ".stage.presenting").count()) && !(await page.evaluate(() => location.hash)).includes("show=1"));
+await page.waitForFunction(
+  () =>
+    !document.fullscreenElement &&
+    !document.querySelector(".tool-big-text .stage.presenting")
+);
+check(
+  "big text: escape ends it",
+  !(await page.locator(`${bt}.stage.presenting`).count()) &&
+    !(await page.evaluate(() => location.hash)).includes("show=1")
+);
 await page.goto(btLink({ m: "A", show: "1" }));
-await page.waitForSelector(bt + ".stage.presenting");
+await page.waitForSelector(`${bt}.stage.presenting`);
 await page.mouse.click(300, 300);
-check("big text: with one slide, a click ends it", !(await page.locator(bt + ".stage.presenting").count()));
+check(
+  "big text: with one slide, a click ends it",
+  !(await page.locator(`${bt}.stage.presenting`).count())
+);
 await page.goto(btLink({ m: "A", show: "1" }));
-await page.waitForSelector(bt + ".stage.presenting");
-await page.evaluate(() => { location.hash = "uuid-generator"; });
-await page.waitForFunction(() => !document.querySelector(".tool-big-text .stage.presenting"));
+await page.waitForSelector(`${bt}.stage.presenting`);
+await page.evaluate(() => {
+  location.hash = "uuid-generator";
+});
+await page.waitForFunction(
+  () => !document.querySelector(".tool-big-text .stage.presenting")
+);
 check("big text: switching tools ends the presentation", true);
 
 // UUID Generator: one version 4 UUID on selection, another on Generate, and
 // both Copy and the value itself put it on the clipboard. No State, so the
 // Deep Link stays bare.
-const uuidValue = () => page.locator(".tool-uuid-generator .value").textContent();
-const V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
-await page.goto(url + "#uuid-generator");
+const uuidValue = () =>
+  page.locator(".tool-uuid-generator .value").textContent();
+const V4 =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+await page.goto(`${url}#uuid-generator`);
 await page.waitForSelector(".tool-uuid-generator .value");
 const firstUuid = (await uuidValue()) ?? "";
-check("uuid shows a version 4 UUID on selection", V4.test(firstUuid), firstUuid);
+check(
+  "uuid shows a version 4 UUID on selection",
+  V4.test(firstUuid),
+  firstUuid
+);
 await page.locator(".tool-uuid-generator .btn-generate").click();
 const secondUuid = (await uuidValue()) ?? "";
-check("uuid generate makes a different one", V4.test(secondUuid) && secondUuid !== firstUuid, secondUuid);
-check("uuid deep link carries no state", await page.evaluate(() => location.hash === "#uuid-generator"));
-const copiedVia = (selector: string) => page.evaluate((sel: string) => {
-  let out = "";
-  navigator.clipboard.writeText = async (t: string) => { out = t; };
-  (document.querySelector(sel) as HTMLElement).click();
-  return new Promise<string>((resolve) => setTimeout(() => resolve(out), 50));
-}, selector);
-check("uuid copy button copies it", (await copiedVia(".tool-uuid-generator .btn-copy")) === secondUuid);
-check("uuid copy button says so", (await page.locator(".tool-uuid-generator .btn-copy").textContent()) === "Copied");
-check("uuid clicking the value copies it", (await copiedVia(".tool-uuid-generator .value")) === secondUuid);
+check(
+  "uuid generate makes a different one",
+  V4.test(secondUuid) && secondUuid !== firstUuid,
+  secondUuid
+);
+check(
+  "uuid deep link carries no state",
+  await page.evaluate(() => location.hash === "#uuid-generator")
+);
+const copiedVia = (selector: string) =>
+  page.evaluate((sel: string) => {
+    let out = "";
+    navigator.clipboard.writeText = async (t: string) => {
+      out = t;
+    };
+    (document.querySelector(sel) as HTMLElement).click();
+    return new Promise<string>((resolve) => setTimeout(() => resolve(out), 50));
+  }, selector);
+check(
+  "uuid copy button copies it",
+  (await copiedVia(".tool-uuid-generator .btn-copy")) === secondUuid
+);
+check(
+  "uuid copy button says so",
+  (await page.locator(".tool-uuid-generator .btn-copy").textContent()) ===
+    "Copied"
+);
+check(
+  "uuid clicking the value copies it",
+  (await copiedVia(".tool-uuid-generator .value")) === secondUuid
+);
 check("uuid value says so", (await uuidValue()) === "Copied");
-await page.waitForFunction((u: string) => document.querySelector(".tool-uuid-generator .value")!.textContent === u, secondUuid);
+await page.waitForFunction(
+  (u: string) =>
+    document.querySelector(".tool-uuid-generator .value")!.textContent === u,
+  secondUuid
+);
 check("uuid value comes back after the flash", true);
 
 // Dual N-Back: an in-page player watches the board and listens in on Web
@@ -1214,158 +2656,347 @@ check("uuid value comes back after the flash", true);
 // short through the Deep Link: 5 + N² trials of a second each.
 const dnb = ".tool-dual-n-back ";
 const dnbOps: Record<number, string> = {};
-for (const op of ["add", "subtract", "multiply", "divide"]) dnbOps[Bun.file(`src/tools/dual-n-back/sounds/operations/${op}.mp3`).size] = op;
-check("dual n-back: the operation recordings differ in size, so the test can tell them apart", Object.keys(dnbOps).length === 4);
+for (const op of ["add", "subtract", "multiply", "divide"]) {
+  dnbOps[Bun.file(`src/tools/dual-n-back/sounds/operations/${op}.mp3`).size] =
+    op;
+}
+check(
+  "dual n-back: the operation recordings differ in size, so the test can tell them apart",
+  Object.keys(dnbOps).length === 4
+);
 type DnbStyle = "perfect" | "silent";
-const dnbPlay = (style: DnbStyle) => page.evaluate(([how, ops]) => {
-  const w = window as unknown as { dnbHeard: number[]; dnbPlayer?: MutationObserver; dnbTapped?: boolean };
-  w.dnbHeard = [];
-  w.dnbPlayer?.disconnect();
-  if (!w.dnbTapped) {
-    w.dnbTapped = true;
-    type Tagged = AudioBuffer & { dnbLen?: number };
-    const decode = BaseAudioContext.prototype.decodeAudioData;
-    BaseAudioContext.prototype.decodeAudioData = function (this: BaseAudioContext, data: ArrayBuffer) {
-      const len = data.byteLength;
-      return decode.call(this, data).then((buf: Tagged) => ((buf.dnbLen = len), buf));
-    } as typeof decode;
-    const start = AudioBufferSourceNode.prototype.start;
-    AudioBufferSourceNode.prototype.start = function (this: AudioBufferSourceNode, ...args: Parameters<typeof start>) {
-      w.dnbHeard.push((this.buffer as Tagged | null)?.dnbLen ?? 0);
-      return start.apply(this, args);
-    };
-  }
-  const host = document.querySelector(".tool-dual-n-back")!;
-  const n = Number(/(\d+)-Back/.exec(host.querySelector(".stage-title")!.textContent!)![1]);
-  const arithmetic = host.querySelector(".answer:not([hidden])") !== null;
-  const cells: number[] = [];
-  const sounds: number[] = [];
-  const numbers: number[] = [];
-  let heard = 0;
-  const key = (k: string) => document.dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true }));
-  const apply: Record<string, (a: number, b: number) => number> = { add: (a, b) => a + b, subtract: (a, b) => a - b, multiply: (a, b) => a * b, divide: (a, b) => a / b };
-  // A sound starts a moment after its trial is drawn, once its buffer is in hand; the player answers after both.
-  const answer = (cell: number, text: string) => {
-    const t = cells.length;
-    cells.push(cell);
-    const played = w.dnbHeard.slice(heard);
-    heard = w.dnbHeard.length;
-    if (arithmetic) {
-      numbers.push(Number(text));
-      if (how === "perfect" && t >= n) for (const c of String(apply[ops[played[0]!]!]!(numbers[t - n]!, numbers[t]!))) key(c);
-      return;
-    }
-    sounds.push(played[0] ?? 0);
-    if (how !== "perfect" || t < n) return;
-    if (cells[t] === cells[t - n]) key("a");
-    if (sounds[t] === sounds[t - n]) key("l");
-  };
-  w.dnbPlayer = new MutationObserver((records) => {
-    const stim = records.flatMap((r) => [...r.addedNodes]).find((x) => x instanceof HTMLElement && x.classList.contains("stim")) as HTMLElement | undefined;
-    if (stim) setTimeout(answer, 50, Number(stim.parentElement!.dataset.cell), stim.textContent ?? "");
-  });
-  w.dnbPlayer.observe(host.querySelector(".board")!, { childList: true, subtree: true });
-}, [style, dnbOps] as [DnbStyle, Record<number, string>]);
+const dnbPlay = (style: DnbStyle) =>
+  page.evaluate(
+    ([how, ops]) => {
+      const w = window as unknown as {
+        dnbHeard: number[];
+        dnbPlayer?: MutationObserver;
+        dnbTapped?: boolean;
+      };
+      w.dnbHeard = [];
+      w.dnbPlayer?.disconnect();
+      if (!w.dnbTapped) {
+        w.dnbTapped = true;
+        type Tagged = AudioBuffer & { dnbLen?: number };
+        const decode = BaseAudioContext.prototype.decodeAudioData;
+        BaseAudioContext.prototype.decodeAudioData = function decodeAudioData(
+          this: BaseAudioContext,
+          data: ArrayBuffer
+        ) {
+          const len = data.byteLength;
+          return decode
+            .call(this, data)
+            .then((buf: Tagged) => ((buf.dnbLen = len), buf));
+        } as typeof decode;
+        const { start } = AudioBufferSourceNode.prototype;
+        AudioBufferSourceNode.prototype.start = function (
+          this: AudioBufferSourceNode,
+          ...args: Parameters<typeof start>
+        ) {
+          w.dnbHeard.push((this.buffer as Tagged | null)?.dnbLen ?? 0);
+          return start.apply(this, args);
+        };
+      }
+      const host = document.querySelector(".tool-dual-n-back")!;
+      const n = Number(
+        /(\d+)-Back/.exec(host.querySelector(".stage-title")!.textContent!)![1]
+      );
+      const arithmetic = host.querySelector(".answer:not([hidden])") !== null;
+      const cells: number[] = [];
+      const sounds: number[] = [];
+      const numbers: number[] = [];
+      let heard = 0;
+      const key = (k: string) =>
+        document.dispatchEvent(
+          new KeyboardEvent("keydown", { key: k, bubbles: true })
+        );
+      const apply: Record<string, (a: number, b: number) => number> = {
+        add: (a, b) => a + b,
+        subtract: (a, b) => a - b,
+        multiply: (a, b) => a * b,
+        divide: (a, b) => a / b,
+      };
+      // A sound starts a moment after its trial is drawn, once its buffer is in hand; the player answers after both.
+      const answer = (cell: number, text: string) => {
+        const t = cells.length;
+        cells.push(cell);
+        const played = w.dnbHeard.slice(heard);
+        heard = w.dnbHeard.length;
+        if (arithmetic) {
+          numbers.push(Number(text));
+          if (how === "perfect" && t >= n) {
+            for (const c of String(
+              apply[ops[played[0]!]!]!(numbers[t - n]!, numbers[t]!)
+            )) {
+              key(c);
+            }
+          }
+          return;
+        }
+        sounds.push(played[0] ?? 0);
+        if (how !== "perfect" || t < n) {
+          return;
+        }
+        if (cells[t] === cells[t - n]) {
+          key("a");
+        }
+        if (sounds[t] === sounds[t - n]) {
+          key("l");
+        }
+      };
+      w.dnbPlayer = new MutationObserver((records) => {
+        const stim = records
+          .flatMap((r) => [...r.addedNodes])
+          .find(
+            (x) => x instanceof HTMLElement && x.classList.contains("stim")
+          ) as HTMLElement | undefined;
+        if (stim) {
+          setTimeout(
+            answer,
+            50,
+            Number(stim.parentElement!.dataset.cell),
+            stim.textContent ?? ""
+          );
+        }
+      });
+      w.dnbPlayer.observe(host.querySelector(".board")!, {
+        childList: true,
+        subtree: true,
+      });
+    },
+    [style, dnbOps] as [DnbStyle, Record<number, string>]
+  );
 const dnbResult = async () => {
-  await page.waitForSelector(dnb + ".overlay.result", { timeout: 60000 });
-  await page.evaluate(() => (window as unknown as { dnbPlayer?: MutationObserver }).dnbPlayer?.disconnect());
-  return (await page.locator(dnb + ".overlay").textContent()) ?? "";
+  await page.waitForSelector(`${dnb}.overlay.result`, { timeout: 60_000 });
+  await page.evaluate(() =>
+    (
+      window as unknown as { dnbPlayer?: MutationObserver }
+    ).dnbPlayer?.disconnect()
+  );
+  return (await page.locator(`${dnb}.overlay`).textContent()) ?? "";
 };
 
-await page.goto(url + "#dual-n-back/trials=5&secs=1");
-await page.waitForSelector(dnb + ".overlay.idle");
-check("dual n-back starts at Dual 2-back with 9 trials",
-  (await page.locator(dnb + ".stage-title").textContent()) === "Dual 2-Back" && (await page.locator(dnb + ".stage-meta").textContent())!.startsWith("9 trials"),
-  (await page.locator(dnb + ".stage-title").textContent()) + " | " + (await page.locator(dnb + ".stage-meta").textContent()));
+await page.goto(`${url}#dual-n-back/trials=5&secs=1`);
+await page.waitForSelector(`${dnb}.overlay.idle`);
+check(
+  "dual n-back starts at Dual 2-back with 9 trials",
+  (await page.locator(`${dnb}.stage-title`).textContent()) === "Dual 2-Back" &&
+    (await page.locator(`${dnb}.stage-meta`).textContent())!.startsWith(
+      "9 trials"
+    ),
+  `${await page.locator(`${dnb}.stage-title`).textContent()} | ${await page
+    .locator(`${dnb}.stage-meta`)
+    .textContent()}`
+);
 await dnbPlay("perfect");
 await page.keyboard.press("Space");
-await page.waitForFunction(() => document.querySelector(".tool-dual-n-back")!.classList.contains("running"));
-check("dual n-back: Space starts, and the setup is out of reach while it runs",
-  await page.evaluate(() => (document.querySelector(".tool-dual-n-back .setup") as HTMLElement).inert));
+await page.waitForFunction(() =>
+  document.querySelector(".tool-dual-n-back")!.classList.contains("running")
+);
+check(
+  "dual n-back: Space starts, and the setup is out of reach while it runs",
+  await page.evaluate(
+    () =>
+      (document.querySelector(".tool-dual-n-back .setup") as HTMLElement).inert
+  )
+);
 await page.keyboard.press("p");
-await page.waitForSelector(dnb + ".overlay.paused");
+await page.waitForSelector(`${dnb}.overlay.paused`);
 await page.waitForTimeout(1200);
-const pausedLeft = await page.locator(dnb + ".stage-meta").textContent();
+const pausedLeft = await page.locator(`${dnb}.stage-meta`).textContent();
 await page.keyboard.press("p");
-await page.waitForSelector(dnb + ".overlay.paused", { state: "hidden" });
-check("dual n-back: P pauses the clock and resumes it", pausedLeft === "9 trials" || pausedLeft === "9 left", pausedLeft ?? "");
+await page.waitForSelector(`${dnb}.overlay.paused`, { state: "hidden" });
+check(
+  "dual n-back: P pauses the clock and resumes it",
+  pausedLeft === "9 trials" || pausedLeft === "9 left",
+  pausedLeft ?? ""
+);
 const perfect = await dnbResult();
-check("dual n-back: a perfect session scores 100% and raises N", perfect.includes("100%") && perfect.includes("N-Back raised to 3") && /Position\d+–0/.test(perfect), perfect);
-check("dual n-back: the next session is 3-back, and the level shows it",
-  (await page.locator(dnb + ".stage-title").textContent()) === "Dual 3-Back" && (await page.locator(dnb + ".level-n").textContent()) === "3-back");
-check("dual n-back: today lists the session", (await page.locator(dnb + ".today-list li").count()) === 1 && (await page.locator(dnb + ".today-list li.up").count()) === 1);
-check("dual n-back: the session is kept across a reload", await page.evaluate(() => {
-  const h = JSON.parse(localStorage.getItem("html-tools:dual-n-back:history") ?? "[]");
-  return h.length === 1 && h[0].score === 100 && h[0].level.n === 3 && h[0].tallies.position1.misses === 0;
-}));
+check(
+  "dual n-back: a perfect session scores 100% and raises N",
+  perfect.includes("100%") &&
+    perfect.includes("N-Back raised to 3") &&
+    /Position\d+–0/.test(perfect),
+  perfect
+);
+check(
+  "dual n-back: the next session is 3-back, and the level shows it",
+  (await page.locator(`${dnb}.stage-title`).textContent()) === "Dual 3-Back" &&
+    (await page.locator(`${dnb}.level-n`).textContent()) === "3-back"
+);
+check(
+  "dual n-back: today lists the session",
+  (await page.locator(`${dnb}.today-list li`).count()) === 1 &&
+    (await page.locator(`${dnb}.today-list li.up`).count()) === 1
+);
+check(
+  "dual n-back: the session is kept across a reload",
+  await page.evaluate(() => {
+    const h = JSON.parse(
+      localStorage.getItem("html-tools:dual-n-back:history") ?? "[]"
+    );
+    return (
+      h.length === 1 &&
+      h[0].score === 100 &&
+      h[0].level.n === 3 &&
+      h[0].tallies.position1.misses === 0
+    );
+  })
+);
 
 // Manual: the player's N, never a level change, and a player who never
 // presses scores nothing.
-await page.goto(url + "#dual-n-back/manual=1&n=1&trials=5&secs=1");
-await page.waitForFunction(() => document.querySelector(".tool-dual-n-back .stage-title")!.textContent === "Dual 1-Back · Manual");
+await page.goto(`${url}#dual-n-back/manual=1&n=1&trials=5&secs=1`);
+await page.waitForFunction(
+  () =>
+    document.querySelector(".tool-dual-n-back .stage-title")!.textContent ===
+    "Dual 1-Back · Manual"
+);
 await dnbPlay("silent");
-await page.locator(dnb + ".start-btn").click();
+await page.locator(`${dnb}.start-btn`).click();
 const silent = await dnbResult();
-check("dual n-back: a manual session that never answers scores 0% and leaves the level", silent.includes("0%") && !silent.includes("N-Back"), silent);
-await page.locator(dnb + ".level-seg button", { hasText: "Automatic" }).click();
-check("dual n-back: back on Automatic, the level is still 3",
-  (await page.locator(dnb + ".level-n").textContent()) === "3-back" && (await page.evaluate(() => location.hash)) === "#dual-n-back/trials=5&secs=1");
+check(
+  "dual n-back: a manual session that never answers scores 0% and leaves the level",
+  silent.includes("0%") && !silent.includes("N-Back"),
+  silent
+);
+await page.locator(`${dnb}.level-seg button`, { hasText: "Automatic" }).click();
+check(
+  "dual n-back: back on Automatic, the level is still 3",
+  (await page.locator(`${dnb}.level-n`).textContent()) === "3-back" &&
+    (await page.evaluate(() => location.hash)) ===
+      "#dual-n-back/trials=5&secs=1"
+);
 
 // Arithmetic: typed answers, from the number on the board and the spoken operation.
-await page.goto(url + "#dual-n-back/mode=m&manual=1&n=1&trials=5&secs=1&ops=asm");
-await page.waitForFunction(() => document.querySelector(".tool-dual-n-back .stage-title")!.textContent === "Arithmetic 1-Back · Manual");
+await page.goto(
+  `${url}#dual-n-back/mode=m&manual=1&n=1&trials=5&secs=1&ops=asm`
+);
+await page.waitForFunction(
+  () =>
+    document.querySelector(".tool-dual-n-back .stage-title")!.textContent ===
+    "Arithmetic 1-Back · Manual"
+);
 await dnbPlay("perfect");
 await page.keyboard.press("Space");
 const arith = await dnbResult();
-check("dual n-back: arithmetic answered right scores 100%", arith.includes("100%"), arith);
+check(
+  "dual n-back: arithmetic answered right scores 100%",
+  arith.includes("100%"),
+  arith
+);
 
 // Self-paced: a trial waits for Enter; Stop discards the Session.
-await page.goto(url + "#dual-n-back/mode=pa-t&manual=1&n=1&trials=5");
-await page.waitForFunction(() => document.querySelector(".tool-dual-n-back .stage-title")!.textContent === "Self-paced Dual 1-Back · Manual");
+await page.goto(`${url}#dual-n-back/mode=pa-t&manual=1&n=1&trials=5`);
+await page.waitForFunction(
+  () =>
+    document.querySelector(".tool-dual-n-back .stage-title")!.textContent ===
+    "Self-paced Dual 1-Back · Manual"
+);
 await page.keyboard.press("Space");
-await page.waitForSelector(dnb + ".stim");
+await page.waitForSelector(`${dnb}.stim`);
 await page.waitForTimeout(3500);
-const waited = await page.locator(dnb + ".stage-meta").textContent();
+const waited = await page.locator(`${dnb}.stage-meta`).textContent();
 await page.keyboard.press("Enter");
-await page.waitForFunction(() => document.querySelector(".tool-dual-n-back .stage-meta")!.textContent === "5 left");
-check("dual n-back: self-paced waits for Enter", waited === "6 left" && (await page.locator(dnb + ".stim").count()) === 1, waited ?? "");
+await page.waitForFunction(
+  () =>
+    document.querySelector(".tool-dual-n-back .stage-meta")!.textContent ===
+    "5 left"
+);
+check(
+  "dual n-back: self-paced waits for Enter",
+  waited === "6 left" && (await page.locator(`${dnb}.stim`).count()) === 1,
+  waited ?? ""
+);
 await page.keyboard.press("Escape");
-await page.waitForSelector(dnb + ".overlay.idle");
-check("dual n-back: Stop discards the session", await page.evaluate(() => JSON.parse(localStorage.getItem("html-tools:dual-n-back:history")!).length === 3));
+await page.waitForSelector(`${dnb}.overlay.idle`);
+check(
+  "dual n-back: Stop discards the session",
+  await page.evaluate(
+    () =>
+      JSON.parse(localStorage.getItem("html-tools:dual-n-back:history")!)
+        .length === 3
+  )
+);
 
 // The mode toggles settle on a playable Mode and reach the Deep Link.
-await page.goto(url + "#dual-n-back/trials=5&secs=1");
-await page.locator(dnb + ".chip", { hasText: "Arithmetic" }).click();
-check("dual n-back: Arithmetic turns Sound off", (await page.locator(dnb + '.chip[data-toggle="sound"]').getAttribute("aria-pressed")) === "false" &&
-  (await page.evaluate(() => location.hash)).includes("mode=pm"));
-await page.locator(dnb + ".multi-seg button", { hasText: "3" }).click();
-check("dual n-back: three objects turn Arithmetic off and add a button per object",
-  (await page.evaluate(() => location.hash)).includes("mode=p-3") && (await page.locator(dnb + ".resp").count()) === 3);
+await page.goto(`${url}#dual-n-back/trials=5&secs=1`);
+await page.locator(`${dnb}.chip`, { hasText: "Arithmetic" }).click();
+check(
+  "dual n-back: Arithmetic turns Sound off",
+  (await page
+    .locator(`${dnb}.chip[data-toggle="sound"]`)
+    .getAttribute("aria-pressed")) === "false" &&
+    (await page.evaluate(() => location.hash)).includes("mode=pm")
+);
+await page.locator(`${dnb}.multi-seg button`, { hasText: "3" }).click();
+check(
+  "dual n-back: three objects turn Arithmetic off and add a button per object",
+  (await page.evaluate(() => location.hash)).includes("mode=p-3") &&
+    (await page.locator(`${dnb}.resp`).count()) === 3
+);
 
 // History: the chart, the table, export, clearing, and importing the export back.
-await page.goto(url + "#dual-n-back/trials=5&secs=1");
-await page.locator(dnb + ".view-seg button", { hasText: "History" }).click();
-await page.waitForSelector(dnb + ".chart svg");
-check("dual n-back history: the automatic session is charted, and both Dual sessions are listed",
-  (await page.locator(dnb + ".chart .dot").count()) === 2 && (await page.locator(dnb + ".sessions tbody tr").count()) === 2,
-  (await page.locator(dnb + ".chart .dot").count()) + " dots, " + (await page.locator(dnb + ".sessions tbody tr").count()) + " rows");
-const [dnbExport] = await Promise.all([page.waitForEvent("download"), page.locator(dnb + ".export-btn").click()]);
-const exported = JSON.parse(await new Response(await dnbExport.createReadStream() as unknown as ReadableStream).text());
-check("dual n-back history: export holds every session", exported.format === "html-tools/dual-n-back" && exported.sessions.length === 3, dnbExport.suggestedFilename());
-const exportFile = { name: "export.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(exported)) };
-await page.locator(dnb + ".import-input").setInputFiles(exportFile);
-await page.waitForSelector(dnb + ".history-note.ok");
-check("dual n-back history: importing what is already here adds nothing",
-  (await page.locator(dnb + ".history-note").textContent()) === "0 sessions added from export.json, 3 already here.", (await page.locator(dnb + ".history-note").textContent()) ?? "");
-await page.locator(dnb + ".clear-btn").click();
-await page.locator(dnb + ".confirm-ok").click();
-check("dual n-back history: clearing deletes every session and resets the level",
-  (await page.evaluate(() => localStorage.getItem("html-tools:dual-n-back:history"))) === "[]" && (await page.locator(dnb + ".level-n").textContent()) === "2-back");
-await page.locator(dnb + ".import-input").setInputFiles(exportFile);
-await page.waitForFunction(() => document.querySelector(".tool-dual-n-back .history-note")!.textContent!.startsWith("3 sessions added"));
-check("dual n-back history: the export brings every session and the level back",
-  (await page.locator(dnb + ".sessions tbody tr").count()) === 2 && (await page.locator(dnb + ".level-n").textContent()) === "3-back");
-await page.locator(dnb + ".view-seg button", { hasText: "Train" }).click();
+await page.goto(`${url}#dual-n-back/trials=5&secs=1`);
+await page.locator(`${dnb}.view-seg button`, { hasText: "History" }).click();
+await page.waitForSelector(`${dnb}.chart svg`);
+check(
+  "dual n-back history: the automatic session is charted, and both Dual sessions are listed",
+  (await page.locator(`${dnb}.chart .dot`).count()) === 2 &&
+    (await page.locator(`${dnb}.sessions tbody tr`).count()) === 2,
+  `${await page.locator(`${dnb}.chart .dot`).count()} dots, ${await page
+    .locator(`${dnb}.sessions tbody tr`)
+    .count()} rows`
+);
+const [dnbExport] = await Promise.all([
+  page.waitForEvent("download"),
+  page.locator(`${dnb}.export-btn`).click(),
+]);
+const exported = JSON.parse(
+  await new Response(
+    (await dnbExport.createReadStream()) as unknown as ReadableStream
+  ).text()
+);
+check(
+  "dual n-back history: export holds every session",
+  exported.format === "html-tools/dual-n-back" &&
+    exported.sessions.length === 3,
+  dnbExport.suggestedFilename()
+);
+const exportFile = {
+  name: "export.json",
+  mimeType: "application/json",
+  buffer: Buffer.from(JSON.stringify(exported)),
+};
+await page.locator(`${dnb}.import-input`).setInputFiles(exportFile);
+await page.waitForSelector(`${dnb}.history-note.ok`);
+check(
+  "dual n-back history: importing what is already here adds nothing",
+  (await page.locator(`${dnb}.history-note`).textContent()) ===
+    "0 sessions added from export.json, 3 already here.",
+  (await page.locator(`${dnb}.history-note`).textContent()) ?? ""
+);
+await page.locator(`${dnb}.clear-btn`).click();
+await page.locator(`${dnb}.confirm-ok`).click();
+check(
+  "dual n-back history: clearing deletes every session and resets the level",
+  (await page.evaluate(() =>
+    localStorage.getItem("html-tools:dual-n-back:history")
+  )) === "[]" &&
+    (await page.locator(`${dnb}.level-n`).textContent()) === "2-back"
+);
+await page.locator(`${dnb}.import-input`).setInputFiles(exportFile);
+await page.waitForFunction(() =>
+  document
+    .querySelector(".tool-dual-n-back .history-note")!
+    .textContent!.startsWith("3 sessions added")
+);
+check(
+  "dual n-back history: the export brings every session and the level back",
+  (await page.locator(`${dnb}.sessions tbody tr`).count()) === 2 &&
+    (await page.locator(`${dnb}.level-n`).textContent()) === "3-back"
+);
+await page.locator(`${dnb}.view-seg button`, { hasText: "Train" }).click();
 
 // Markdown Editor: the welcome Draft on a first visit, Preview with Contents
 // open, then edits that reach the preview, the stats, the draft, and the Deep
@@ -1373,135 +3004,269 @@ await page.locator(dnb + ".view-seg button", { hasText: "Train" }).click();
 // and a second visit fetches nothing. Contents jumps and follows the scroll;
 // the Light Document is a Preference that survives a reload.
 await page.goto("about:blank");
-await page.goto(url + "#markdown-editor");
+await page.goto(`${url}#markdown-editor`);
 const mv = ".tool-markdown-editor ";
 const mvHost = () => page.locator(mv.trim());
-await page.waitForSelector(mv + ".doc h1");
-check("markdown editor opens in Preview with Contents open",
+await page.waitForSelector(`${mv}.doc h1`);
+check(
+  "markdown editor opens in Preview with Contents open",
   (await mvHost().getAttribute("data-view")) === "preview" &&
-  (await mvHost().evaluate((el) => el.classList.contains("toc-open"))) &&
-  (await page.locator(mv + ".toc-link").count()) >= 8 &&
-  (await page.locator(mv + ".doc h1").textContent()) === "Markdown Editor");
-check("welcome draft renders a table, a task list, a callout, highlighted code, and a footnote",
-  (await page.locator(mv + ".doc table").count()) === 1 &&
-  (await page.locator(mv + ".doc li.task input[type=checkbox]").count()) === 2 &&
-  (await page.locator(mv + ".doc blockquote.callout-tip .callout-title").textContent()) === "Tip" &&
-  (await page.locator(mv + ".doc pre code.hljs .hljs-keyword").count()) >= 1 &&
-  (await page.locator(mv + ".doc .footnotes li").count()) === 1);
+    (await mvHost().evaluate((el) => el.classList.contains("toc-open"))) &&
+    (await page.locator(`${mv}.toc-link`).count()) >= 8 &&
+    (await page.locator(`${mv}.doc h1`).textContent()) === "Markdown Editor"
+);
+check(
+  "welcome draft renders a table, a task list, a callout, highlighted code, and a footnote",
+  (await page.locator(`${mv}.doc table`).count()) === 1 &&
+    (await page.locator(`${mv}.doc li.task input[type=checkbox]`).count()) ===
+      2 &&
+    (await page
+      .locator(`${mv}.doc blockquote.callout-tip .callout-title`)
+      .textContent()) === "Tip" &&
+    (await page.locator(`${mv}.doc pre code.hljs .hljs-keyword`).count()) >=
+      1 &&
+    (await page.locator(`${mv}.doc .footnotes li`).count()) === 1
+);
 
 // A code block's Copy button puts the block on the clipboard and says so briefly.
 await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
-await page.locator(mv + ".doc .code-wrap .copy-btn").first().click();
-await page.waitForFunction(() => document.querySelector(".tool-markdown-editor .doc .copy-btn")?.textContent === "Copied");
+await page.locator(`${mv}.doc .code-wrap .copy-btn`).first().click();
+await page.waitForFunction(
+  () =>
+    document.querySelector(".tool-markdown-editor .doc .copy-btn")
+      ?.textContent === "Copied"
+);
 const copiedText = await page.evaluate(() => navigator.clipboard.readText());
-check("copy button copies the code block", copiedText.startsWith("export function slug"), copiedText.slice(0, 40));
+check(
+  "copy button copies the code block",
+  copiedText.startsWith("export function slug"),
+  copiedText.slice(0, 40)
+);
 
 // Engines: the welcome Draft has math and a diagram, so both load, from the CDN the first time.
-await page.waitForFunction(() => document.querySelectorAll(".tool-markdown-editor .doc .katex").length >= 2, null, { timeout: 120000 });
-await page.waitForFunction(() => document.querySelector(".tool-markdown-editor .doc .mermaid-block svg"), null, { timeout: 120000 });
+await page.waitForFunction(
+  () =>
+    document.querySelectorAll(".tool-markdown-editor .doc .katex").length >= 2,
+  null,
+  { timeout: 120_000 }
+);
+await page.waitForFunction(
+  () => document.querySelector(".tool-markdown-editor .doc .mermaid-block svg"),
+  null,
+  { timeout: 120_000 }
+);
 check("math and diagrams render once their engines load", true);
 
 // Contents: a click jumps, the entry for the heading at the top is highlighted.
-await page.locator(mv + ".toc-link[data-id='md-callouts']").click();
-await page.waitForFunction(() => document.querySelector(".tool-markdown-editor .toc-link.active")?.getAttribute("data-id") === "md-callouts");
-check("contents jumps to the heading and highlights it",
-  (await page.locator(mv + ".preview-pane").evaluate((p) => p.scrollTop)) > 100);
+await page.locator(`${mv}.toc-link[data-id='md-callouts']`).click();
+await page.waitForFunction(
+  () =>
+    document.querySelector<HTMLElement>(
+      ".tool-markdown-editor .toc-link.active"
+    )?.dataset.id === "md-callouts"
+);
+check(
+  "contents jumps to the heading and highlights it",
+  (await page.locator(`${mv}.preview-pane`).evaluate((p) => p.scrollTop)) > 100
+);
 
 // Edit: the preview, the stats, the draft, and the Deep Link follow the editor.
-await page.locator(mv + ".seg button[data-mode=split]").click();
-await page.locator(mv + ".editor").fill("# Smoke\n\nSome *text* with `code`.\n\n## Second\n\n- [ ] todo\n");
-await page.waitForFunction(() => document.querySelector(".tool-markdown-editor .doc h1")?.textContent === "Smoke");
-await page.waitForFunction(() => JSON.parse(localStorage.getItem("html-tools:markdown-editor:draft") ?? "{}").text?.startsWith("# Smoke"));
-check("editing updates the preview, contents, stats, and draft",
-  (await page.locator(mv + ".toc-link").allTextContents()).join("|") === "Smoke|Second" &&
-  (await page.locator(mv + ".stat-words").textContent()) === "12 words");
-await page.locator(mv + ".filename").fill("notes");
-await page.locator(mv + ".filename").press("Enter");
-check("a renamed file gets its extension back", (await page.locator(mv + ".filename").inputValue()) === "notes.md");
-await page.waitForFunction(() => location.hash.startsWith("#markdown-editor/notes.md."));
+await page.locator(`${mv}.seg button[data-mode=split]`).click();
+await page
+  .locator(`${mv}.editor`)
+  .fill("# Smoke\n\nSome *text* with `code`.\n\n## Second\n\n- [ ] todo\n");
+await page.waitForFunction(
+  () =>
+    document.querySelector(".tool-markdown-editor .doc h1")?.textContent ===
+    "Smoke"
+);
+await page.waitForFunction(() =>
+  JSON.parse(
+    localStorage.getItem("html-tools:markdown-editor:draft") ?? "{}"
+  ).text?.startsWith("# Smoke")
+);
+check(
+  "editing updates the preview, contents, stats, and draft",
+  (await page.locator(`${mv}.toc-link`).allTextContents()).join("|") ===
+    "Smoke|Second" &&
+    (await page.locator(`${mv}.stat-words`).textContent()) === "12 words"
+);
+await page.locator(`${mv}.filename`).fill("notes");
+await page.locator(`${mv}.filename`).press("Enter");
+check(
+  "a renamed file gets its extension back",
+  (await page.locator(`${mv}.filename`).inputValue()) === "notes.md"
+);
+await page.waitForFunction(() =>
+  location.hash.startsWith("#markdown-editor/notes.md.")
+);
 const mvLink = await page.evaluate(() => location.href);
 
 // Light Document: a Preference, remembered, applied to the preview only.
-await page.locator(mv + ".light-btn").click();
-check("light document toggles the preview palette and is remembered",
-  (await page.locator(mv + ".preview-pane").evaluate((p) => p.classList.contains("light"))) &&
-  (await page.evaluate(() => localStorage.getItem("html-tools:markdown-editor:light"))) === "1");
+await page.locator(`${mv}.light-btn`).click();
+check(
+  "light document toggles the preview palette and is remembered",
+  (await page
+    .locator(`${mv}.preview-pane`)
+    .evaluate((p) => p.classList.contains("light"))) &&
+    (await page.evaluate(() =>
+      localStorage.getItem("html-tools:markdown-editor:light")
+    )) === "1"
+);
 
 // Second visit through the Deep Link: the document comes back with its name,
 // the mode and the light page come back from the Preferences, and the
 // engines come back from IndexedDB with nothing downloaded.
 const mvRequests: string[] = [];
-const mvSpy = (r: { url(): string }) => { if (r.url().startsWith("http")) mvRequests.push(r.url()); };
+const mvSpy = (r: { url: () => string }) => {
+  if (r.url().startsWith("http")) {
+    mvRequests.push(r.url());
+  }
+};
 page.on("request", mvSpy);
 await page.goto("about:blank");
 await page.goto(mvLink);
-await page.waitForFunction(() => document.querySelector(".tool-markdown-editor .doc h1")?.textContent === "Smoke");
-check("markdown deep link restores the draft, its name, and the preferences",
-  (await page.locator(mv + ".editor").inputValue()).startsWith("# Smoke") &&
-  (await page.locator(mv + ".filename").inputValue()) === "notes.md" &&
-  (await mvHost().getAttribute("data-view")) === "split" &&
-  (await page.locator(mv + ".preview-pane").evaluate((p) => p.classList.contains("light"))),
-  [(await page.locator(mv + ".editor").inputValue()).slice(0, 12), await page.locator(mv + ".filename").inputValue(), await mvHost().getAttribute("data-view"), await page.locator(mv + ".preview-pane").getAttribute("class")].join(" | "));
-await page.locator(mv + ".editor").fill("Inline $x^2$ and\n\n```mermaid\nflowchart LR\n  A --> B\n```\n");
-await page.waitForFunction(() => document.querySelector(".tool-markdown-editor .doc .mermaid-block svg") && document.querySelector(".tool-markdown-editor .doc .katex"));
+await page.waitForFunction(
+  () =>
+    document.querySelector(".tool-markdown-editor .doc h1")?.textContent ===
+    "Smoke"
+);
+check(
+  "markdown deep link restores the draft, its name, and the preferences",
+  (await page.locator(`${mv}.editor`).inputValue()).startsWith("# Smoke") &&
+    (await page.locator(`${mv}.filename`).inputValue()) === "notes.md" &&
+    (await mvHost().getAttribute("data-view")) === "split" &&
+    (await page
+      .locator(`${mv}.preview-pane`)
+      .evaluate((p) => p.classList.contains("light"))),
+  [
+    (await page.locator(`${mv}.editor`).inputValue()).slice(0, 12),
+    await page.locator(`${mv}.filename`).inputValue(),
+    await mvHost().getAttribute("data-view"),
+    await page.locator(`${mv}.preview-pane`).getAttribute("class"),
+  ].join(" | ")
+);
+await page
+  .locator(`${mv}.editor`)
+  .fill("Inline $x^2$ and\n\n```mermaid\nflowchart LR\n  A --> B\n```\n");
+await page.waitForFunction(
+  () =>
+    document.querySelector(".tool-markdown-editor .doc .mermaid-block svg") &&
+    document.querySelector(".tool-markdown-editor .doc .katex")
+);
 page.off("request", mvSpy);
-check("second visit renders math and diagrams from cached engines with no download", mvRequests.length === 0, mvRequests.join(" ").slice(0, 200));
+check(
+  "second visit renders math and diagrams from cached engines with no download",
+  mvRequests.length === 0,
+  mvRequests.join(" ").slice(0, 200)
+);
 
 // Find and replace: one match stepped to, replaced, the count following.
-await page.locator(mv + ".editor").fill("alpha beta alpha\n");
-await page.locator(mv + ".editor").click();
-await page.keyboard.press(process.platform === "darwin" ? "Meta+f" : "Control+f");
-await page.locator(mv + ".find-input").fill("alpha");
+await page.locator(`${mv}.editor`).fill("alpha beta alpha\n");
+await page.locator(`${mv}.editor`).click();
+await page.keyboard.press(
+  process.platform === "darwin" ? "Meta+f" : "Control+f"
+);
+await page.locator(`${mv}.find-input`).fill("alpha");
 await page.keyboard.press("Enter");
-check("find counts matches and keeps focus in the find box",
-  (await page.locator(mv + ".find-count").textContent()) === "2/2" &&
-  (await page.locator(mv + ".find-input").evaluate((i) => i === document.activeElement)));
-await page.locator(mv + ".replace-input").fill("gamma");
-await page.locator(mv + ".find-all").click();
-check("replace all rewrites the draft",
-  (await page.locator(mv + ".editor").inputValue()) === "gamma beta gamma\n" &&
-  (await page.locator(mv + ".find-count").textContent()) === "0/0");
-await page.locator(mv + ".find-close").click();
+check(
+  "find counts matches and keeps focus in the find box",
+  (await page.locator(`${mv}.find-count`).textContent()) === "2/2" &&
+    (await page
+      .locator(`${mv}.find-input`)
+      .evaluate((i) => i === document.activeElement))
+);
+await page.locator(`${mv}.replace-input`).fill("gamma");
+await page.locator(`${mv}.find-all`).click();
+check(
+  "replace all rewrites the draft",
+  (await page.locator(`${mv}.editor`).inputValue()) === "gamma beta gamma\n" &&
+    (await page.locator(`${mv}.find-count`).textContent()) === "0/0"
+);
+await page.locator(`${mv}.find-close`).click();
 
 // Mod+E trades Edit for Preview and back; the choice is remembered like the buttons'.
-await page.keyboard.press(process.platform === "darwin" ? "Meta+e" : "Control+e");
-check("mod+e switches to preview", (await mvHost().getAttribute("data-view")) === "preview");
-await page.keyboard.press(process.platform === "darwin" ? "Meta+e" : "Control+e");
-check("mod+e switches back to edit with the editor focused",
+await page.keyboard.press(
+  process.platform === "darwin" ? "Meta+e" : "Control+e"
+);
+check(
+  "mod+e switches to preview",
+  (await mvHost().getAttribute("data-view")) === "preview"
+);
+await page.keyboard.press(
+  process.platform === "darwin" ? "Meta+e" : "Control+e"
+);
+check(
+  "mod+e switches back to edit with the editor focused",
   (await mvHost().getAttribute("data-view")) === "edit" &&
-  (await page.locator(mv + ".editor").evaluate((t) => t === document.activeElement)) &&
-  (await page.evaluate(() => localStorage.getItem("html-tools:markdown-editor:view"))) === "edit");
+    (await page
+      .locator(`${mv}.editor`)
+      .evaluate((t) => t === document.activeElement)) &&
+    (await page.evaluate(() =>
+      localStorage.getItem("html-tools:markdown-editor:view")
+    )) === "edit"
+);
 
 // A hidden pane forgets where it was scrolled; the Tool remembers for it.
-await page.locator(mv + ".editor").fill("line\n".repeat(400));
-await page.locator(mv + ".editor").evaluate((t) => (t.scrollTop = 900));
-await page.keyboard.press(process.platform === "darwin" ? "Meta+e" : "Control+e");
-await page.keyboard.press(process.platform === "darwin" ? "Meta+e" : "Control+e");
-check("the editor keeps its scroll position across preview and back",
-  (await page.locator(mv + ".editor").evaluate((t) => t.scrollTop)) === 900);
+await page.locator(`${mv}.editor`).fill("line\n".repeat(400));
+await page.locator(`${mv}.editor`).evaluate((t) => (t.scrollTop = 900));
+await page.keyboard.press(
+  process.platform === "darwin" ? "Meta+e" : "Control+e"
+);
+await page.keyboard.press(
+  process.platform === "darwin" ? "Meta+e" : "Control+e"
+);
+check(
+  "the editor keeps its scroll position across preview and back",
+  (await page.locator(`${mv}.editor`).evaluate((t) => t.scrollTop)) === 900
+);
 
 // Format: the formatter is fetched on first use, the Draft comes back in one style, math untouched.
-await page.locator(mv + ".editor").fill("# Title\nText with *emph* and __strong__.\n* one\n* two\n\n|a|b|\n|-|-|\n|1|2|\n\nMath $x_1 * y$ stays.\n");
-await page.locator(mv + ".format-btn").click();
-await page.waitForFunction(() => (document.querySelector(".tool-markdown-editor .editor") as HTMLTextAreaElement).value.startsWith("# Title\n\n"), null, { timeout: 120000 });
-check("format rewrites the draft in one style",
-  (await page.locator(mv + ".editor").inputValue()) === "# Title\n\nText with _emph_ and **strong**.\n\n- one\n- two\n\n| a   | b   |\n| --- | --- |\n| 1   | 2   |\n\nMath $x_1 * y$ stays.\n",
-  JSON.stringify(await page.locator(mv + ".editor").inputValue()));
+await page
+  .locator(`${mv}.editor`)
+  .fill(
+    "# Title\nText with *emph* and __strong__.\n* one\n* two\n\n|a|b|\n|-|-|\n|1|2|\n\nMath $x_1 * y$ stays.\n"
+  );
+await page.locator(`${mv}.format-btn`).click();
+await page.waitForFunction(
+  () =>
+    (
+      document.querySelector(
+        ".tool-markdown-editor .editor"
+      ) as HTMLTextAreaElement
+    ).value.startsWith("# Title\n\n"),
+  null,
+  { timeout: 120_000 }
+);
+check(
+  "format rewrites the draft in one style",
+  (await page.locator(`${mv}.editor`).inputValue()) ===
+    "# Title\n\nText with _emph_ and **strong**.\n\n- one\n- two\n\n| a   | b   |\n| --- | --- |\n| 1   | 2   |\n\nMath $x_1 * y$ stays.\n",
+  JSON.stringify(await page.locator(`${mv}.editor`).inputValue())
+);
 
 // New asks first when there is text: the button becomes the confirmation, a second click discards.
-const beforeNew = await page.locator(mv + ".editor").inputValue();
-await page.locator(mv + ".new-btn").click();
-check("new arms a confirmation and keeps the text",
-  (await page.locator(mv + ".new-btn").textContent()) === "Discard?" &&
-  (await page.locator(mv + ".editor").inputValue()) === beforeNew && beforeNew.length > 0);
-await page.locator(mv + ".editor").click();
-check("clicking elsewhere disarms it", (await page.locator(mv + ".new-btn").textContent()) === "New");
-await page.locator(mv + ".new-btn").click();
-await page.locator(mv + ".new-btn").click();
-check("a second click starts a new document",
-  (await page.locator(mv + ".editor").inputValue()) === "" &&
-  (await page.locator(mv + ".filename").inputValue()) === "untitled.md" &&
-  (await page.locator(mv + ".new-btn").textContent()) === "New");
+const beforeNew = await page.locator(`${mv}.editor`).inputValue();
+await page.locator(`${mv}.new-btn`).click();
+check(
+  "new arms a confirmation and keeps the text",
+  (await page.locator(`${mv}.new-btn`).textContent()) === "Discard?" &&
+    (await page.locator(`${mv}.editor`).inputValue()) === beforeNew &&
+    beforeNew.length > 0
+);
+await page.locator(`${mv}.editor`).click();
+check(
+  "clicking elsewhere disarms it",
+  (await page.locator(`${mv}.new-btn`).textContent()) === "New"
+);
+await page.locator(`${mv}.new-btn`).click();
+await page.locator(`${mv}.new-btn`).click();
+check(
+  "a second click starts a new document",
+  (await page.locator(`${mv}.editor`).inputValue()) === "" &&
+    (await page.locator(`${mv}.filename`).inputValue()) === "untitled.md" &&
+    (await page.locator(`${mv}.new-btn`).textContent()) === "New"
+);
 
 // Python IDE: every Engine comes from the CDN on this first visit (about
 // 50 MB), the Interpreter boots in its worker, and a Run's output reaches
@@ -1510,89 +3275,226 @@ check("a second click starts a new document",
 // from its creation to its first diagnostics, so a restart that should not
 // happen, or a boot that has become slow, shows.
 await page.addInitScript(() => {
-  const log: { name: string; created: number; firstDiagnostics?: number }[] = [];
+  const log: { name: string; created: number; firstDiagnostics?: number }[] =
+    [];
   (globalThis as unknown as { smokeWorkers: typeof log }).smokeWorkers = log;
   const Native = globalThis.Worker;
   globalThis.Worker = class extends Native {
     constructor(script: string | URL, opts?: WorkerOptions) {
       super(script, opts);
-      const entry = { name: opts?.name ?? "", created: performance.now() } as (typeof log)[number];
+      const entry = {
+        name: opts?.name ?? "",
+        created: performance.now(),
+      } as (typeof log)[number];
       log.push(entry);
       this.addEventListener("message", (ev: MessageEvent) => {
-        if (entry.firstDiagnostics === undefined && ev.data?.method === "textDocument/publishDiagnostics") entry.firstDiagnostics = performance.now();
+        if (
+          entry.firstDiagnostics === undefined &&
+          ev.data?.method === "textDocument/publishDiagnostics"
+        ) {
+          entry.firstDiagnostics = performance.now();
+        }
       });
     }
   };
 });
-await page.goto(url + "#python-ide");
+await page.goto(`${url}#python-ide`);
 const ide = ".tool-python-ide ";
-const ideReady = () => page.waitForFunction(() =>
-  document.querySelector(".tool-python-ide .st-interp")?.textContent === "Ready" &&
-  (document.querySelector(".tool-python-ide .st-checker") as HTMLElement).dataset.state === "ready", null, { timeout: 300000 });
-const ideTerm = async () => (await page.locator(ide + ".xterm-rows").innerText()).trim();
+const ideReady = () =>
+  page.waitForFunction(
+    () =>
+      document.querySelector(".tool-python-ide .st-interp")?.textContent ===
+        "Ready" &&
+      (document.querySelector(".tool-python-ide .st-checker") as HTMLElement)
+        .dataset.state === "ready",
+    null,
+    { timeout: 300_000 }
+  );
+const ideTerm = async () =>
+  (await page.locator(`${ide}.xterm-rows`).innerText()).trim();
 await ideReady();
-check("ide: interpreter and checker boot", (await page.locator(ide + ".st-python").textContent())!.startsWith("Python 3."));
-check("ide: a fresh project opens on main.py", (await page.locator(ide + ".tab.active").textContent()) === "main.py");
-await page.locator(ide + ".run-btn").click();
-await page.waitForFunction(() => document.querySelector(".tool-python-ide .st-interp")?.textContent === "Ready", null, { timeout: 60000 });
-await page.waitForFunction(() => document.querySelector(".tool-python-ide .xterm-rows")?.textContent?.includes("Hello from Python!"));
-check("ide: run prints to the terminal, then the REPL returns", (await ideTerm()).endsWith(">>>"));
+check(
+  "ide: interpreter and checker boot",
+  (await page.locator(`${ide}.st-python`).textContent())!.startsWith(
+    "Python 3."
+  )
+);
+check(
+  "ide: a fresh project opens on main.py",
+  (await page.locator(`${ide}.tab.active`).textContent()) === "main.py"
+);
+await page.locator(`${ide}.run-btn`).click();
+await page.waitForFunction(
+  () =>
+    document.querySelector(".tool-python-ide .st-interp")?.textContent ===
+    "Ready",
+  null,
+  { timeout: 60_000 }
+);
+await page.waitForFunction(() =>
+  document
+    .querySelector(".tool-python-ide .xterm-rows")
+    ?.textContent?.includes("Hello from Python!")
+);
+check(
+  "ide: run prints to the terminal, then the REPL returns",
+  (await ideTerm()).endsWith(">>>")
+);
 await page.evaluate(() => {
-  const monaco = (globalThis as unknown as { monaco: { editor: { getModels(): { uri: { path: string }; setValue(v: string): void }[] } } }).monaco;
-  monaco.editor.getModels().find((m) => m.uri.path.endsWith("main.py"))!.setValue("import os\nx: int = 'a'\n");
+  const { monaco } = globalThis as unknown as {
+    monaco: {
+      editor: {
+        getModels: () => {
+          uri: { path: string };
+          setValue: (v: string) => void;
+        }[];
+      };
+    };
+  };
+  monaco.editor
+    .getModels()
+    .find((m) => m.uri.path.endsWith("main.py"))!
+    .setValue("import os\nx: int = 'a'\n");
 });
-await page.waitForFunction(() => {
-  const monaco = (globalThis as unknown as { monaco: { editor: { getModelMarkers(f: object): { owner: string }[] } } }).monaco;
-  const owners = new Set(monaco.editor.getModelMarkers({}).map((m) => m.owner));
-  return owners.has("ruff") && owners.has("lsp");
-}, null, { timeout: 30000 });
+await page.waitForFunction(
+  () => {
+    const { monaco } = globalThis as unknown as {
+      monaco: {
+        editor: { getModelMarkers: (f: object) => { owner: string }[] };
+      };
+    };
+    const owners = new Set(
+      monaco.editor.getModelMarkers({}).map((m) => m.owner)
+    );
+    return owners.has("ruff") && owners.has("lsp");
+  },
+  null,
+  { timeout: 30_000 }
+);
 check("ide: Ruff and Pyright both report on the file", true);
-await page.locator(ide + ".terminal-host").click();
+await page.locator(`${ide}.terminal-host`).click();
 await page.keyboard.type("6 * 7");
 await page.keyboard.press("Enter");
-await page.waitForFunction(() => document.querySelector(".tool-python-ide .xterm-rows")?.textContent?.includes("42"), null, { timeout: 30000 });
+await page.waitForFunction(
+  () =>
+    document
+      .querySelector(".tool-python-ide .xterm-rows")
+      ?.textContent?.includes("42"),
+  null,
+  { timeout: 30_000 }
+);
 check("ide: the REPL evaluates a line", true);
 // A file and a folder cannot share a name: the interpreter's filesystem would refuse the Project at boot.
 for (const btn of [".new-file-btn", ".new-folder-btn"]) {
   await page.locator(ide + btn).click();
-  await page.locator(ide + ".prompt-input").fill("pkg");
-  await page.locator(ide + ".prompt-ok").click();
+  await page.locator(`${ide}.prompt-input`).fill("pkg");
+  await page.locator(`${ide}.prompt-ok`).click();
   await page.waitForTimeout(300);
 }
-check("ide: a folder cannot take a file's name",
-  (await page.locator(ide + ".st-message").textContent()) === 'Cannot create pkg/: "pkg" is a file.' &&
-  (await page.locator(ide + ".tree-row.folder").count()) === 0);
+check(
+  "ide: a folder cannot take a file's name",
+  (await page.locator(`${ide}.st-message`).textContent()) ===
+    'Cannot create pkg/: "pkg" is a file.' &&
+    (await page.locator(`${ide}.tree-row.folder`).count()) === 0
+);
 // Tree operations, and what must follow them: the Deep Link, the Checker, the Interpreter, the folders.
-const ideText = (path: string) => page.evaluate((p) => {
-  const monaco = (globalThis as unknown as { monaco: { editor: { getModels(): { uri: { path: string }; getValue(): string }[] } } }).monaco;
-  return monaco.editor.getModels().find((m) => m.uri.path === "/project/" + p)?.getValue() ?? null;
-}, path);
-const ideSetText = (path: string, text: string) => page.evaluate(([p, t]) => {
-  const monaco = (globalThis as unknown as { monaco: { editor: { getModels(): { uri: { path: string }; setValue(v: string): void }[] } } }).monaco;
-  monaco.editor.getModels().find((m) => m.uri.path === "/project/" + p)!.setValue(t);
-}, [path, text] as const);
+const ideText = (path: string) =>
+  page.evaluate((p) => {
+    const { monaco } = globalThis as unknown as {
+      monaco: {
+        editor: {
+          getModels: () => { uri: { path: string }; getValue: () => string }[];
+        };
+      };
+    };
+    return (
+      monaco.editor
+        .getModels()
+        .find((m) => m.uri.path === `/project/${p}`)
+        ?.getValue() ?? null
+    );
+  }, path);
+const ideSetText = (path: string, text: string) =>
+  page.evaluate(
+    ([p, t]) => {
+      const { monaco } = globalThis as unknown as {
+        monaco: {
+          editor: {
+            getModels: () => {
+              uri: { path: string };
+              setValue: (v: string) => void;
+            }[];
+          };
+        };
+      };
+      monaco.editor
+        .getModels()
+        .find((m) => m.uri.path === `/project/${p}`)!
+        .setValue(t);
+    },
+    [path, text] as const
+  );
 const ideNew = async (btn: string, name: string) => {
   await page.locator(ide + btn).click();
-  await page.locator(ide + ".prompt-input").fill(name);
-  await page.locator(ide + ".prompt-ok").click();
-  await page.locator(ide + ".prompt-dialog").waitFor({ state: "hidden" });
-  await page.locator(ide + `.tree-row[data-path="${name}"]`).waitFor();
+  await page.locator(`${ide}.prompt-input`).fill(name);
+  await page.locator(`${ide}.prompt-ok`).click();
+  await page.locator(`${ide}.prompt-dialog`).waitFor({ state: "hidden" });
+  await page.locator(`${ide}.tree-row[data-path="${name}"]`).waitFor();
 };
 const ideMenu = async (path: string, label: string) => {
-  await page.locator(ide + `.tree-row[data-path="${path}"]`).click({ button: "right" });
-  await page.locator(ide + ".context-menu button").filter({ hasText: new RegExp("^" + label + "$") }).click();
+  await page
+    .locator(`${ide}.tree-row[data-path="${path}"]`)
+    .click({ button: "right" });
+  await page
+    .locator(`${ide}.context-menu button`)
+    .filter({ hasText: new RegExp(`^${label}$`) })
+    .click();
 };
-const ideTree = () => page.evaluate(() => [...document.querySelectorAll(".tool-python-ide .tree-row")].map((r) => (r as HTMLElement).dataset.path!).toSorted());
+const ideTree = () =>
+  page.evaluate(() =>
+    [...document.querySelectorAll(".tool-python-ide .tree-row")]
+      .map((r) => (r as HTMLElement).dataset.path!)
+      .toSorted()
+  );
 const ideRun = async (file: string, until: string) => {
-  await page.locator(ide + `.tree-row.file[data-path="${file}"]`).click();
-  await page.locator(ide + ".run-btn").click();
-  await page.waitForFunction((s) => document.querySelector(".tool-python-ide .xterm-rows")?.textContent?.includes(s), until, { timeout: 30000 });
-  await page.waitForFunction(() => document.querySelector(".tool-python-ide .st-interp")?.textContent === "Ready", null, { timeout: 60000 });
+  await page.locator(`${ide}.tree-row.file[data-path="${file}"]`).click();
+  await page.locator(`${ide}.run-btn`).click();
+  await page.waitForFunction(
+    (s) =>
+      document
+        .querySelector(".tool-python-ide .xterm-rows")
+        ?.textContent?.includes(s),
+    until,
+    { timeout: 30_000 }
+  );
+  await page.waitForFunction(
+    () =>
+      document.querySelector(".tool-python-ide .st-interp")?.textContent ===
+      "Ready",
+    null,
+    { timeout: 60_000 }
+  );
 };
 // A completion accepted replaces the word typed so far: Pyright's items carry no edit of their own.
 await page.evaluate(() => {
-  const monaco = (globalThis as unknown as { monaco: { editor: { getModels(): { uri: { path: string }; setValue(v: string): void }[]; getEditors(): { setModel(m: unknown): void; setPosition(p: unknown): void; focus(): void }[] } } }).monaco;
-  const model = monaco.editor.getModels().find((m) => m.uri.path.endsWith("main.py"))!;
+  const { monaco } = globalThis as unknown as {
+    monaco: {
+      editor: {
+        getModels: () => {
+          uri: { path: string };
+          setValue: (v: string) => void;
+        }[];
+        getEditors: () => {
+          setModel: (m: unknown) => void;
+          setPosition: (p: unknown) => void;
+          focus: () => void;
+        }[];
+      };
+    };
+  };
+  const model = monaco.editor
+    .getModels()
+    .find((m) => m.uri.path.endsWith("main.py"))!;
   model.setValue("");
   const editor = monaco.editor.getEditors()[0]!;
   editor.setModel(model);
@@ -1600,57 +3502,112 @@ await page.evaluate(() => {
   editor.focus();
 });
 await page.keyboard.type("import collec", { delay: 40 });
-await page.waitForSelector(ide + ".suggest-widget.visible", { timeout: 30000 });
-await page.waitForFunction(() => document.querySelector(".tool-python-ide .suggest-widget .monaco-list-row.focused .label-name")?.textContent === "collections", null, { timeout: 30000 });
+await page.waitForSelector(`${ide}.suggest-widget.visible`, {
+  timeout: 30_000,
+});
+await page.waitForFunction(
+  () =>
+    document.querySelector(
+      ".tool-python-ide .suggest-widget .monaco-list-row.focused .label-name"
+    )?.textContent === "collections",
+  null,
+  { timeout: 30_000 }
+);
 await page.keyboard.press("Tab");
 await page.waitForTimeout(300);
-check("ide: an accepted completion replaces the word typed", (await ideText("main.py")) === "import collections", JSON.stringify(await ideText("main.py")));
+check(
+  "ide: an accepted completion replaces the word typed",
+  (await ideText("main.py")) === "import collections",
+  JSON.stringify(await ideText("main.py"))
+);
 page.on("dialog", (d) => void d.accept());
-await page.locator(ide + '.tree-row.file[data-path="main.py"]').click();
+await page.locator(`${ide}.tree-row.file[data-path="main.py"]`).click();
 await ideMenu("main.py", "Rename");
-await page.locator(ide + ".prompt-input").fill("app.py");
-await page.locator(ide + ".prompt-ok").click();
-await page.locator(ide + '.tree-row[data-path="app.py"]').waitFor();
-check("ide: the Deep Link follows a rename of the active file", decodeURIComponent(await page.evaluate(() => location.hash)).endsWith(":app.py") &&
-  (await page.locator(ide + ".tab.active").textContent()) === "app.py");
+await page.locator(`${ide}.prompt-input`).fill("app.py");
+await page.locator(`${ide}.prompt-ok`).click();
+await page.locator(`${ide}.tree-row[data-path="app.py"]`).waitFor();
+check(
+  "ide: the Deep Link follows a rename of the active file",
+  decodeURIComponent(await page.evaluate(() => location.hash)).endsWith(
+    ":app.py"
+  ) && (await page.locator(`${ide}.tab.active`).textContent()) === "app.py"
+);
 await ideNew(".new-file-btn", "My File.py");
 await ideSetText("My File.py", 'x: int = "a"\n');
-await page.waitForFunction(() => {
-  const monaco = (globalThis as unknown as { monaco: { editor: { getModelMarkers(f: object): { owner: string; resource: { path: string } }[] } } }).monaco;
-  return monaco.editor.getModelMarkers({}).some((m) => m.owner === "lsp" && m.resource.path === "/project/My File.py");
-}, null, { timeout: 30000 });
+await page.waitForFunction(
+  () => {
+    const { monaco } = globalThis as unknown as {
+      monaco: {
+        editor: {
+          getModelMarkers: (
+            f: object
+          ) => { owner: string; resource: { path: string } }[];
+        };
+      };
+    };
+    return monaco.editor
+      .getModelMarkers({})
+      .some(
+        (m) => m.owner === "lsp" && m.resource.path === "/project/My File.py"
+      );
+  },
+  null,
+  { timeout: 30_000 }
+);
 check("ide: Pyright reports on a file with a space in its name", true);
 await ideNew(".new-file-btn", "lib/util.py");
 await ideSetText("lib/util.py", "V = 'folder'\n");
 // The Checker's worker needs encoded URIs, but Monaco retains the raw URI in a request
 // and uses it again when a result such as document highlights comes back.
 await ideSetText("My File.py", "value = 1\nprint(value)\n");
-await page.locator(ide + '.tree-row.file[data-path="My File.py"]').click();
+await page.locator(`${ide}.tree-row.file[data-path="My File.py"]`).click();
 const ideErrorsBeforeSpaceMove = errors.length;
 await page.evaluate(() => {
-  const target = document.querySelector('.tool-python-ide .tree-row.folder[data-path="lib"]')!;
+  const target = document.querySelector(
+    '.tool-python-ide .tree-row.folder[data-path="lib"]'
+  )!;
   const dt = new DataTransfer();
   dt.setData("text/x-pyide-path", "My File.py");
-  target.dispatchEvent(new DragEvent("drop", { dataTransfer: dt, bubbles: true, cancelable: true }));
+  target.dispatchEvent(
+    new DragEvent("drop", { dataTransfer: dt, bubbles: true, cancelable: true })
+  );
 });
-await page.locator(ide + '.tree-row.file[data-path="lib/My File.py"]').waitFor();
+await page
+  .locator(`${ide}.tree-row.file[data-path="lib/My File.py"]`)
+  .waitFor();
 await page.evaluate(() => {
-  const monaco = (globalThis as unknown as { monaco: { editor: { getEditors(): { setPosition(p: { lineNumber: number; column: number }): void }[] } } }).monaco;
+  const { monaco } = globalThis as unknown as {
+    monaco: {
+      editor: {
+        getEditors: () => {
+          setPosition: (p: { lineNumber: number; column: number }) => void;
+        }[];
+      };
+    };
+  };
   monaco.editor.getEditors()[0]?.setPosition({ lineNumber: 1, column: 2 });
 });
 await page.waitForTimeout(1000);
-check("ide: moving an open file with a space keeps Checker answers on its model",
+check(
+  "ide: moving an open file with a space keeps Checker answers on its model",
   errors.length === ideErrorsBeforeSpaceMove &&
-  (await ideText("lib/My File.py")) === "value = 1\nprint(value)\n" &&
-  (await page.locator(ide + ".tab.active").getAttribute("title")) === "lib/My File.py",
-  errors.slice(ideErrorsBeforeSpaceMove).join(" | "));
+    (await ideText("lib/My File.py")) === "value = 1\nprint(value)\n" &&
+    (await page.locator(`${ide}.tab.active`).getAttribute("title")) ===
+      "lib/My File.py",
+  errors.slice(ideErrorsBeforeSpaceMove).join(" | ")
+);
 await page.evaluate(() => {
   const dt = new DataTransfer();
   dt.setData("text/x-pyide-path", "lib/My File.py");
-  document.querySelector(".tool-python-ide .tree")!
-    .dispatchEvent(new DragEvent("drop", { dataTransfer: dt, bubbles: true, cancelable: true }));
+  document.querySelector(".tool-python-ide .tree")!.dispatchEvent(
+    new DragEvent("drop", {
+      dataTransfer: dt,
+      bubbles: true,
+      cancelable: true,
+    })
+  );
 });
-await page.locator(ide + '.tree-row.file[data-path="My File.py"]').waitFor();
+await page.locator(`${ide}.tree-row.file[data-path="My File.py"]`).waitFor();
 await ideNew(".new-file-btn", "recreate.py");
 await ideSetText("recreate.py", "OLD = True\n");
 await ideNew(".new-file-btn", "flip.txt");
@@ -1658,123 +3615,332 @@ await ideSetText("flip.txt", "x".repeat(256 * 1024));
 await ideSetText("app.py", "import lib.util\nprint('via', lib.util.V)\n");
 await ideRun("app.py", "via folder");
 await ideMenu("lib", "Rename");
-await page.locator(ide + ".prompt-input").fill("lib_old");
-await page.locator(ide + ".prompt-ok").click();
+await page.locator(`${ide}.prompt-input`).fill("lib_old");
+await page.locator(`${ide}.prompt-ok`).click();
 await ideNew(".new-file-btn", "lib.py");
 await ideSetText("lib.py", "V = 'module'\n");
-await ideSetText("app.py", "import lib, os, time\nos.makedirs('made/deep')\nopen('flip.txt', 'wb').write(bytes([0, 1, 2, 255]))\ntime.sleep(1.5)\nprint('via', lib.V)\n");
-await page.locator(ide + '.tree-row.file[data-path="app.py"]').click();
-await page.locator(ide + ".run-btn").click();
-await page.waitForFunction(() => document.querySelector(".tool-python-ide .st-interp")?.textContent === "Running", null, { timeout: 30000 });
+await ideSetText(
+  "app.py",
+  "import lib, os, time\nos.makedirs('made/deep')\nopen('flip.txt', 'wb').write(bytes([0, 1, 2, 255]))\ntime.sleep(1.5)\nprint('via', lib.V)\n"
+);
+await page.locator(`${ide}.tree-row.file[data-path="app.py"]`).click();
+await page.locator(`${ide}.run-btn`).click();
+await page.waitForFunction(
+  () =>
+    document.querySelector(".tool-python-ide .st-interp")?.textContent ===
+    "Running",
+  null,
+  { timeout: 30_000 }
+);
 // Two edits: the first is saved while the program still runs, the second is still in its debounce when it ends.
 // A file removed from the Interpreter during the Run and recreated in the Tree must not be removed again by the Run's snapshot.
 await page.waitForTimeout(150);
 await ideSetText("lib.py", "V = 'module'\nTYPED_DURING_RUN = 1\n");
 await ideMenu("recreate.py", "Delete");
-await page.locator(ide + '.tree-row[data-path="recreate.py"]').waitFor({ state: "hidden" });
+await page
+  .locator(`${ide}.tree-row[data-path="recreate.py"]`)
+  .waitFor({ state: "hidden" });
 await ideNew(".new-file-btn", "recreate.py");
 await ideSetText("recreate.py", "NEW = True\n");
 await page.waitForTimeout(800);
 await ideSetText("lib.py", "V = 'module'\nTYPED_DURING_RUN = True\n");
-await page.waitForFunction(() => document.querySelector(".tool-python-ide .xterm-rows")?.textContent?.includes("via module"), null, { timeout: 30000 });
-await page.waitForFunction(() => document.querySelector(".tool-python-ide .st-interp")?.textContent === "Ready", null, { timeout: 60000 });
+await page.waitForFunction(
+  () =>
+    document
+      .querySelector(".tool-python-ide .xterm-rows")
+      ?.textContent?.includes("via module"),
+  null,
+  { timeout: 30_000 }
+);
+await page.waitForFunction(
+  () =>
+    document.querySelector(".tool-python-ide .st-interp")?.textContent ===
+    "Ready",
+  null,
+  { timeout: 60_000 }
+);
 await page.waitForTimeout(400);
 check("ide: a renamed package does not shadow a new module of its name", true);
-check("ide: an edit typed during a Run stays", (await ideText("lib.py")) === "V = 'module'\nTYPED_DURING_RUN = True\n", JSON.stringify(await ideText("lib.py")));
-check("ide: a file deleted and recreated during a Run stays",
-  (await ideText("recreate.py")) === "NEW = True\n", JSON.stringify(await ideText("recreate.py")));
-check("ide: a Run can rewrite a just-edited text file as binary",
-  (await ideText("flip.txt")) === null && (await page.locator(ide + '.tree-row.file[data-path="flip.txt"]').count()) === 1,
-  JSON.stringify(await ideText("flip.txt")));
-await page.locator(ide + '.tree-row.folder[data-path="made"]').click();
-check("ide: a program's folders reach the Tree", (await ideTree()).includes("made/deep"), (await ideTree()).join(", "));
+check(
+  "ide: an edit typed during a Run stays",
+  (await ideText("lib.py")) === "V = 'module'\nTYPED_DURING_RUN = True\n",
+  JSON.stringify(await ideText("lib.py"))
+);
+check(
+  "ide: a file deleted and recreated during a Run stays",
+  (await ideText("recreate.py")) === "NEW = True\n",
+  JSON.stringify(await ideText("recreate.py"))
+);
+check(
+  "ide: a Run can rewrite a just-edited text file as binary",
+  (await ideText("flip.txt")) === null &&
+    (await page
+      .locator(`${ide}.tree-row.file[data-path="flip.txt"]`)
+      .count()) === 1,
+  JSON.stringify(await ideText("flip.txt"))
+);
+await page.locator(`${ide}.tree-row.folder[data-path="made"]`).click();
+check(
+  "ide: a program's folders reach the Tree",
+  (await ideTree()).includes("made/deep"),
+  (await ideTree()).join(", ")
+);
 await ideMenu("lib_old/util.py", "Delete");
-await page.waitForFunction(() => !document.querySelector('.tool-python-ide .tree-row[data-path="lib_old/util.py"]'));
-check("ide: deleting the last file leaves its folder", (await ideTree()).includes("lib_old"), (await ideTree()).join(", "));
+await page.waitForFunction(
+  () =>
+    !document.querySelector(
+      '.tool-python-ide .tree-row[data-path="lib_old/util.py"]'
+    )
+);
+check(
+  "ide: deleting the last file leaves its folder",
+  (await ideTree()).includes("lib_old"),
+  (await ideTree()).join(", ")
+);
 await ideMenu("lib_old", "Delete");
-await page.waitForFunction(() => !document.querySelector('.tool-python-ide .tree-row[data-path="lib_old"]'));
-await ideSetText("app.py", "import os\nprint('recreated', open('recreate.py').read().strip())\nprint('binary', list(open('flip.txt', 'rb').read()))\nprint('dirs', sorted(d for d, _, _ in os.walk('.')))\n");
+await page.waitForFunction(
+  () =>
+    !document.querySelector('.tool-python-ide .tree-row[data-path="lib_old"]')
+);
+await ideSetText(
+  "app.py",
+  "import os\nprint('recreated', open('recreate.py').read().strip())\nprint('binary', list(open('flip.txt', 'rb').read()))\nprint('dirs', sorted(d for d, _, _ in os.walk('.')))\n"
+);
 await ideRun("app.py", "dirs [");
-check("ide: the recreated file reaches the Interpreter", (await ideTerm()).includes("recreated NEW = True"), (await ideTerm()).split("\n").slice(-5).join(" | "));
-check("ide: the binary rewrite reaches the Interpreter", (await ideTerm()).includes("binary [0, 1, 2, 255]"), (await ideTerm()).split("\n").slice(-5).join(" | "));
-check("ide: the Interpreter's folders match the Tree", (await ideTerm()).includes("dirs ['.', './made', './made/deep']"), (await ideTerm()).split("\n").slice(-5).join(" | "));
+check(
+  "ide: the recreated file reaches the Interpreter",
+  (await ideTerm()).includes("recreated NEW = True"),
+  (await ideTerm()).split("\n").slice(-5).join(" | ")
+);
+check(
+  "ide: the binary rewrite reaches the Interpreter",
+  (await ideTerm()).includes("binary [0, 1, 2, 255]"),
+  (await ideTerm()).split("\n").slice(-5).join(" | ")
+);
+check(
+  "ide: the Interpreter's folders match the Tree",
+  (await ideTerm()).includes("dirs ['.', './made', './made/deep']"),
+  (await ideTerm()).split("\n").slice(-5).join(" | ")
+);
 // An edit made right before a reload is journaled and comes back.
 await ideSetText("app.py", "print('edited just before the reload')\n");
 await page.reload();
 await ideReady();
-check("ide: the project comes back after a reload with its last edit", (await ideText("app.py")) === "print('edited just before the reload')\n", JSON.stringify(await ideText("app.py")));
-check("ide: the second boot downloaded nothing", (await page.locator(ide + ".st-engine").textContent()) === "");
+check(
+  "ide: the project comes back after a reload with its last edit",
+  (await ideText("app.py")) === "print('edited just before the reload')\n",
+  JSON.stringify(await ideText("app.py"))
+);
+check(
+  "ide: the second boot downloaded nothing",
+  (await page.locator(`${ide}.st-engine`).textContent()) === ""
+);
 // The Checker's boot, from its worker's creation to its first diagnostics: about a second here.
 type WorkerLog = { name: string; created: number; firstDiagnostics?: number }[];
-const checkerWorkers = () => page.evaluate(() => (globalThis as unknown as { smokeWorkers: WorkerLog }).smokeWorkers.filter((w) => w.name === "pyright-foreground"));
-await page.waitForFunction(() => (globalThis as unknown as { smokeWorkers: WorkerLog }).smokeWorkers.some((w) => w.name === "pyright-foreground" && w.firstDiagnostics !== undefined), null, { timeout: 30000 });
+const checkerWorkers = () =>
+  page.evaluate(() =>
+    (globalThis as unknown as { smokeWorkers: WorkerLog }).smokeWorkers.filter(
+      (w) => w.name === "pyright-foreground"
+    )
+  );
+await page.waitForFunction(
+  () =>
+    (globalThis as unknown as { smokeWorkers: WorkerLog }).smokeWorkers.some(
+      (w) => w.name === "pyright-foreground" && w.firstDiagnostics !== undefined
+    ),
+  null,
+  { timeout: 30_000 }
+);
 const boot = (await checkerWorkers()).at(-1)!;
-check("ide: the Checker reports within 6 s of its worker's creation", boot.firstDiagnostics! - boot.created < 6000, ((boot.firstDiagnostics! - boot.created) / 1000).toFixed(2) + "s");
+check(
+  "ide: the Checker reports within 6 s of its worker's creation",
+  boot.firstDiagnostics! - boot.created < 6000,
+  `${((boot.firstDiagnostics! - boot.created) / 1000).toFixed(2)}s`
+);
 // A settings save that changes nothing about Pyright leaves the Checker running; one that does restarts it.
 const ideSaveSettings = async (change: (dialog: HTMLElement) => void) => {
-  await page.locator(ide + ".settings-btn").click();
-  await page.locator(ide + ".settings-dialog").evaluate(change);
-  await page.locator(ide + ".settings-dialog form button.primary").click();
-  await page.locator(ide + ".settings-dialog").waitFor({ state: "hidden" });
+  await page.locator(`${ide}.settings-btn`).click();
+  await page.locator(`${ide}.settings-dialog`).evaluate(change);
+  await page.locator(`${ide}.settings-dialog form button.primary`).click();
+  await page.locator(`${ide}.settings-dialog`).waitFor({ state: "hidden" });
 };
 const checkersBefore = (await checkerWorkers()).length;
-await ideSaveSettings((d) => { (d.querySelector("input[name=lineLength]") as HTMLInputElement).value = "100"; });
+await ideSaveSettings((d) => {
+  (d.querySelector("input[name=lineLength]") as HTMLInputElement).value = "100";
+});
 await page.waitForTimeout(1500);
-check("ide: a Ruff-only settings save does not restart the Checker", (await checkerWorkers()).length === checkersBefore &&
-  (await page.locator(ide + ".st-checker").getAttribute("data-state")) === "ready", (await page.locator(ide + ".st-checker").getAttribute("data-state"))!);
-await ideSaveSettings((d) => { (d.querySelector("select[name=typeCheckingMode]") as HTMLSelectElement).value = "basic"; });
-await page.waitForFunction((n) => (globalThis as unknown as { smokeWorkers: WorkerLog }).smokeWorkers.filter((w) => w.name === "pyright-foreground").length === n + 1, checkersBefore, { timeout: 10000 });
+check(
+  "ide: a Ruff-only settings save does not restart the Checker",
+  (await checkerWorkers()).length === checkersBefore &&
+    (await page.locator(`${ide}.st-checker`).getAttribute("data-state")) ===
+      "ready",
+  (await page.locator(`${ide}.st-checker`).getAttribute("data-state"))!
+);
+await ideSaveSettings((d) => {
+  (
+    d.querySelector("select[name=typeCheckingMode]") as HTMLSelectElement
+  ).value = "basic";
+});
+await page.waitForFunction(
+  (n) =>
+    (globalThis as unknown as { smokeWorkers: WorkerLog }).smokeWorkers.filter(
+      (w) => w.name === "pyright-foreground"
+    ).length ===
+    n + 1,
+  checkersBefore,
+  { timeout: 10_000 }
+);
 await ideReady();
-check("ide: a Pyright settings change restarts the Checker once", (await checkerWorkers()).length === checkersBefore + 1);
+check(
+  "ide: a Pyright settings change restarts the Checker once",
+  (await checkerWorkers()).length === checkersBefore + 1
+);
 // The Mirror follows what is installed, not the Lock: micropip's freeze lists every Catalog
 // package either way, so a Catalog package removed must still leave the Checker's view.
-const ideLspMessages = (path: string) => page.evaluate((p) => {
-  const monaco = (globalThis as unknown as { monaco: { editor: { getModelMarkers(f: object): { owner: string; message: string; resource: { path: string } }[] } } }).monaco;
-  return monaco.editor.getModelMarkers({}).filter((m) => m.owner === "lsp" && m.resource.path === "/project/" + p).map((m) => m.message);
-}, path);
+const ideLspMessages = (path: string) =>
+  page.evaluate((p) => {
+    const { monaco } = globalThis as unknown as {
+      monaco: {
+        editor: {
+          getModelMarkers: (
+            f: object
+          ) => { owner: string; message: string; resource: { path: string } }[];
+        };
+      };
+    };
+    return monaco.editor
+      .getModelMarkers({})
+      .filter((m) => m.owner === "lsp" && m.resource.path === `/project/${p}`)
+      .map((m) => m.message);
+  }, path);
 await ideSetText("app.py", "import six\nprint(six.__version__)\n");
-await page.locator(ide + ".install-input").fill("six");
-await page.locator(ide + ".install-btn").click();
-await page.waitForFunction(() => document.querySelector(".tool-python-ide .st-interp")?.textContent === "Installing", null, { timeout: 30000 });
+await page.locator(`${ide}.install-input`).fill("six");
+await page.locator(`${ide}.install-btn`).click();
+await page.waitForFunction(
+  () =>
+    document.querySelector(".tool-python-ide .st-interp")?.textContent ===
+    "Installing",
+  null,
+  { timeout: 30_000 }
+);
 await ideReady();
-await page.waitForFunction(() => (document.querySelector(".tool-python-ide .st-checker") as HTMLElement).dataset.state === "ready", null, { timeout: 60000 });
-await page.waitForFunction(() => {
-  const monaco = (globalThis as unknown as { monaco: { editor: { getModelMarkers(f: object): { owner: string; message: string; resource: { path: string } }[] } } }).monaco;
-  return !monaco.editor.getModelMarkers({}).some((m) => m.owner === "lsp" && m.resource.path === "/project/app.py" && m.message.includes("six"));
-}, null, { timeout: 30000 });
+await page.waitForFunction(
+  () =>
+    (document.querySelector(".tool-python-ide .st-checker") as HTMLElement)
+      .dataset.state === "ready",
+  null,
+  { timeout: 60_000 }
+);
+await page.waitForFunction(
+  () => {
+    const { monaco } = globalThis as unknown as {
+      monaco: {
+        editor: {
+          getModelMarkers: (
+            f: object
+          ) => { owner: string; message: string; resource: { path: string } }[];
+        };
+      };
+    };
+    return !monaco.editor
+      .getModelMarkers({})
+      .some(
+        (m) =>
+          m.owner === "lsp" &&
+          m.resource.path === "/project/app.py" &&
+          m.message.includes("six")
+      );
+  },
+  null,
+  { timeout: 30_000 }
+);
 check("ide: an installed package resolves for the Checker", true);
 await page.evaluate(() => {
-  for (const row of document.querySelectorAll(".tool-python-ide .pkg-row")) if (row.textContent?.includes("six")) (row.querySelector(".pkg-remove") as HTMLElement).click();
+  for (const row of document.querySelectorAll(".tool-python-ide .pkg-row")) {
+    if (row.textContent?.includes("six")) {
+      (row.querySelector(".pkg-remove") as HTMLElement).click();
+    }
+  }
 });
-await page.waitForFunction(() => document.querySelector(".tool-python-ide .st-interp")?.textContent !== "Ready", null, { timeout: 30000 });
+await page.waitForFunction(
+  () =>
+    document.querySelector(".tool-python-ide .st-interp")?.textContent !==
+    "Ready",
+  null,
+  { timeout: 30_000 }
+);
 await ideReady();
-await page.waitForFunction(() => {
-  const monaco = (globalThis as unknown as { monaco: { editor: { getModelMarkers(f: object): { owner: string; message: string; resource: { path: string } }[] } } }).monaco;
-  return monaco.editor.getModelMarkers({}).some((m) => m.owner === "lsp" && m.resource.path === "/project/app.py" && m.message.includes("six"));
-}, null, { timeout: 60000 });
-check("ide: a removed package is missing for the Checker again", true, (await ideLspMessages("app.py")).join(" | "));
+await page.waitForFunction(
+  () => {
+    const { monaco } = globalThis as unknown as {
+      monaco: {
+        editor: {
+          getModelMarkers: (
+            f: object
+          ) => { owner: string; message: string; resource: { path: string } }[];
+        };
+      };
+    };
+    return monaco.editor
+      .getModelMarkers({})
+      .some(
+        (m) =>
+          m.owner === "lsp" &&
+          m.resource.path === "/project/app.py" &&
+          m.message.includes("six")
+      );
+  },
+  null,
+  { timeout: 60_000 }
+);
+check(
+  "ide: a removed package is missing for the Checker again",
+  true,
+  (await ideLspMessages("app.py")).join(" | ")
+);
 
-await page.goto(url + "#markdown-editor");
-await page.waitForSelector(mv + ".editor");
+await page.goto(`${url}#markdown-editor`);
+await page.waitForSelector(`${mv}.editor`);
 // Contents in the Narrow Layout is a drawer, closed on load, opened by the button.
 await page.setViewportSize({ width: 600, height: 800 });
-await page.locator(mv + ".seg button[data-mode=preview]").click();
-await page.waitForFunction(() => document.querySelector(".tool-markdown-editor")!.classList.contains("toc-drawer"));
-check("narrow: contents becomes a drawer and closes", !(await mvHost().evaluate((el) => el.classList.contains("toc-open"))));
-await page.locator(mv + ".toc-btn").click();
-check("narrow: the contents button opens the drawer", await page.locator(mv + ".toc-backdrop").isVisible());
-await page.locator(mv + ".toc-backdrop").click({ position: { x: 550, y: 400 } });
-check("narrow: the backdrop closes the drawer", !(await page.locator(mv + ".toc-backdrop").isVisible()));
+await page.locator(`${mv}.seg button[data-mode=preview]`).click();
+await page.waitForFunction(() =>
+  document
+    .querySelector(".tool-markdown-editor")!
+    .classList.contains("toc-drawer")
+);
+check(
+  "narrow: contents becomes a drawer and closes",
+  !(await mvHost().evaluate((el) => el.classList.contains("toc-open")))
+);
+await page.locator(`${mv}.toc-btn`).click();
+check(
+  "narrow: the contents button opens the drawer",
+  await page.locator(`${mv}.toc-backdrop`).isVisible()
+);
+await page
+  .locator(`${mv}.toc-backdrop`)
+  .click({ position: { x: 550, y: 400 } });
+check(
+  "narrow: the backdrop closes the drawer",
+  !(await page.locator(`${mv}.toc-backdrop`).isVisible())
+);
 await page.setViewportSize({ width: 1200, height: 800 });
-await page.waitForFunction(() => document.querySelector(".tool-markdown-editor")!.classList.contains("toc-open"));
+await page.waitForFunction(() =>
+  document
+    .querySelector(".tool-markdown-editor")!
+    .classList.contains("toc-open")
+);
 check("wide again: contents comes back as a column", true);
 await page.evaluate(() => {
-  for (const k of ["draft", "view", "contents", "light"]) localStorage.removeItem("html-tools:markdown-editor:" + k);
+  for (const k of ["draft", "view", "contents", "light"]) {
+    localStorage.removeItem(`html-tools:markdown-editor:${k}`);
+  }
 });
 
 // Narrow layout: below 768px the sidebar becomes an on-demand drawer.
 await page.setViewportSize({ width: 375, height: 667 });
-await page.goto(url + "#jsonc-sorter");
+await page.goto(`${url}#jsonc-sorter`);
 // waitFor, not isVisible: shrinking the viewport hides the sidebar via a
 // transition, and this goto is a same-document hash navigation, not a reload.
 await page.locator(".sidebar").waitFor({ state: "hidden" });
@@ -1783,15 +3949,25 @@ check("narrow: hamburger visible", await page.locator(".menu-btn").isVisible());
 
 await page.locator(".menu-btn").click();
 await page.locator(".sidebar").waitFor({ state: "visible" });
-check("narrow: hamburger opens drawer",
-  (await page.locator(".menu-btn").getAttribute("aria-expanded")) === "true");
-check("narrow: main pane inert while open",
-  await page.locator(".content").evaluate((el) => (el as HTMLElement).inert));
+check(
+  "narrow: hamburger opens drawer",
+  (await page.locator(".menu-btn").getAttribute("aria-expanded")) === "true"
+);
+check(
+  "narrow: main pane inert while open",
+  await page.locator(".content").evaluate((el) => (el as HTMLElement).inert)
+);
 
 await page.locator(".tool-list button", { hasText: "Base64" }).click();
 await page.locator(".sidebar").waitFor({ state: "hidden" });
-check("narrow: selecting a tool closes drawer", await page.evaluate(() => location.hash === "#base64-to-image"));
-check("narrow: main pane usable again", !(await page.locator(".content").evaluate((el) => (el as HTMLElement).inert)));
+check(
+  "narrow: selecting a tool closes drawer",
+  await page.evaluate(() => location.hash === "#base64-to-image")
+);
+check(
+  "narrow: main pane usable again",
+  !(await page.locator(".content").evaluate((el) => (el as HTMLElement).inert))
+);
 
 // Re-selecting the current tool fires no hashchange but must still close the drawer.
 await page.locator(".menu-btn").click();
@@ -1816,7 +3992,10 @@ check("narrow: escape closes drawer", true);
 // The collapse button is a wide-layout control; the drawer has none.
 await page.locator(".menu-btn").click();
 await page.locator(".sidebar").waitFor({ state: "visible" });
-check("narrow: no collapse button in the drawer", !(await page.locator(".collapse-btn").isVisible()));
+check(
+  "narrow: no collapse button in the drawer",
+  !(await page.locator(".collapse-btn").isVisible())
+);
 await page.keyboard.press("Escape");
 await page.locator(".sidebar").waitFor({ state: "hidden" });
 
@@ -1825,73 +4004,134 @@ await page.locator(".sidebar").waitFor({ state: "hidden" });
 await page.setViewportSize({ width: 1200, height: 800 });
 await page.locator(".sidebar").waitFor({ state: "visible" });
 // CSS shows the sidebar before the matchMedia change event syncs the button.
-await page.waitForFunction(() => document.querySelector(".menu-btn")!.getAttribute("aria-expanded") === "true");
-check("wide: sidebar visible, hamburger gone, collapse button shown",
-  !(await page.locator(".menu-btn").isVisible()) && (await page.locator(".collapse-btn").isVisible()));
+await page.waitForFunction(
+  () =>
+    document.querySelector(".menu-btn")!.getAttribute("aria-expanded") ===
+    "true"
+);
+check(
+  "wide: sidebar visible, hamburger gone, collapse button shown",
+  !(await page.locator(".menu-btn").isVisible()) &&
+    (await page.locator(".collapse-btn").isVisible())
+);
 
 // Wide layout: the corner button collapses the sidebar and the main pane
 // takes the full width.
 const paneLeft = async () => (await page.locator(".content").boundingBox())!.x;
-await page.waitForFunction(() => document.querySelector(".content")!.getBoundingClientRect().x === 220);
+await page.waitForFunction(
+  () => document.querySelector(".content")!.getBoundingClientRect().x === 220
+);
 check("wide: main pane sits beside the sidebar", true);
 
 // Clicking a tool while the filter has focus must land: the blur must not
 // rebuild the list under the pointer.
 await page.locator(".filter-wrap input").focus();
 await page.locator(".tool-list button", { hasText: "DNS" }).click();
-check("wide: click on tool lands while filter is focused",
-  await page.evaluate(() => location.hash === "#dns-lookup"));
+check(
+  "wide: click on tool lands while filter is focused",
+  await page.evaluate(() => location.hash === "#dns-lookup")
+);
 
 await page.locator(".collapse-btn").click();
 await page.locator(".sidebar").waitFor({ state: "hidden" });
-await page.waitForFunction(() => document.querySelector(".content")!.getBoundingClientRect().x === 0);
-check("wide: corner button collapses sidebar, focus moves to the reveal button",
+await page.waitForFunction(
+  () => document.querySelector(".content")!.getBoundingClientRect().x === 0
+);
+check(
+  "wide: corner button collapses sidebar, focus moves to the reveal button",
   (await page.locator(".menu-btn").isVisible()) &&
-  (await page.locator(".menu-btn").getAttribute("aria-expanded")) === "false" &&
-  (await page.locator(".menu-btn").evaluate((el) => el === document.activeElement)) &&
-  !(await page.locator(".content").evaluate((el) => (el as HTMLElement).inert)));
+    (await page.locator(".menu-btn").getAttribute("aria-expanded")) ===
+      "false" &&
+    (await page
+      .locator(".menu-btn")
+      .evaluate((el) => el === document.activeElement)) &&
+    !(await page
+      .locator(".content")
+      .evaluate((el) => (el as HTMLElement).inert))
+);
 
 // While collapsed, the filter shortcut opens the sidebar as the drawer
 // without disturbing the collapse.
 await page.keyboard.press("Meta+k");
 await page.locator(".sidebar").waitFor({ state: "visible" });
-check("wide collapsed: cmd+k opens drawer",
-  (await page.locator(".content").evaluate((el) => (el as HTMLElement).inert)) &&
-  (await page.locator(".filter-wrap input").evaluate((el) => el === document.activeElement)) &&
-  (await paneLeft()) === 0);
+check(
+  "wide collapsed: cmd+k opens drawer",
+  (await page
+    .locator(".content")
+    .evaluate((el) => (el as HTMLElement).inert)) &&
+    (await page
+      .locator(".filter-wrap input")
+      .evaluate((el) => el === document.activeElement)) &&
+    (await paneLeft()) === 0
+);
 await page.locator(".tool-list button", { hasText: "JSONC" }).click();
 await page.locator(".sidebar").waitFor({ state: "hidden" });
-check("wide collapsed: selecting a tool closes drawer, stays collapsed",
-  (await page.evaluate(() => location.hash === "#jsonc-sorter" && document.body.classList.contains("sidebar-collapsed"))));
-check("wide collapsed: the query string says so, the hash is untouched",
-  (await page.evaluate(() => location.search === "?sidebar=collapsed" && location.hash === "#jsonc-sorter")));
+check(
+  "wide collapsed: selecting a tool closes drawer, stays collapsed",
+  await page.evaluate(
+    () =>
+      location.hash === "#jsonc-sorter" &&
+      document.body.classList.contains("sidebar-collapsed")
+  )
+);
+check(
+  "wide collapsed: the query string says so, the hash is untouched",
+  await page.evaluate(
+    () =>
+      location.search === "?sidebar=collapsed" &&
+      location.hash === "#jsonc-sorter"
+  )
+);
 
 // The collapse lives in the URL: it survives a reload, with no slide-out.
 await page.reload();
 await page.waitForSelector(".tool-list button", { state: "attached" });
-check("wide collapsed: remembered across reloads",
-  !(await page.locator(".sidebar").isVisible()) && (await paneLeft()) === 0);
+check(
+  "wide collapsed: remembered across reloads",
+  !(await page.locator(".sidebar").isVisible()) && (await paneLeft()) === 0
+);
 
 await page.locator(".menu-btn").click();
 await page.locator(".sidebar").waitFor({ state: "visible" });
-await page.waitForFunction(() => document.querySelector(".content")!.getBoundingClientRect().x === 220);
-check("wide: reveal button expands sidebar again, focus moves to the corner button",
+await page.waitForFunction(
+  () => document.querySelector(".content")!.getBoundingClientRect().x === 220
+);
+check(
+  "wide: reveal button expands sidebar again, focus moves to the corner button",
   !(await page.locator(".menu-btn").isVisible()) &&
-  (await page.locator(".collapse-btn").evaluate((el) => el === document.activeElement)) &&
-  (await page.evaluate(() => location.search === "" && location.hash === "#jsonc-sorter")));
+    (await page
+      .locator(".collapse-btn")
+      .evaluate((el) => el === document.activeElement)) &&
+    (await page.evaluate(
+      () => location.search === "" && location.hash === "#jsonc-sorter"
+    ))
+);
 
 // A link that carries the param opens collapsed, and the tool's own deep link still lands.
-await page.goto(url + "?sidebar=collapsed#dns-lookup");
+await page.goto(`${url}?sidebar=collapsed#dns-lookup`);
 await page.waitForSelector(".tool-list button", { state: "attached" });
-check("wide: a link with ?sidebar=collapsed opens collapsed",
-  !(await page.locator(".sidebar").isVisible()) && (await paneLeft()) === 0 &&
-  (await page.evaluate(() => location.hash === "#dns-lookup" && localStorage.getItem("html-tools:sidebar") === null)));
+check(
+  "wide: a link with ?sidebar=collapsed opens collapsed",
+  !(await page.locator(".sidebar").isVisible()) &&
+    (await paneLeft()) === 0 &&
+    (await page.evaluate(
+      () =>
+        location.hash === "#dns-lookup" &&
+        localStorage.getItem("html-tools:sidebar") === null
+    ))
+);
 await page.keyboard.press("Meta+k");
 await page.locator(".sidebar").waitFor({ state: "visible" });
 await page.locator(".tool-list button", { hasText: "JSONC" }).click();
 await page.locator(".sidebar").waitFor({ state: "hidden" });
-check("wide collapsed: switching tools keeps the param",
-  await page.evaluate(() => location.search === "?sidebar=collapsed" && location.hash === "#jsonc-sorter"));
+check(
+  "wide collapsed: switching tools keeps the param",
+  await page.evaluate(
+    () =>
+      location.search === "?sidebar=collapsed" &&
+      location.hash === "#jsonc-sorter"
+  )
+);
 
 // Narrowing while collapsed still starts the drawer closed; the collapse is
 // a wide-layout thing and does not leak into it.
@@ -1904,9 +4144,18 @@ check("narrow: drawer opens regardless of collapse preference", true);
 await page.keyboard.press("Escape");
 await page.locator(".sidebar").waitFor({ state: "hidden" });
 await page.setViewportSize({ width: 1200, height: 800 });
-await page.waitForFunction(() => document.querySelector(".content")!.getBoundingClientRect().x === 0);
-await page.waitForFunction(() => document.querySelector(".menu-btn")!.getAttribute("aria-expanded") === "false");
-check("wide: collapse applies again after widening", !(await page.locator(".sidebar").isVisible()));
+await page.waitForFunction(
+  () => document.querySelector(".content")!.getBoundingClientRect().x === 0
+);
+await page.waitForFunction(
+  () =>
+    document.querySelector(".menu-btn")!.getAttribute("aria-expanded") ===
+    "false"
+);
+check(
+  "wide: collapse applies again after widening",
+  !(await page.locator(".sidebar").isVisible())
+);
 
 check("no page errors", errors.length === 0, errors.join(" | "));
 await browser.close();

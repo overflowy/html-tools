@@ -6,23 +6,35 @@
 
 export class YamlError extends Error {}
 
-type Line = { indent: number; text: string; no: number };
+interface Line {
+  indent: number;
+  text: string;
+  no: number;
+}
 
 function stripComment(text: string): string {
   let quote = "";
-  for (let i = 0; i < text.length; i++) {
+  for (let i = 0; i < text.length; i += 1) {
     const c = text[i]!;
     if (quote) {
       if (c === quote) {
-        if (quote === "'" && text[i + 1] === "'") { i++; continue; }
+        if (quote === "'" && text[i + 1] === "'") {
+          i += 1;
+          continue;
+        }
         quote = "";
       } else if (quote === '"' && c === "\\") {
-        i++;
+        i += 1;
       }
       continue;
     }
-    if (c === "'" || c === '"') { quote = c; continue; }
-    if (c === "#" && (i === 0 || text[i - 1] === " " || text[i - 1] === "\t")) return text.slice(0, i);
+    if (c === "'" || c === '"') {
+      quote = c;
+      continue;
+    }
+    if (c === "#" && (i === 0 || text[i - 1] === " " || text[i - 1] === "\t")) {
+      return text.slice(0, i);
+    }
   }
   return text;
 }
@@ -30,13 +42,22 @@ function stripComment(text: string): string {
 function toLines(src: string): Line[] {
   const out: Line[] = [];
   const raw = src.split("\n");
-  for (let k = 0; k < raw.length; k++) {
+  for (let k = 0; k < raw.length; k += 1) {
     let t = raw[k]!;
-    if (t.endsWith("\r")) t = t.slice(0, -1);
+    if (t.endsWith("\r")) {
+      t = t.slice(0, -1);
+    }
     const m = /^( *)(.*)$/.exec(t)!;
     const text = stripComment(m[2]!).trimEnd();
-    if (!text) continue;
-    if (m[1]!.length === 0 && (text === "---" || text === "..." || text.startsWith("%"))) continue;
+    if (!text) {
+      continue;
+    }
+    if (
+      m[1]!.length === 0 &&
+      (text === "---" || text === "..." || text.startsWith("%"))
+    ) {
+      continue;
+    }
     out.push({ indent: m[1]!.length, text, no: k + 1 });
   }
   return out;
@@ -48,99 +69,180 @@ function readQuoted(s: string, pos: number, no: number): [string, number] {
   let out = "";
   let i = pos + 1;
   for (;;) {
-    if (i >= s.length) throw new YamlError("Unterminated string at line " + no);
+    if (i >= s.length) {
+      throw new YamlError(`Unterminated string at line ${no}`);
+    }
     const c = s[i]!;
     if (c === q) {
-      if (q === "'" && s[i + 1] === "'") { out += "'"; i += 2; continue; }
+      if (q === "'" && s[i + 1] === "'") {
+        out += "'";
+        i += 2;
+        continue;
+      }
       return [out, i + 1];
     }
     if (q === '"' && c === "\\") {
       const e = s[i + 1];
       i += 2;
       switch (e) {
-        case "n": out += "\n"; break;
-        case "t": out += "\t"; break;
-        case "r": out += "\r"; break;
-        case '"': out += '"'; break;
-        case "\\": out += "\\"; break;
-        case "/": out += "/"; break;
-        case "0": out += "\0"; break;
-        case "u": out += String.fromCodePoint(parseInt(s.slice(i, i + 4), 16)); i += 4; break;
-        default: out += e ?? "";
+        case "n": {
+          out += "\n";
+          break;
+        }
+        case "t": {
+          out += "\t";
+          break;
+        }
+        case "r": {
+          out += "\r";
+          break;
+        }
+        case '"': {
+          out += '"';
+          break;
+        }
+        case "\\": {
+          out += "\\";
+          break;
+        }
+        case "/": {
+          out += "/";
+          break;
+        }
+        case "0": {
+          out += "\0";
+          break;
+        }
+        case "u": {
+          out += String.fromCodePoint(Number.parseInt(s.slice(i, i + 4), 16));
+          i += 4;
+          break;
+        }
+        default: {
+          out += e ?? "";
+        }
       }
       continue;
     }
     out += c;
-    i++;
+    i += 1;
   }
 }
 
 function plainValue(s: string): unknown {
-  if (s === "true") return true;
-  if (s === "false") return false;
-  if (s === "null" || s === "~" || s === "") return null;
+  if (s === "true") {
+    return true;
+  }
+  if (s === "false") {
+    return false;
+  }
+  if (s === "null" || s === "~" || s === "") {
+    return null;
+  }
   return s;
 }
 
 /** Parses a value that fits on one line: flow collection, quoted, or plain scalar. */
 function parseInline(s: string, no: number): unknown {
   const [value, end] = readFlow(s, 0, no);
-  if (s.slice(end).trim()) throw new YamlError("Unexpected content after value at line " + no);
+  if (s.slice(end).trim()) {
+    throw new YamlError(`Unexpected content after value at line ${no}`);
+  }
   return value;
 }
 
 function readFlow(s: string, pos: number, no: number): [unknown, number] {
-  while (s[pos] === " ") pos++;
+  while (s[pos] === " ") {
+    pos += 1;
+  }
   const c = s[pos];
-  if (c === undefined) return [null, pos];
-  if (c === "|" || c === ">") throw new YamlError("Block scalars are not supported (line " + no + ")");
-  if (c === "&" || c === "*") throw new YamlError("Anchors are not supported (line " + no + ")");
-  if (c === "'" || c === '"') return readQuoted(s, pos, no);
+  if (c === undefined) {
+    return [null, pos];
+  }
+  if (c === "|" || c === ">") {
+    throw new YamlError(`Block scalars are not supported (line ${no})`);
+  }
+  if (c === "&" || c === "*") {
+    throw new YamlError(`Anchors are not supported (line ${no})`);
+  }
+  if (c === "'" || c === '"') {
+    return readQuoted(s, pos, no);
+  }
   if (c === "{") {
     const out: Record<string, unknown> = {};
-    pos++;
+    pos += 1;
     for (;;) {
-      while (s[pos] === " ") pos++;
-      if (s[pos] === "}") return [out, pos + 1];
+      while (s[pos] === " ") {
+        pos += 1;
+      }
+      if (s[pos] === "}") {
+        return [out, pos + 1];
+      }
       let key: string;
       if (s[pos] === "'" || s[pos] === '"') {
         [key, pos] = readQuoted(s, pos, no);
       } else {
         const end = s.indexOf(":", pos);
-        if (end < 0) throw new YamlError("Expected ':' in flow mapping at line " + no);
+        if (end === -1) {
+          throw new YamlError(`Expected ':' in flow mapping at line ${no}`);
+        }
         key = s.slice(pos, end).trim();
         pos = end;
       }
-      while (s[pos] === " ") pos++;
-      if (s[pos] !== ":") throw new YamlError("Expected ':' in flow mapping at line " + no);
-      pos++;
+      while (s[pos] === " ") {
+        pos += 1;
+      }
+      if (s[pos] !== ":") {
+        throw new YamlError(`Expected ':' in flow mapping at line ${no}`);
+      }
+      pos += 1;
       let value: unknown;
       [value, pos] = readFlow(s, pos, no);
       out[key] = value;
-      while (s[pos] === " ") pos++;
-      if (s[pos] === ",") { pos++; continue; }
-      if (s[pos] === "}") return [out, pos + 1];
-      throw new YamlError("Expected ',' or '}' in flow mapping at line " + no);
+      while (s[pos] === " ") {
+        pos += 1;
+      }
+      if (s[pos] === ",") {
+        pos += 1;
+        continue;
+      }
+      if (s[pos] === "}") {
+        return [out, pos + 1];
+      }
+      throw new YamlError(`Expected ',' or '}' in flow mapping at line ${no}`);
     }
   }
   if (c === "[") {
     const out: unknown[] = [];
-    pos++;
+    pos += 1;
     for (;;) {
-      while (s[pos] === " ") pos++;
-      if (s[pos] === "]") return [out, pos + 1];
+      while (s[pos] === " ") {
+        pos += 1;
+      }
+      if (s[pos] === "]") {
+        return [out, pos + 1];
+      }
       let value: unknown;
       [value, pos] = readFlow(s, pos, no);
       out.push(value);
-      while (s[pos] === " ") pos++;
-      if (s[pos] === ",") { pos++; continue; }
-      if (s[pos] === "]") return [out, pos + 1];
-      throw new YamlError("Expected ',' or ']' in flow sequence at line " + no);
+      while (s[pos] === " ") {
+        pos += 1;
+      }
+      if (s[pos] === ",") {
+        pos += 1;
+        continue;
+      }
+      if (s[pos] === "]") {
+        return [out, pos + 1];
+      }
+      throw new YamlError(`Expected ',' or ']' in flow sequence at line ${no}`);
     }
   }
   // Plain scalar: up to a flow terminator.
   let end = pos;
-  while (end < s.length && s[end] !== "," && s[end] !== "}" && s[end] !== "]") end++;
+  while (end < s.length && s[end] !== "," && s[end] !== "}" && s[end] !== "]") {
+    end += 1;
+  }
   return [plainValue(s.slice(pos, end).trim()), end];
 }
 
@@ -149,15 +251,27 @@ function splitKey(text: string, no: number): [string, string] | null {
   if (text.startsWith("'") || text.startsWith('"')) {
     const [key, end] = readQuoted(text, 0, no);
     const rest = text.slice(end);
-    if (rest === ":") return [key, ""];
-    if (rest.startsWith(": ")) return [key, rest.slice(2).trim()];
+    if (rest === ":") {
+      return [key, ""];
+    }
+    if (rest.startsWith(": ")) {
+      return [key, rest.slice(2).trim()];
+    }
     return null;
   }
-  if (text.startsWith("[") || text.startsWith("{")) return null;
-  for (let i = 0; i < text.length; i++) {
-    if (text[i] !== ":") continue;
-    if (i === text.length - 1) return [text.slice(0, i).trim(), ""];
-    if (text[i + 1] === " ") return [text.slice(0, i).trim(), text.slice(i + 2).trim()];
+  if (text.startsWith("[") || text.startsWith("{")) {
+    return null;
+  }
+  for (let i = 0; i < text.length; i += 1) {
+    if (text[i] !== ":") {
+      continue;
+    }
+    if (i === text.length - 1) {
+      return [text.slice(0, i).trim(), ""];
+    }
+    if (text[i + 1] === " ") {
+      return [text.slice(0, i).trim(), text.slice(i + 2).trim()];
+    }
   }
   return null;
 }
@@ -172,16 +286,24 @@ export function parseYaml(src: string): unknown {
 
   function parseBlock(indent: number): unknown {
     const first = lines[idx];
-    if (!first) return null;
+    if (!first) {
+      return null;
+    }
     return isItem(first.text) ? parseSequence(indent) : parseMapping(indent);
   }
 
   /** The value after `key:` with nothing on the line: a nested block, a sequence at the same indent, or null. */
   function nestedValue(indent: number): unknown {
     const next = lines[idx];
-    if (!next) return null;
-    if (next.indent > indent) return parseBlock(next.indent);
-    if (next.indent === indent && isItem(next.text)) return parseSequence(indent);
+    if (!next) {
+      return null;
+    }
+    if (next.indent > indent) {
+      return parseBlock(next.indent);
+    }
+    if (next.indent === indent && isItem(next.text)) {
+      return parseSequence(indent);
+    }
     return null;
   }
 
@@ -189,13 +311,22 @@ export function parseYaml(src: string): unknown {
     const out: Record<string, unknown> = {};
     while (idx < lines.length) {
       const ln = lines[idx]!;
-      if (ln.indent < indent) break;
-      if (ln.indent > indent) throw new YamlError("Unexpected indentation at line " + ln.no);
-      if (isItem(ln.text)) break;
+      if (ln.indent < indent) {
+        break;
+      }
+      if (ln.indent > indent) {
+        throw new YamlError(`Unexpected indentation at line ${ln.no}`);
+      }
+      if (isItem(ln.text)) {
+        break;
+      }
       const kv = splitKey(ln.text, ln.no);
-      if (!kv) throw new YamlError("Expected 'key: value' at line " + ln.no);
-      idx++;
-      out[kv[0]] = kv[1] === "" ? nestedValue(indent) : parseInline(kv[1], ln.no);
+      if (!kv) {
+        throw new YamlError(`Expected 'key: value' at line ${ln.no}`);
+      }
+      idx += 1;
+      out[kv[0]] =
+        kv[1] === "" ? nestedValue(indent) : parseInline(kv[1], ln.no);
     }
     return out;
   }
@@ -204,12 +335,18 @@ export function parseYaml(src: string): unknown {
     const out: unknown[] = [];
     while (idx < lines.length) {
       const ln = lines[idx]!;
-      if (ln.indent < indent) break;
-      if (ln.indent > indent) throw new YamlError("Unexpected indentation at line " + ln.no);
-      if (!isItem(ln.text)) break;
+      if (ln.indent < indent) {
+        break;
+      }
+      if (ln.indent > indent) {
+        throw new YamlError(`Unexpected indentation at line ${ln.no}`);
+      }
+      if (!isItem(ln.text)) {
+        break;
+      }
       const content = ln.text.slice(1).trimStart();
       if (!content) {
-        idx++;
+        idx += 1;
         const next = lines[idx];
         out.push(next && next.indent > indent ? parseBlock(next.indent) : null);
         continue;
@@ -220,7 +357,7 @@ export function parseYaml(src: string): unknown {
         lines[idx] = { indent: indent + offset, text: content, no: ln.no };
         out.push(parseMapping(indent + offset));
       } else {
-        idx++;
+        idx += 1;
         out.push(parseInline(content, ln.no));
       }
     }
@@ -228,6 +365,8 @@ export function parseYaml(src: string): unknown {
   }
 
   const value = parseBlock(lines[0]?.indent ?? 0);
-  if (idx < lines.length) throw new YamlError("Unexpected content at line " + lines[idx]!.no);
+  if (idx < lines.length) {
+    throw new YamlError(`Unexpected content at line ${lines[idx]!.no}`);
+  }
   return value;
 }

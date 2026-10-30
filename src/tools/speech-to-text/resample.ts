@@ -5,7 +5,7 @@
 // chunks of any size, it gives the same samples as one call over the whole
 // signal. Files take the browser's own resampler instead (decodeAudioData).
 
-export const ENGINE_RATE = 16000;
+export const ENGINE_RATE = 16_000;
 
 /** Kernel half-width in input samples at 1:1; widened by the downsampling ratio. */
 const HALF_TAPS = 16;
@@ -15,7 +15,9 @@ const CUTOFF = 0.9;
 const PHASES = 256;
 
 function sinc(x: number) {
-  if (x === 0) return 1;
+  if (x === 0) {
+    return 1;
+  }
   const px = Math.PI * x;
   return Math.sin(px) / px;
 }
@@ -36,10 +38,13 @@ export class Resampler {
     const half = Math.ceil(HALF_TAPS / fc);
     this.half = half;
     this.kernel = new Float32Array(2 * half * PHASES + 2);
-    for (let j = 0; j < this.kernel.length; j++) {
+    for (let j = 0; j < this.kernel.length; j += 1) {
       const d = j / PHASES - half;
       const t = Math.min(1, (d + half) / (2 * half));
-      const w = 0.42 - 0.5 * Math.cos(2 * Math.PI * t) + 0.08 * Math.cos(4 * Math.PI * t);
+      const w =
+        0.42 -
+        0.5 * Math.cos(2 * Math.PI * t) +
+        0.08 * Math.cos(4 * Math.PI * t);
       this.kernel[j] = fc * sinc(fc * d) * w;
     }
     // Zeros before the first sample: the signal starts from silence.
@@ -57,7 +62,7 @@ export class Resampler {
       const base = Math.floor(this.pos);
       let sum = 0;
       let norm = 0;
-      for (let i = base - half + 1; i <= base + half; i++) {
+      for (let i = base - half + 1; i <= base + half; i += 1) {
         const x = (this.pos - i + half) * PHASES;
         const j = Math.floor(x);
         const f = x - j;

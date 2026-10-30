@@ -1,29 +1,38 @@
 // The Countdown: to a moment (Until) or for a length of time (Timer).
 
-const UNITS = [["d", 86400], ["h", 3600], ["m", 60], ["s", 1]] as const;
+const UNITS = [
+  ["d", 86_400],
+  ["h", 3600],
+  ["m", 60],
+  ["s", 1],
+] as const;
 
 /** The longest Timer: 99 days. */
-export const MAX_TIMER = 99 * 86400;
+export const MAX_TIMER = 99 * 86_400;
 
 /**
  * A Timer length in seconds, or null. Accepts plain seconds (`90`), unit
  * amounts in any order (`1h30m`, `2d 12h`), or a clock (`1:30:00`, `5:00`).
  */
 export function parseDuration(input: string): number | null {
-  const s = input.trim().toLowerCase().replace(/\s+/g, "");
+  const s = input.trim().toLowerCase().replaceAll(/\s+/g, "");
   let secs: number;
   if (/^\d+$/.test(s)) {
     secs = Number(s);
   } else if (/^\d+(:\d{1,2}){1,3}$/.test(s)) {
     const parts = s.split(":").map(Number);
-    if (parts.slice(1).some((p) => p > 59)) return null;
-    const weights = [86400, 3600, 60, 1].slice(-parts.length);
+    if (parts.slice(1).some((p) => p > 59)) {
+      return null;
+    }
+    const weights = [86_400, 3600, 60, 1].slice(-parts.length);
     secs = parts.reduce((sum, p, i) => sum + p * weights[i]!, 0);
   } else if (/^(\d+[dhms])+$/.test(s)) {
     const seen = new Set<string>();
     secs = 0;
     for (const [, n, unit] of s.matchAll(/(\d+)([dhms])/g)) {
-      if (seen.has(unit!)) return null;
+      if (seen.has(unit!)) {
+        return null;
+      }
       seen.add(unit!);
       secs += Number(n) * UNITS.find(([u]) => u === unit)![1];
     }
@@ -40,7 +49,9 @@ export function formatDuration(secs: number): string {
   for (const [unit, size] of UNITS) {
     const n = Math.floor(rest / size);
     rest -= n * size;
-    if (n) out += n + unit;
+    if (n) {
+      out += n + unit;
+    }
   }
   return out || "0s";
 }
@@ -61,13 +72,23 @@ export function formatRemaining(secs: number, style: CountdownStyle): string {
     rest %= size;
   }
   if (style === "clock") {
-    const first = Math.min(parts.findIndex((p) => p > 0), 2);
+    const first = Math.min(
+      parts.findIndex((p) => p > 0),
+      2
+    );
     const shown = parts.slice(first === -1 ? 2 : first);
-    return shown.map((p, i) => (i === 0 ? String(p) : String(p).padStart(2, "0"))).join(":");
+    return shown
+      .map((p, i) => (i === 0 ? String(p) : String(p).padStart(2, "0")))
+      .join(":");
   }
   const first = parts.findIndex((p) => p > 0);
-  if (first === -1) return "0s";
-  return parts.slice(first).map((p, i) => p + UNITS[first + i]![0]).join("\u00a0");
+  if (first === -1) {
+    return "0s";
+  }
+  return parts
+    .slice(first)
+    .map((p, i) => p + UNITS[first + i]![0])
+    .join("\u00A0");
 }
 
 /** Whole seconds left until `end` (ms since the epoch), never negative. */

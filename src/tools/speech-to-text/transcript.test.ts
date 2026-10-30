@@ -1,6 +1,19 @@
 // Unit tests for the Transcript rules: Window cuts, Cues, and the exports. Run: bun test
 import { describe, expect, test } from "bun:test";
-import { clock, cutWindow, keywordLines, subtitleLines, timestamp, toCues, toJson, toSrt, toText, toVtt, type Word } from "./transcript";
+
+import {
+  clock,
+  cutWindow,
+  keywordLines,
+  subtitleLines,
+  timestamp,
+  toCues,
+  toJson,
+  toSrt,
+  toText,
+  toVtt,
+} from "./transcript";
+import type { Word } from "./transcript";
 
 /** Words from "text@start-end" specs, probability 1. */
 function words(...specs: string[]): Word[] {
@@ -22,7 +35,13 @@ describe("cutWindow", () => {
   });
 
   test("cuts at the last sentence end clear of the edge, halfway into the gap after it", () => {
-    const w = words("First.@1-2", "Second@12-13", "one.@13-14", "Third@20-21", "runs@28-29.5");
+    const w = words(
+      "First.@1-2",
+      "Second@12-13",
+      "one.@13-14",
+      "Third@20-21",
+      "runs@28-29.5"
+    );
     const { keep, advance } = cutWindow(w, 30, false);
     expect(keep.map((x) => x.word)).toEqual(["First.", "Second", "one."]);
     expect(advance).toBe(17);
@@ -43,7 +62,13 @@ describe("cutWindow", () => {
   });
 
   test("closing quotes and brackets still end a sentence", () => {
-    const w = words("He@10-11", "said,@11-12", "“go.”@12-13", "Then@25-26", "edge@29.5-30");
+    const w = words(
+      "He@10-11",
+      "said,@11-12",
+      "“go.”@12-13",
+      "Then@25-26",
+      "edge@29.5-30"
+    );
     expect(cutWindow(w, 30, false).keep.at(-1)!.word).toBe("“go.”");
   });
 
@@ -54,42 +79,85 @@ describe("cutWindow", () => {
   });
 
   test("always advances at least a second", () => {
-    expect(cutWindow(words("a@0-0.2", "b@29.5-30"), 30, false).advance).toBeGreaterThanOrEqual(1);
+    expect(
+      cutWindow(words("a@0-0.2", "b@29.5-30"), 30, false).advance
+    ).toBeGreaterThanOrEqual(1);
   });
 });
 
 describe("toCues", () => {
   test("one Cue per sentence", () => {
-    const cues = toCues(words("Hello@0-0.5", "there.@0.5-1", "How@1.2-1.4", "are@1.4-1.6", "you?@1.6-2"));
+    const cues = toCues(
+      words(
+        "Hello@0-0.5",
+        "there.@0.5-1",
+        "How@1.2-1.4",
+        "are@1.4-1.6",
+        "you?@1.6-2"
+      )
+    );
     expect(cues.map((c) => c.text)).toEqual(["Hello there.", "How are you?"]);
-    expect(cues.map((c) => [c.start, c.end, c.first])).toEqual([[0, 1, 0], [1.2, 2, 2]]);
+    expect(cues.map((c) => [c.start, c.end, c.first])).toEqual([
+      [0, 1, 0],
+      [1.2, 2, 2],
+    ]);
   });
 
   test("a long pause starts a new Cue", () => {
-    expect(toCues(words("wait@0-1", "for@1-2", "it@4-5")).map((c) => c.text)).toEqual(["wait for", "it"]);
+    expect(
+      toCues(words("wait@0-1", "for@1-2", "it@4-5")).map((c) => c.text)
+    ).toEqual(["wait for", "it"]);
   });
 
   test("no Cue runs past seven seconds", () => {
-    const w = Array.from({ length: 20 }, (_, i) => ({ word: "w" + i, start: i * 0.5, end: i * 0.5 + 0.4, probability: 1 }));
-    for (const c of toCues(w)) expect(c.end - c.start).toBeLessThanOrEqual(7);
+    const w = Array.from({ length: 20 }, (_, i) => ({
+      word: `w${i}`,
+      start: i * 0.5,
+      end: i * 0.5 + 0.4,
+      probability: 1,
+    }));
+    for (const c of toCues(w)) {
+      expect(c.end - c.start).toBeLessThanOrEqual(7);
+    }
   });
 
   test("a sentence too long for one Cue is cut after its last comma, not before its last word", () => {
-    const text = "If anything is unclear, ask in the team channel, thank you all, and have a great week.";
-    const w = text.split(" ").map((word, i) => ({ word, start: i * 0.35, end: i * 0.35 + 0.3, probability: 1 }));
+    const text =
+      "If anything is unclear, ask in the team channel, thank you all, and have a great week.";
+    const w = text.split(" ").map((word, i) => ({
+      word,
+      start: i * 0.35,
+      end: i * 0.35 + 0.3,
+      probability: 1,
+    }));
     const cues = toCues(w);
-    expect(cues.map((c) => c.text)).toEqual(["If anything is unclear, ask in the team channel, thank you all,", "and have a great week."]);
+    expect(cues.map((c) => c.text)).toEqual([
+      "If anything is unclear, ask in the team channel, thank you all,",
+      "and have a great week.",
+    ]);
     expect(cues.map((c) => c.first)).toEqual([0, 12]);
   });
 
   test("without a comma, a long sentence is cut before the Word that would overflow", () => {
-    const w = Array.from({ length: 12 }, (_, i) => ({ word: "abcdefghi", start: i * 0.3, end: i * 0.3 + 0.2, probability: 1 }));
+    const w = Array.from({ length: 12 }, (_, i) => ({
+      word: "abcdefghi",
+      start: i * 0.3,
+      end: i * 0.3 + 0.2,
+      probability: 1,
+    }));
     expect(toCues(w).map((c) => c.words.length)).toEqual([8, 4]);
   });
 
   test("no Cue runs past two subtitle lines", () => {
-    const w = Array.from({ length: 30 }, (_, i) => ({ word: "word" + i, start: i * 0.2, end: i * 0.2 + 0.1, probability: 1 }));
-    for (const c of toCues(w)) expect(c.text.length).toBeLessThanOrEqual(84);
+    const w = Array.from({ length: 30 }, (_, i) => ({
+      word: `word${i}`,
+      start: i * 0.2,
+      end: i * 0.2 + 0.1,
+      probability: 1,
+    }));
+    for (const c of toCues(w)) {
+      expect(c.text.length).toBeLessThanOrEqual(84);
+    }
     expect(toCues(w).flatMap((c) => c.words)).toEqual(w);
   });
 });
@@ -111,11 +179,15 @@ describe("exports", () => {
   const w = words("Hello@0-0.5", "there.@0.5-1", "Bye.@4-4.5");
 
   test("SRT", () => {
-    expect(toSrt(toCues(w))).toBe("1\n00:00:00,000 --> 00:00:01,000\nHello there.\n\n2\n00:00:04,000 --> 00:00:04,500\nBye.\n");
+    expect(toSrt(toCues(w))).toBe(
+      "1\n00:00:00,000 --> 00:00:01,000\nHello there.\n\n2\n00:00:04,000 --> 00:00:04,500\nBye.\n"
+    );
   });
 
   test("WebVTT", () => {
-    expect(toVtt(toCues(w))).toBe("WEBVTT\n\n00:00:00.000 --> 00:00:01.000\nHello there.\n\n00:00:04.000 --> 00:00:04.500\nBye.\n");
+    expect(toVtt(toCues(w))).toBe(
+      "WEBVTT\n\n00:00:00.000 --> 00:00:01.000\nHello there.\n\n00:00:04.000 --> 00:00:04.500\nBye.\n"
+    );
   });
 
   test("text breaks a paragraph after a sentence and a long pause, not after a pause alone", () => {
@@ -125,7 +197,9 @@ describe("exports", () => {
   });
 
   test("JSON", () => {
-    const parsed = JSON.parse(toJson({ language: "en", duration: 4.51234, words: w }));
+    const parsed = JSON.parse(
+      toJson({ language: "en", duration: 4.51234, words: w })
+    );
     expect(parsed.text).toBe("Hello there. Bye.");
     expect(parsed.duration).toBe(4.512);
     expect(parsed.words).toHaveLength(3);
@@ -133,11 +207,15 @@ describe("exports", () => {
 
   test("a long line is split in two at the space nearest the middle", () => {
     expect(subtitleLines("short one")).toBe("short one");
-    expect(subtitleLines("The quick brown fox jumps over the lazy dog again")).toBe("The quick brown fox jumps\nover the lazy dog again");
+    expect(
+      subtitleLines("The quick brown fox jumps over the lazy dog again")
+    ).toBe("The quick brown fox jumps\nover the lazy dog again");
   });
 });
 
 test("keywords: comma-separated in the field, one per line for the engine", () => {
-  expect(keywordLines(" Kubernetes, Dr. Nowak ,,Łódź ")).toBe("Kubernetes\nDr. Nowak\nŁódź");
+  expect(keywordLines(" Kubernetes, Dr. Nowak ,,Łódź ")).toBe(
+    "Kubernetes\nDr. Nowak\nŁódź"
+  );
   expect(keywordLines("  ")).toBe("");
 });

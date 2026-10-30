@@ -1,9 +1,10 @@
 import "./theme.css";
 import "./shell.css";
-import { tools } from "../registry";
-import type { Tool } from "./types";
 import menuIcon from "lucide-static/icons/menu.svg";
 import panelLeftIcon from "lucide-static/icons/panel-left.svg";
+
+import { tools } from "../registry";
+import type { Tool } from "./types";
 
 const LAST_KEY = "html-tools:last";
 // The query string carries the Sidebar's Collapsed state: `?sidebar=collapsed`
@@ -55,15 +56,21 @@ document.body.innerHTML = `
   <div class="drawer-backdrop"></div>
 `;
 
-const $filter = document.querySelector(".filter-wrap input") as HTMLInputElement;
+const $filter = document.querySelector(
+  ".filter-wrap input"
+) as HTMLInputElement;
 const $list = document.querySelector(".tool-list") as HTMLElement;
 const $h1 = document.querySelector(".tool-header h1") as HTMLElement;
-const $subtitle = document.querySelector(".tool-header .subtitle") as HTMLElement;
+const $subtitle = document.querySelector(
+  ".tool-header .subtitle"
+) as HTMLElement;
 const $hosts = document.querySelector(".hosts") as HTMLElement;
 const $sidebar = document.querySelector(".sidebar") as HTMLElement;
 const $content = document.querySelector(".content") as HTMLElement;
 const $menuBtn = document.querySelector(".menu-btn") as HTMLButtonElement;
-const $collapseBtn = document.querySelector(".collapse-btn") as HTMLButtonElement;
+const $collapseBtn = document.querySelector(
+  ".collapse-btn"
+) as HTMLButtonElement;
 const $backdrop = document.querySelector(".drawer-backdrop") as HTMLElement;
 
 // Narrow Layout: below 768px the Sidebar becomes the Drawer. Keep this query
@@ -75,13 +82,17 @@ let drawerOpen = false;
 // of the URL, so it survives a reload and travels with a copied link; the
 // Drawer is ephemeral and does not. The class goes on before the first paint
 // so the Sidebar never slides out on load.
-let collapsed = new URLSearchParams(location.search).get(SIDEBAR_PARAM) === SIDEBAR_COLLAPSED;
+let collapsed =
+  new URLSearchParams(location.search).get(SIDEBAR_PARAM) === SIDEBAR_COLLAPSED;
 document.body.classList.toggle("sidebar-collapsed", collapsed);
 
 function writeSidebarParam(next: boolean) {
   const url = new URL(location.href);
-  if (next) url.searchParams.set(SIDEBAR_PARAM, SIDEBAR_COLLAPSED);
-  else url.searchParams.delete(SIDEBAR_PARAM);
+  if (next) {
+    url.searchParams.set(SIDEBAR_PARAM, SIDEBAR_COLLAPSED);
+  } else {
+    url.searchParams.delete(SIDEBAR_PARAM);
+  }
   history.replaceState(null, "", url);
 }
 
@@ -94,12 +105,19 @@ function drawerForm(): boolean {
 // the Drawer, shown/hidden for the inline Sidebar. (It is only displayed
 // while the Sidebar is not inline; see shell.css.)
 function syncMenuBtn() {
-  $menuBtn.setAttribute("aria-expanded", String(drawerForm() ? drawerOpen : true));
+  $menuBtn.setAttribute(
+    "aria-expanded",
+    String(drawerForm() ? drawerOpen : true)
+  );
 }
 
 function setDrawer(open: boolean) {
-  if (open === drawerOpen) return;
-  if (open && !drawerForm()) return;
+  if (open === drawerOpen) {
+    return;
+  }
+  if (open && !drawerForm()) {
+    return;
+  }
   drawerOpen = open;
   document.body.classList.toggle("drawer-open", open);
   syncMenuBtn();
@@ -111,21 +129,26 @@ function setDrawer(open: boolean) {
     $sidebar.setAttribute("role", "dialog");
     $sidebar.setAttribute("aria-modal", "true");
     $sidebar.setAttribute("aria-label", "Tool list");
-    const target = $list.querySelector("button.selected") ?? $list.querySelector("button");
+    const target =
+      $list.querySelector("button.selected") ?? $list.querySelector("button");
     (target as HTMLElement | null)?.focus();
   } else {
     $sidebar.removeAttribute("role");
     $sidebar.removeAttribute("aria-modal");
     $sidebar.removeAttribute("aria-label");
     const active = document.activeElement;
-    if ($sidebar.contains(active) || active === document.body) $menuBtn.focus();
+    if ($sidebar.contains(active) || active === document.body) {
+      $menuBtn.focus();
+    }
   }
 }
 
 const collapseListeners = new Set<(collapsed: boolean) => void>();
 
 function setCollapsed(next: boolean) {
-  if (next === collapsed) return;
+  if (next === collapsed) {
+    return;
+  }
   // A Drawer opened over a collapsed Sidebar is closed first, so expanding
   // lands on the plain inline Sidebar rather than an inline one with a
   // backdrop still up.
@@ -137,16 +160,21 @@ function setCollapsed(next: boolean) {
   // Whichever button was pressed is about to disappear; hand focus to its
   // counterpart so a keyboard user can toggle straight back.
   const active = document.activeElement;
-  if (next && $sidebar.contains(active)) $menuBtn.focus();
-  else if (!next && active === $menuBtn) $collapseBtn.focus();
-  for (const fn of collapseListeners) fn(next);
+  if (next && $sidebar.contains(active)) {
+    $menuBtn.focus();
+  } else if (!next && active === $menuBtn) {
+    $collapseBtn.focus();
+  }
+  for (const fn of collapseListeners) {
+    fn(next);
+  }
 }
 
 const hosts = new Map<string, HTMLElement>();
 const payloads = new Map<string, string>();
 const restorers = new Map<string, (payload: string) => void>();
 let current: Tool | null = null;
-let visible: Tool[] = tools.slice();
+let visible: Tool[] = [...tools];
 let cursor = 0;
 
 function matches(tool: Tool, query: string): boolean {
@@ -166,21 +194,23 @@ function renderList() {
     const empty = document.createElement("div");
     empty.className = "no-match";
     empty.textContent = "No matching tools";
-    $list.appendChild(empty);
+    $list.append(empty);
     return;
   }
   visible.forEach((tool) => {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.textContent = tool.name;
-    if (current && tool.id === current.id) btn.classList.add("selected");
+    if (current && tool.id === current.id) {
+      btn.classList.add("selected");
+    }
     btn.addEventListener("click", () => {
       location.hash = tool.id;
       // Re-selecting the current tool fires no hashchange, so the Drawer
       // closes here rather than in the hashchange handler.
       setDrawer(false);
     });
-    $list.appendChild(btn);
+    $list.append(btn);
   });
   renderCursor();
 }
@@ -190,21 +220,32 @@ function renderList() {
 // on mousedown), so the click would never land.
 function renderCursor() {
   const active = document.activeElement === $filter;
-  $list.querySelectorAll("button").forEach((btn, i) => btn.classList.toggle("cursor", active && i === cursor));
+  $list
+    .querySelectorAll("button")
+    .forEach((btn, i) =>
+      btn.classList.toggle("cursor", active && i === cursor)
+    );
 }
 
 /** Deep Link format: `#<tool-id>` or `#<tool-id>/<payload>`. */
 function parseHash(): { id: string; payload: string } {
   const raw = location.hash.slice(1);
   const slash = raw.indexOf("/");
-  if (slash === -1) return { id: decodeURIComponent(raw), payload: "" };
-  return { id: decodeURIComponent(raw.slice(0, slash)), payload: raw.slice(slash + 1) };
+  if (slash === -1) {
+    return { id: decodeURIComponent(raw), payload: "" };
+  }
+  return {
+    id: decodeURIComponent(raw.slice(0, slash)),
+    payload: raw.slice(slash + 1),
+  };
 }
 
 function writeHash(toolId: string) {
   const payload = payloads.get(toolId);
-  const hash = "#" + toolId + (payload ? "/" + payload : "");
-  if (location.hash !== hash) history.replaceState(null, "", hash);
+  const hash = `#${toolId}${payload ? `/${payload}` : ""}`;
+  if (location.hash !== hash) {
+    history.replaceState(null, "", hash);
+  }
 }
 
 function selectTool(id: string, payload = "") {
@@ -212,17 +253,22 @@ function selectTool(id: string, payload = "") {
   // A hash without a payload (sidebar click, hand-typed URL) keeps the
   // tool's last-known State rather than wiping it. A payload meant for an
   // unknown tool id is dropped, not applied to the fallback tool.
-  const changed = tool.id === id && payload !== "" && payload !== payloads.get(tool.id);
-  if (changed) payloads.set(tool.id, payload);
+  const changed =
+    tool.id === id && payload !== "" && payload !== payloads.get(tool.id);
+  if (changed) {
+    payloads.set(tool.id, payload);
+  }
   writeHash(tool.id);
   if (current?.id === tool.id) {
-    if (changed) restorers.get(tool.id)?.(payload);
+    if (changed) {
+      restorers.get(tool.id)?.(payload);
+    }
     renderList();
     return;
   }
   current = tool;
   localStorage.setItem(LAST_KEY, tool.id);
-  document.title = tool.name + " · html tools";
+  document.title = `${tool.name} · html tools`;
   document.body.classList.toggle("tool-full-height", !!tool.fullHeight);
   $h1.textContent = tool.name;
   $subtitle.textContent = tool.subtitle;
@@ -230,14 +276,19 @@ function selectTool(id: string, payload = "") {
   let host = hosts.get(tool.id);
   if (!host) {
     host = document.createElement("section");
-    host.className = "tool-host tool-" + tool.id;
-    $hosts.appendChild(host);
+    host.className = `tool-host tool-${tool.id}`;
+    $hosts.append(host);
     hosts.set(tool.id, host);
     tool.mount(host, {
       setState(p) {
-        if (p) payloads.set(tool.id, p);
-        else payloads.delete(tool.id);
-        if (current?.id === tool.id) writeHash(tool.id);
+        if (p) {
+          payloads.set(tool.id, p);
+        } else {
+          payloads.delete(tool.id);
+        }
+        if (current?.id === tool.id) {
+          writeHash(tool.id);
+        }
       },
       onRestore(fn) {
         restorers.set(tool.id, fn);
@@ -253,17 +304,23 @@ function selectTool(id: string, payload = "") {
       },
     });
     const stored = payloads.get(tool.id);
-    if (stored) restorers.get(tool.id)?.(stored);
+    if (stored) {
+      restorers.get(tool.id)?.(stored);
+    }
   } else if (changed) {
     restorers.get(tool.id)?.(payload);
   }
-  for (const [hostId, h] of hosts) h.hidden = hostId !== tool.id;
+  for (const [hostId, h] of hosts) {
+    h.hidden = hostId !== tool.id;
+  }
   renderList();
 }
 
 window.addEventListener("hashchange", () => {
   const { id, payload } = parseHash();
-  if (id) selectTool(id, payload);
+  if (id) {
+    selectTool(id, payload);
+  }
 });
 
 window.addEventListener("keydown", (e) => {
@@ -294,8 +351,11 @@ window.addEventListener("keydown", (e) => {
 // collapsed, the Sidebar is still reachable as the Drawer through the
 // filter shortcuts below.
 $menuBtn.addEventListener("click", () => {
-  if (narrow.matches) setDrawer(!drawerOpen);
-  else setCollapsed(false);
+  if (narrow.matches) {
+    setDrawer(!drawerOpen);
+  } else {
+    setCollapsed(false);
+  }
 });
 $collapseBtn.addEventListener("click", () => setCollapsed(true));
 $backdrop.addEventListener("click", () => setDrawer(false));

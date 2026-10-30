@@ -5,6 +5,7 @@
 // Checker always sees live text.
 
 import type * as Monaco from "monaco-editor";
+
 import type { Linter, RuffDiagnostic } from "./ruff";
 
 type Editor = Monaco.editor.IStandaloneCodeEditor;
@@ -45,7 +46,7 @@ export function defineTheme(monaco: typeof Monaco) {
       "editorSuggestWidget.selectedBackground": "#c9644240",
       "editorHoverWidget.background": v("--surface") || "#262625",
       "input.background": v("--surface-2") || "#2d2d2c",
-      "focusBorder": v("--accent") || "#c96442",
+      focusBorder: v("--accent") || "#c96442",
       "list.activeSelectionBackground": "#c9644240",
       "list.hoverBackground": "#ffffff0a",
       "minimap.background": v("--bg") || "#1a1a1a",
@@ -61,12 +62,26 @@ export function defineTheme(monaco: typeof Monaco) {
 
 /** A TOML tokenizer good enough for pyproject.toml. */
 export function registerToml(monaco: typeof Monaco) {
-  if (monaco.languages.getLanguages().some((l) => l.id === "toml")) return;
-  monaco.languages.register({ id: "toml", extensions: [".toml"], aliases: ["TOML"] });
+  if (monaco.languages.getLanguages().some((l) => l.id === "toml")) {
+    return;
+  }
+  monaco.languages.register({
+    id: "toml",
+    extensions: [".toml"],
+    aliases: ["TOML"],
+  });
   monaco.languages.setLanguageConfiguration("toml", {
     comments: { lineComment: "#" },
-    brackets: [["[", "]"], ["{", "}"]],
-    autoClosingPairs: [{ open: "[", close: "]" }, { open: "{", close: "}" }, { open: '"', close: '"' }, { open: "'", close: "'" }],
+    brackets: [
+      ["[", "]"],
+      ["{", "}"],
+    ],
+    autoClosingPairs: [
+      { open: "[", close: "]" },
+      { open: "{", close: "}" },
+      { open: '"', close: '"' },
+      { open: "'", close: "'" },
+    ],
   });
   monaco.languages.setMonarchTokensProvider("toml", {
     tokenizer: {
@@ -78,9 +93,15 @@ export function registerToml(monaco: typeof Monaco) {
         [/"([^"\\]|\\.)*"/, "string"],
         [/'[^']*'/, "string"],
         [/\b(true|false)\b/, "keyword"],
-        [/\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})?)?/, "number"],
+        [
+          /\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})?)?/,
+          "number",
+        ],
         [/[+-]?(inf|nan)\b/, "number"],
-        [/[+-]?(0x[0-9a-fA-F_]+|0o[0-7_]+|0b[01_]+|\d[\d_]*(\.\d[\d_]*)?([eE][+-]?\d+)?)/, "number"],
+        [
+          /[+-]?(0x[0-9a-fA-F_]+|0o[0-7_]+|0b[01_]+|\d[\d_]*(\.\d[\d_]*)?([eE][+-]?\d+)?)/,
+          "number",
+        ],
         [/[[\]{},=]/, "delimiter"],
       ],
       mstring: [
@@ -107,7 +128,11 @@ export function configureJson(monaco: typeof Monaco) {
   });
 }
 
-export function createEditor(monaco: typeof Monaco, host: HTMLElement, tabSize: number): Editor {
+export function createEditor(
+  monaco: typeof Monaco,
+  host: HTMLElement,
+  tabSize: number
+): Editor {
   const style = getComputedStyle(document.documentElement);
   return monaco.editor.create(host, {
     model: null,
@@ -133,10 +158,18 @@ export function createEditor(monaco: typeof Monaco, host: HTMLElement, tabSize: 
 
 /* ---------------- the Linter in the editor ---------------- */
 
-type Loc = { row: number; column: number };
+interface Loc {
+  row: number;
+  column: number;
+}
 
 function toRange(start: Loc, end: Loc): Monaco.IRange {
-  return { startLineNumber: start.row, startColumn: start.column, endLineNumber: end.row, endColumn: end.column };
+  return {
+    startLineNumber: start.row,
+    startColumn: start.column,
+    endLineNumber: end.row,
+    endColumn: end.column,
+  };
 }
 
 export class LinterBinding {
@@ -146,70 +179,113 @@ export class LinterBinding {
   private disposables: Monaco.IDisposable[] = [];
   private generation = 0;
 
-  constructor(private monaco: typeof Monaco, private linter: Linter, private onError: (message: string) => void) {
+  constructor(
+    private monaco: typeof Monaco,
+    private linter: Linter,
+    private onError: (message: string) => void
+  ) {
     this.disposables.push(
       monaco.languages.registerCodeActionProvider("python", {
-        provideCodeActions: (model, range, context) => this.codeActions(model, range, context),
+        provideCodeActions: (model, range, context) =>
+          this.codeActions(model, range, context),
       }),
       monaco.languages.registerDocumentFormattingEditProvider("python", {
         provideDocumentFormattingEdits: (model) => this.formatEdits(model),
-      }),
+      })
     );
   }
 
   /** Re-lints every model: the Project's Ruff settings changed. */
   invalidate(models: Iterable<Model>) {
-    this.generation++;
-    for (const m of models) this.schedule(m, 0);
+    this.generation += 1;
+    for (const m of models) {
+      this.schedule(m, 0);
+    }
   }
 
   schedule(model: Model, delay = 250) {
-    if (model.getLanguageId() !== "python") return;
+    if (model.getLanguageId() !== "python") {
+      return;
+    }
     const key = model.uri.toString();
     const t = this.timers.get(key);
-    if (t) clearTimeout(t);
-    this.timers.set(key, window.setTimeout(() => this.lint(model), delay));
+    if (t) {
+      clearTimeout(t);
+    }
+    this.timers.set(
+      key,
+      window.setTimeout(() => this.lint(model), delay)
+    );
   }
 
   forget(model: Model) {
     const key = model.uri.toString();
     const t = this.timers.get(key);
-    if (t) clearTimeout(t);
+    if (t) {
+      clearTimeout(t);
+    }
     this.timers.delete(key);
     this.findings.delete(key);
   }
 
   private async lint(model: Model) {
-    if (model.isDisposed()) return;
+    if (model.isDisposed()) {
+      return;
+    }
     const version = model.getVersionId();
-    const generation = this.generation;
+    const { generation } = this;
     let diagnostics: RuffDiagnostic[];
     try {
       diagnostics = await this.linter.check(model.getValue());
-    } catch (e) {
-      this.onError(e instanceof Error ? e.message : String(e));
+    } catch (error) {
+      this.onError(error instanceof Error ? error.message : String(error));
       return;
     }
-    if (model.isDisposed() || model.getVersionId() !== version || generation !== this.generation) return;
+    if (
+      model.isDisposed() ||
+      model.getVersionId() !== version ||
+      generation !== this.generation
+    ) {
+      return;
+    }
     this.findings.set(model.uri.toString(), diagnostics);
     const { MarkerSeverity, MarkerTag } = this.monaco;
-    const markers: Monaco.editor.IMarkerData[] = diagnostics.map((d) => Object.assign(toRange(d.start_location, d.end_location), {
-      message: d.code ? `${d.message} (${d.code})` : d.message,
-      severity: d.code === null ? MarkerSeverity.Error : MarkerSeverity.Warning,
-      code: d.code ?? undefined,
-      source: "ruff",
-      tags: d.tags.map((t) => (t === "unnecessary" ? MarkerTag.Unnecessary : MarkerTag.Deprecated)),
-    }));
+    const markers: Monaco.editor.IMarkerData[] = diagnostics.map((d) =>
+      Object.assign(toRange(d.start_location, d.end_location), {
+        message: d.code ? `${d.message} (${d.code})` : d.message,
+        severity:
+          d.code === null ? MarkerSeverity.Error : MarkerSeverity.Warning,
+        code: d.code ?? undefined,
+        source: "ruff",
+        tags: d.tags.map((t) =>
+          t === "unnecessary" ? MarkerTag.Unnecessary : MarkerTag.Deprecated
+        ),
+      })
+    );
     this.monaco.editor.setModelMarkers(model, RUFF_OWNER, markers);
   }
 
-  private codeActions(model: Model, range: Monaco.Range, context: Monaco.languages.CodeActionContext): Monaco.languages.CodeActionList {
+  private codeActions(
+    model: Model,
+    range: Monaco.Range,
+    context: Monaco.languages.CodeActionContext
+  ): Monaco.languages.CodeActionList {
     const findings = this.findings.get(model.uri.toString()) ?? [];
     const actions: Monaco.languages.CodeAction[] = [];
     for (const marker of context.markers) {
-      if (marker.source !== "ruff") continue;
-      const d = findings.find((f) => f.fix && f.start_location.row === marker.startLineNumber && f.start_location.column === marker.startColumn && (f.code ?? undefined) === marker.code);
-      if (!d?.fix) continue;
+      if (marker.source !== "ruff") {
+        continue;
+      }
+      const d = findings.find(
+        (f) =>
+          f.fix &&
+          f.start_location.row === marker.startLineNumber &&
+          f.start_location.column === marker.startColumn &&
+          (f.code ?? undefined) === marker.code
+      );
+      if (!d?.fix) {
+        continue;
+      }
       actions.push({
         title: d.fix.message ?? `Fix ${d.code ?? ""}`.trim(),
         kind: "quickfix",
@@ -219,31 +295,49 @@ export class LinterBinding {
           edits: d.fix.edits.map((e) => ({
             resource: model.uri,
             versionId: model.getVersionId(),
-            textEdit: { range: toRange(e.location, e.end_location), text: e.content ?? "" },
+            textEdit: {
+              range: toRange(e.location, e.end_location),
+              text: e.content ?? "",
+            },
           })),
         },
       });
     }
     void range;
-    return { actions, dispose() {} };
+    return {
+      actions,
+      dispose() {
+        // Nothing was registered that needs releasing.
+      },
+    };
   }
 
-  private async formatEdits(model: Model): Promise<Monaco.languages.TextEdit[]> {
+  private async formatEdits(
+    model: Model
+  ): Promise<Monaco.languages.TextEdit[]> {
     const source = model.getValue();
     let formatted: string;
     try {
       formatted = await this.linter.format(source);
-    } catch (e) {
-      this.onError("Format: " + (e instanceof Error ? e.message : String(e)));
+    } catch (error) {
+      this.onError(
+        `Format: ${error instanceof Error ? error.message : String(error)}`
+      );
       return [];
     }
-    if (formatted === source) return [];
+    if (formatted === source) {
+      return [];
+    }
     return [{ range: model.getFullModelRange(), text: formatted }];
   }
 
   dispose() {
-    for (const d of this.disposables) d.dispose();
-    for (const t of this.timers.values()) clearTimeout(t);
+    for (const d of this.disposables) {
+      d.dispose();
+    }
+    for (const t of this.timers.values()) {
+      clearTimeout(t);
+    }
     this.timers.clear();
   }
 }

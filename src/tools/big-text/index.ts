@@ -2,7 +2,15 @@ import "./tool.css";
 import type { Tool } from "../../shell/types";
 import { parseDuration, formatDuration } from "./countdown";
 import { Display } from "./display";
-import { DEFAULTS, LIMITS, decode, encode, type Countdown, type End, type Font, type Settings, type Speed, type Transition } from "./state";
+import { DEFAULTS, LIMITS, decode, encode } from "./state";
+import type {
+  Countdown,
+  End,
+  Font,
+  Settings,
+  Speed,
+  Transition,
+} from "./state";
 import { hasCountdown, slideAt } from "./text";
 
 /** How long the hint and the pointer stay up after the pointer last moved. */
@@ -12,15 +20,32 @@ const CHROME_MS = 2500;
 function localValue(ms: number): string {
   const d = new Date(ms);
   const p = (n: number) => String(n).padStart(2, "0");
-  const secs = d.getSeconds() ? ":" + p(d.getSeconds()) : "";
+  const secs = d.getSeconds() ? `:${p(d.getSeconds())}` : "";
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}${secs}`;
 }
 
 const tool: Tool = {
   id: "big-text",
   name: "Big Text",
-  subtitle: "Show a message as large as the screen allows, with slides and a countdown.",
-  keywords: ["big", "text", "fullscreen", "full screen", "sign", "display", "banner", "marquee", "ticker", "countdown", "timer", "slides", "kiosk", "message", "present"],
+  subtitle:
+    "Show a message as large as the screen allows, with slides and a countdown.",
+  keywords: [
+    "big",
+    "text",
+    "fullscreen",
+    "full screen",
+    "sign",
+    "display",
+    "banner",
+    "marquee",
+    "ticker",
+    "countdown",
+    "timer",
+    "slides",
+    "kiosk",
+    "message",
+    "present",
+  ],
   mount(el, ctx) {
     el.innerHTML = `
       <div class="options">
@@ -86,7 +111,8 @@ const tool: Tool = {
         </section>
       </div>`;
 
-    const $ = <T extends HTMLElement>(sel: string) => el.querySelector(sel) as T;
+    const $ = <T extends HTMLElement>(sel: string) =>
+      el.querySelector(sel) as T;
     const $message = $<HTMLTextAreaElement>(".o-message");
     const $font = $<HTMLSelectElement>(".o-font");
     const $fg = $<HTMLInputElement>(".o-fg");
@@ -123,20 +149,32 @@ const tool: Tool = {
       $timer.removeAttribute("aria-invalid");
       if ($cd.value === "until") {
         const at = new Date($until.value).getTime();
-        if (Number.isFinite(at)) return { kind: "until", at };
+        if (Number.isFinite(at)) {
+          return { kind: "until", at };
+        }
         $until.setAttribute("aria-invalid", "true");
       } else if ($cd.value === "timer") {
         const secs = parseDuration($timer.value);
-        if (secs) return { kind: "timer", secs };
-        if ($timer.value.trim()) $timer.setAttribute("aria-invalid", "true");
+        if (secs) {
+          return { kind: "timer", secs };
+        }
+        if ($timer.value.trim()) {
+          $timer.setAttribute("aria-invalid", "true");
+        }
       }
       return { kind: "none" };
     }
 
     function read(): Settings {
-      const n = (input: HTMLInputElement, [lo, hi]: readonly [number, number], fallback: number) => {
+      const n = (
+        input: HTMLInputElement,
+        [lo, hi]: readonly [number, number],
+        fallback: number
+      ) => {
         const v = Number(input.value);
-        return input.value.trim() && Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : fallback;
+        return input.value.trim() && Number.isFinite(v)
+          ? Math.min(hi, Math.max(lo, v))
+          : fallback;
       };
       return {
         message: $message.value,
@@ -168,8 +206,10 @@ const tool: Tool = {
       $secs.value = String(s.secs);
       $trans.value = s.transition;
       $cd.value = s.countdown.kind;
-      $until.value = s.countdown.kind === "until" ? localValue(s.countdown.at) : "";
-      $timer.value = s.countdown.kind === "timer" ? formatDuration(s.countdown.secs) : "";
+      $until.value =
+        s.countdown.kind === "until" ? localValue(s.countdown.at) : "";
+      $timer.value =
+        s.countdown.kind === "timer" ? formatDuration(s.countdown.secs) : "";
       $style.value = s.style;
       $end.value = s.end;
       $endText.value = s.endText;
@@ -188,13 +228,18 @@ const tool: Tool = {
         endtext: cd !== "none" && s.end === "text",
         slides: !s.scroll && display.count > 1,
       };
-      for (const f of el.querySelectorAll<HTMLElement>("[data-when]")) f.hidden = !on[f.dataset.when!];
+      for (const f of el.querySelectorAll<HTMLElement>("[data-when]")) {
+        f.hidden = !on[f.dataset.when!];
+      }
       const empty = !s.message.trim() && s.countdown.kind === "none";
       $link.disabled = empty;
       $present.disabled = empty;
-      $note.textContent = s.countdown.kind !== "none" && s.message.trim() && !hasCountdown(s.message)
-        ? "Put {countdown} where the time should go."
-        : "";
+      $note.textContent =
+        s.countdown.kind !== "none" &&
+        s.message.trim() &&
+        !hasCountdown(s.message)
+          ? "Put {countdown} where the time should go."
+          : "";
     }
 
     function publish() {
@@ -212,12 +257,14 @@ const tool: Tool = {
 
     // The preview has the shape of this screen, as large as the pane allows.
     new ResizeObserver(([entry]) => {
-      if (presenting) return;
+      if (presenting) {
+        return;
+      }
       const { width: w, height: h } = entry!.contentRect;
       const ratio = screen.width / screen.height || 16 / 9;
       const sw = Math.min(w, h * ratio);
-      $stage.style.setProperty("--w", Math.floor(sw) + "px");
-      $stage.style.setProperty("--h", Math.floor(sw / ratio) + "px");
+      $stage.style.setProperty("--w", `${Math.floor(sw)}px`);
+      $stage.style.setProperty("--h", `${Math.floor(sw / ratio)}px`);
     }).observe($frame);
 
     display.onSlide = (i, count) => {
@@ -241,11 +288,15 @@ const tool: Tool = {
     function wakeChrome() {
       $stage.classList.add("awake");
       clearTimeout(chromeTimer);
-      chromeTimer = window.setTimeout(() => $stage.classList.remove("awake"), CHROME_MS);
+      chromeTimer = window.setTimeout(
+        () => $stage.classList.remove("awake"),
+        CHROME_MS
+      );
     }
 
     function syncHint() {
-      $hint.hidden = !document.fullscreenEnabled || !!document.fullscreenElement;
+      $hint.hidden =
+        !document.fullscreenEnabled || !!document.fullscreenElement;
     }
 
     async function keepAwake() {
@@ -257,7 +308,11 @@ const tool: Tool = {
     }
 
     function fullscreen() {
-      if (document.fullscreenEnabled && !document.fullscreenElement) document.documentElement.requestFullscreen().catch(() => {});
+      if (document.fullscreenEnabled && !document.fullscreenElement) {
+        document.documentElement.requestFullscreen().catch(() => {
+          // The browser may refuse; presenting works in the window too.
+        });
+      }
     }
 
     /**
@@ -270,7 +325,9 @@ const tool: Tool = {
       $stage.classList.add("presenting");
       display.startTimer();
       publish();
-      if (clicked) fullscreen();
+      if (clicked) {
+        fullscreen();
+      }
       // Asked for already: no hint while the browser answers.
       $hint.hidden = clicked || !document.fullscreenEnabled;
       wakeChrome();
@@ -279,11 +336,17 @@ const tool: Tool = {
     }
 
     function exitPresent() {
-      if (!presenting) return;
+      if (!presenting) {
+        return;
+      }
       presenting = false;
       $stage.classList.remove("presenting", "awake");
       display.resetTimer();
-      if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+      if (document.fullscreenElement) {
+        document.exitFullscreen().catch(() => {
+          // Already left, e.g. with Esc.
+        });
+      }
       void wake?.release();
       wake = null;
       publish();
@@ -293,49 +356,73 @@ const tool: Tool = {
     // Leaving full screen (Esc, or the browser's own control) ends the presentation.
     let wasFullscreen = false;
     document.addEventListener("fullscreenchange", () => {
-      if (document.fullscreenElement) wasFullscreen = true;
-      else if (wasFullscreen) {
+      if (document.fullscreenElement) {
+        wasFullscreen = true;
+      } else if (wasFullscreen) {
         wasFullscreen = false;
         exitPresent();
       }
       syncHint();
     });
     document.addEventListener("visibilitychange", () => {
-      if (presenting && document.visibilityState === "visible") void keepAwake();
+      if (presenting && document.visibilityState === "visible") {
+        void keepAwake();
+      }
     });
     // Switching to another Tool hides the Display; the presentation ends with it.
     new ResizeObserver(() => {
-      if (presenting && !$stage.clientWidth) exitPresent();
+      if (presenting && !$stage.clientWidth) {
+        exitPresent();
+      }
     }).observe($stage);
 
     // While presenting, keys go to the Display alone: none reach the Shell's
     // shortcuts or anything behind it.
-    window.addEventListener("keydown", (e) => {
-      if (!presenting) return;
-      e.stopPropagation();
-      if (e.key === "Escape") exitPresent();
-      else if (e.key === "f" || e.key === "F") fullscreen();
-      else if (["ArrowRight", "ArrowDown", "PageDown", " "].includes(e.key)) display.step(1);
-      else if (["ArrowLeft", "ArrowUp", "PageUp"].includes(e.key)) display.step(-1);
-      else if (e.key !== "Tab") return;
-      e.preventDefault();
-    }, true);
+    window.addEventListener(
+      "keydown",
+      (e) => {
+        if (!presenting) {
+          return;
+        }
+        e.stopPropagation();
+        if (e.key === "Escape") {
+          exitPresent();
+        } else if (e.key === "f" || e.key === "F") {
+          fullscreen();
+        } else if (
+          ["ArrowRight", "ArrowDown", "PageDown", " "].includes(e.key)
+        ) {
+          display.step(1);
+        } else if (["ArrowLeft", "ArrowUp", "PageUp"].includes(e.key)) {
+          display.step(-1);
+        } else if (e.key !== "Tab") {
+          return;
+        }
+        e.preventDefault();
+      },
+      true
+    );
 
     $stage.addEventListener("pointermove", () => presenting && wakeChrome());
     $stage.addEventListener("pointerdown", () => presenting && wakeChrome());
     // A click moves on to the next Slide; with only one, it leaves, so a
     // screen with no keyboard can still get out.
     $stage.addEventListener("click", () => {
-      if (!presenting) return;
-      if (display.count > 1) display.step(1);
-      else exitPresent();
+      if (!presenting) {
+        return;
+      }
+      if (display.count > 1) {
+        display.step(1);
+      } else {
+        exitPresent();
+      }
     });
     $present.addEventListener("click", () => present(true));
 
     $link.addEventListener("click", async () => {
       const url = new URL(location.href);
       url.search = "";
-      url.hash = "big-text/" + encode(settings, true);
+      url.hash = `big-text/${encode(settings, true)}`;
       let label = "Copied";
       try {
         await navigator.clipboard.writeText(url.href);
@@ -343,7 +430,9 @@ const tool: Tool = {
         label = "Copy failed";
       }
       $link.textContent = label;
-      setTimeout(() => { $link.textContent = "Copy link"; }, 1200);
+      setTimeout(() => {
+        $link.textContent = "Copy link";
+      }, 1200);
     });
 
     /* ---------------- fields ---------------- */
@@ -355,23 +444,33 @@ const tool: Tool = {
         next.setHours(next.getHours() + 1, 0, 0, 0);
         $until.value = localValue(next.getTime());
       }
-      if ($cd.value === "timer" && !$timer.value.trim()) $timer.value = "10m";
+      if ($cd.value === "timer" && !$timer.value.trim()) {
+        $timer.value = "10m";
+      }
     }
 
     // Selects and checkboxes fire input too, so one listener sees every change.
     el.addEventListener("input", (e) => {
       const t = e.target as HTMLElement;
-      if (t === $cd) prefillCountdown();
-      if (t === $message || t.closest(".options")) update();
+      if (t === $cd) {
+        prefillCountdown();
+      }
+      if (t === $message || t.closest(".options")) {
+        update();
+      }
     });
-    for (const type of ["input", "keyup", "pointerup", "focus"]) $message.addEventListener(type, followCaret);
+    for (const type of ["input", "keyup", "pointerup", "focus"]) {
+      $message.addEventListener(type, followCaret);
+    }
 
     ctx.onRestore((payload) => {
       const { settings: s, show } = decode(payload);
       fill(s);
       update();
       caretSlide = 0;
-      if (show && !presenting) present(false);
+      if (show && !presenting) {
+        present(false);
+      }
     });
 
     // Drawn, not published: the Shell restores a Deep Link right after mount,

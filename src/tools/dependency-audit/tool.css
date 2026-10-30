@@ -58,14 +58,22 @@
   flex-wrap: wrap;
 }
 
-.tool-dependency-audit .pane-head .spacer { flex: 1; }
+.tool-dependency-audit .pane-head .spacer {
+  flex: 1;
+}
 
-
-.tool-dependency-audit .input-pane { flex-shrink: 0; }
+.tool-dependency-audit .input-pane {
+  flex-shrink: 0;
+}
 
 /* The detected lockfile is a file name: set as one, beside the sans label. */
-.tool-dependency-audit .kind-label { color: var(--ok); font-family: var(--mono); }
-.tool-dependency-audit .kind-label.bad { color: var(--danger-text); }
+.tool-dependency-audit .kind-label {
+  color: var(--ok);
+  font-family: var(--mono);
+}
+.tool-dependency-audit .kind-label.bad {
+  color: var(--danger-text);
+}
 
 .tool-dependency-audit .src {
   border: none;
@@ -81,8 +89,17 @@
    textarea is dropped whole, its outline included, or the two would show at
    once. Keyed to the textarea and not to :focus-within, so a button in the
    pane head keeps just its own ring instead of ringing the pane too. */
-.tool-dependency-audit .src:focus { outline: none; box-shadow: none; border: none; }
-.tool-dependency-audit .input-pane:has(.src:focus) { outline: var(--ring-line); outline-offset: -1px; border-color: transparent; box-shadow: var(--ring-halo); }
+.tool-dependency-audit .src:focus {
+  outline: none;
+  box-shadow: none;
+  border: none;
+}
+.tool-dependency-audit .input-pane:has(.src:focus) {
+  outline: var(--ring-line);
+  outline-offset: -1px;
+  border-color: transparent;
+  box-shadow: var(--ring-halo);
+}
 
 .tool-dependency-audit .files {
   display: flex;
@@ -91,7 +108,9 @@
   padding: 8px 12px;
   border-top: 1px solid var(--border);
 }
-.tool-dependency-audit .files[hidden] { display: none; }
+.tool-dependency-audit .files[hidden] {
+  display: none;
+}
 
 .tool-dependency-audit .chip {
   display: inline-flex;
@@ -103,8 +122,13 @@
   font-family: var(--mono);
   font-size: 12px;
 }
-.tool-dependency-audit .chip.bad { color: var(--danger-text); border-color: rgba(247, 193, 193, 0.4); }
-.tool-dependency-audit .chip-kind { color: var(--text-muted); }
+.tool-dependency-audit .chip.bad {
+  color: var(--danger-text);
+  border-color: rgba(247, 193, 193, 0.4);
+}
+.tool-dependency-audit .chip-kind {
+  color: var(--text-muted);
+}
 .tool-dependency-audit .chip-x {
   min-height: 0;
   padding: 0 6px;
@@ -132,7 +156,9 @@
   align-items: center;
   gap: 8px 18px;
 }
-.tool-dependency-audit .filters[hidden] { display: none; }
+.tool-dependency-audit .filters[hidden] {
+  display: none;
+}
 .tool-dependency-audit .filter-group {
   display: flex;
   flex-wrap: wrap;
@@ -145,7 +171,9 @@
   color: var(--text-muted);
   font-size: 12.5px;
 }
-.tool-dependency-audit .opt[hidden] { display: none; }
+.tool-dependency-audit .opt[hidden] {
+  display: none;
+}
 
 /* ---- results ---- */
 
@@ -180,8 +208,12 @@
   font-variant-numeric: tabular-nums;
 }
 /* Nothing to report, no bar: it appears with the first result or error. */
-.tool-dependency-audit .statusbar:has(.status-text:empty) { display: none; }
-.tool-dependency-audit .statusbar.error { color: var(--danger-text); }
+.tool-dependency-audit .statusbar:has(.status-text:empty) {
+  display: none;
+}
+.tool-dependency-audit .statusbar.error {
+  color: var(--danger-text);
+}
 
 .tool-dependency-audit .note {
   margin: 4px 0;
@@ -208,8 +240,12 @@
   margin-bottom: 10px;
   overflow: hidden;
 }
-.tool-dependency-audit .lockfile:last-child { margin-bottom: 0; }
-.tool-dependency-audit .lockfile[hidden] { display: none; }
+.tool-dependency-audit .lockfile:last-child {
+  margin-bottom: 0;
+}
+.tool-dependency-audit .lockfile[hidden] {
+  display: none;
+}
 
 .tool-dependency-audit .lockfile > summary {
   display: flex;
@@ -222,7 +258,9 @@
   list-style: none;
   user-select: none;
 }
-.tool-dependency-audit .lockfile > summary::-webkit-details-marker { display: none; }
+.tool-dependency-audit .lockfile > summary::-webkit-details-marker {
+  display: none;
+}
 .tool-dependency-audit .lockfile > summary::before {
   content: "";
   width: 0;
@@ -232,20 +270,37 @@
   border-bottom: 4px solid transparent;
   transition: transform 0.12s;
 }
-.tool-dependency-audit .lockfile[open] > summary::before { transform: rotate(90deg); }
-.tool-dependency-audit .lockfile .spacer { flex: 1; }
-.tool-dependency-audit .lf-name { font-weight: 600; }
-.tool-dependency-audit .lf-label { color: var(--text-muted); }
-.tool-dependency-audit .lockfile .count { color: var(--text-muted); white-space: nowrap; }
-.tool-dependency-audit .lockfile.failed > summary .lf-name { color: var(--danger-text); }
-.tool-dependency-audit .lf-body { padding: 4px 10px 10px; }
+.tool-dependency-audit .lockfile[open] > summary::before {
+  transform: rotate(90deg);
+}
+.tool-dependency-audit .lockfile .spacer {
+  flex: 1;
+}
+.tool-dependency-audit .lf-name {
+  font-weight: 600;
+}
+.tool-dependency-audit .lf-label {
+  color: var(--text-muted);
+}
+.tool-dependency-audit .lockfile .count {
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.tool-dependency-audit .lockfile.failed > summary .lf-name {
+  color: var(--danger-text);
+}
+.tool-dependency-audit .lf-body {
+  padding: 4px 10px 10px;
+}
 
 .tool-dependency-audit .cards {
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
-.tool-dependency-audit .cards:empty { display: none; }
+.tool-dependency-audit .cards:empty {
+  display: none;
+}
 
 /* One step tighter than the lockfile block it sits in, so the nested corners
    read as concentric rather than pinched. */
@@ -254,7 +309,9 @@
   border-radius: var(--radius-sm);
   background: var(--bg);
 }
-.tool-dependency-audit .card[hidden] { display: none; }
+.tool-dependency-audit .card[hidden] {
+  display: none;
+}
 
 .tool-dependency-audit .card-head {
   display: flex;
@@ -266,10 +323,21 @@
   font-size: 12.5px;
   flex-wrap: wrap;
 }
-.tool-dependency-audit .pkg { font-weight: 600; overflow-wrap: anywhere; }
-.tool-dependency-audit .ver { font-weight: 400; color: var(--text-muted); }
-.tool-dependency-audit .hit-count { color: var(--text-muted); font-size: 11.5px; }
-.tool-dependency-audit .card-body { padding: 4px 12px 10px; }
+.tool-dependency-audit .pkg {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.tool-dependency-audit .ver {
+  font-weight: 400;
+  color: var(--text-muted);
+}
+.tool-dependency-audit .hit-count {
+  color: var(--text-muted);
+  font-size: 11.5px;
+}
+.tool-dependency-audit .card-body {
+  padding: 4px 12px 10px;
+}
 
 .tool-dependency-audit .tag {
   font-family: var(--sans);
@@ -293,17 +361,34 @@
   letter-spacing: 0.05em;
   white-space: nowrap;
 }
-.tool-dependency-audit .sev.critical { color: var(--danger-text); background: var(--danger-bg); border-color: transparent; }
-.tool-dependency-audit .sev.high { color: var(--danger-text); border-color: rgba(247, 193, 193, 0.5); }
-.tool-dependency-audit .sev.moderate { color: var(--accent); border-color: rgba(201, 100, 66, 0.45); }
-.tool-dependency-audit .sev.low { color: var(--ok); border-color: rgba(159, 191, 127, 0.4); }
+.tool-dependency-audit .sev.critical {
+  color: var(--danger-text);
+  background: var(--danger-bg);
+  border-color: transparent;
+}
+.tool-dependency-audit .sev.high {
+  color: var(--danger-text);
+  border-color: rgba(247, 193, 193, 0.5);
+}
+.tool-dependency-audit .sev.moderate {
+  color: var(--accent);
+  border-color: rgba(201, 100, 66, 0.45);
+}
+.tool-dependency-audit .sev.low {
+  color: var(--ok);
+  border-color: rgba(159, 191, 127, 0.4);
+}
 
 .tool-dependency-audit .advisory {
   padding: 8px 0;
   border-top: 1px solid var(--border);
 }
-.tool-dependency-audit .advisory:first-child { border-top: none; }
-.tool-dependency-audit .advisory[hidden] { display: none; }
+.tool-dependency-audit .advisory:first-child {
+  border-top: none;
+}
+.tool-dependency-audit .advisory[hidden] {
+  display: none;
+}
 
 .tool-dependency-audit .adv-head {
   display: flex;
@@ -321,9 +406,14 @@
 }
 @media (hover: hover) {
   .tool-dependency-audit .adv-head a:hover,
-  .tool-dependency-audit .results-title a:hover { color: var(--accent); text-decoration-color: var(--accent); }
+  .tool-dependency-audit .results-title a:hover {
+    color: var(--accent);
+    text-decoration-color: var(--accent);
+  }
 }
-.tool-dependency-audit .aliases { color: var(--text-muted); }
+.tool-dependency-audit .aliases {
+  color: var(--text-muted);
+}
 
 .tool-dependency-audit .adv-summary {
   margin: 6px 0 0;
@@ -335,16 +425,23 @@
   font-size: 12.5px;
   color: var(--text-muted);
 }
-.tool-dependency-audit .adv-fix.has-fix { color: var(--ok); }
+.tool-dependency-audit .adv-fix.has-fix {
+  color: var(--ok);
+}
 
-.tool-dependency-audit .raw { margin-top: 6px; }
+.tool-dependency-audit .raw {
+  margin-top: 6px;
+}
 .tool-dependency-audit .raw > summary {
   cursor: pointer;
   font-size: 12px;
   color: var(--text-muted);
   user-select: none;
 }
-.tool-dependency-audit .raw-body { position: relative; margin-top: 6px; }
+.tool-dependency-audit .raw-body {
+  position: relative;
+  margin-top: 6px;
+}
 .tool-dependency-audit .btn-copy-raw {
   position: absolute;
   top: 6px;
@@ -367,7 +464,9 @@
 }
 
 .tool-dependency-audit .clean,
-.tool-dependency-audit .skipped { margin-top: 10px; }
+.tool-dependency-audit .skipped {
+  margin-top: 10px;
+}
 .tool-dependency-audit .clean > summary,
 .tool-dependency-audit .skipped > summary {
   cursor: pointer;
@@ -398,15 +497,31 @@
   gap: 10px;
   flex-wrap: wrap;
 }
-.tool-dependency-audit .skipped-list .reason { color: var(--text-muted); overflow-wrap: anywhere; }
+.tool-dependency-audit .skipped-list .reason {
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
 
 @media (max-width: 767px) {
-  .tool-dependency-audit .repo-row { flex-wrap: wrap; }
-  .tool-dependency-audit .repo { flex-basis: 100%; }
+  .tool-dependency-audit .repo-row {
+    flex-wrap: wrap;
+  }
+  .tool-dependency-audit .repo {
+    flex-basis: 100%;
+  }
   /* Touch targets: the fetch button sits outside any pane head, and the
      chip grows around its remove button. */
-  .tool-dependency-audit .repo-row :is(button, .repo) { min-height: 40px; }
-  .tool-dependency-audit .chip-x { min-width: 36px; min-height: 36px; }
-  .tool-dependency-audit .lockfile .count { display: none; }
-  .tool-dependency-audit .hit-count { display: none; }
+  .tool-dependency-audit .repo-row :is(button, .repo) {
+    min-height: 40px;
+  }
+  .tool-dependency-audit .chip-x {
+    min-width: 36px;
+    min-height: 36px;
+  }
+  .tool-dependency-audit .lockfile .count {
+    display: none;
+  }
+  .tool-dependency-audit .hit-count {
+    display: none;
+  }
 }

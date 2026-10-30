@@ -36,21 +36,33 @@ const SHAPES: { name: string; d: string }[] = [
 
 function polygon(sides: number, r: number, startDeg: number, dy = 0): string {
   const pts: string[] = [];
-  for (let i = 0; i < sides; i++) {
+  for (let i = 0; i < sides; i += 1) {
     const a = ((startDeg + (360 / sides) * i) * Math.PI) / 180;
-    pts.push((50 + r * Math.cos(a)).toFixed(1) + " " + (50 + dy + r * Math.sin(a)).toFixed(1));
+    pts.push(
+      `${(50 + r * Math.cos(a)).toFixed(1)} ${(
+        50 +
+        dy +
+        r * Math.sin(a)
+      ).toFixed(1)}`
+    );
   }
-  return "M" + pts.join(" L") + " Z";
+  return `M${pts.join(" L")} Z`;
 }
 
 function star(points: number, outer: number, inner: number, dy = 0): string {
   const pts: string[] = [];
-  for (let i = 0; i < points * 2; i++) {
+  for (let i = 0; i < points * 2; i += 1) {
     const r = i % 2 ? inner : outer;
     const a = ((-90 + (180 / points) * i) * Math.PI) / 180;
-    pts.push((50 + r * Math.cos(a)).toFixed(1) + " " + (50 + dy + r * Math.sin(a)).toFixed(1));
+    pts.push(
+      `${(50 + r * Math.cos(a)).toFixed(1)} ${(
+        50 +
+        dy +
+        r * Math.sin(a)
+      ).toFixed(1)}`
+    );
   }
-  return "M" + pts.join(" L") + " Z";
+  return `M${pts.join(" L")} Z`;
 }
 
 /** The eight pentominoes with a letter name that fit in three by three: F, P, T, U, V, W, X, Z. */
@@ -76,7 +88,9 @@ function cells(pattern: string): string {
   let d = "";
   rows.forEach((row, y) => {
     [...row].forEach((c, x) => {
-      if (c !== "#") return;
+      if (c !== "#") {
+        return;
+      }
       const left = x0 + x * size - 0.3;
       const top = y0 + y * size - 0.3;
       d += `M${left.toFixed(1)} ${top.toFixed(1)}h${size + 0.6}v${size + 0.6}h-${size + 0.6}Z`;
@@ -87,7 +101,10 @@ function cells(pattern: string): string {
 
 export const SHAPE_SETS: Record<ShapeSetId, { name: string; d: string }[]> = {
   shapes: SHAPES,
-  pentominoes: PENTOMINOES.map(([name, p]) => ({ name: name + " pentomino", d: cells(p) })),
+  pentominoes: PENTOMINOES.map(([name, p]) => ({
+    name: `${name} pentomino`,
+    d: cells(p),
+  })),
 };
 
 export function shapeSvg(set: ShapeSetId, index: number, fill: string): string {
@@ -105,15 +122,17 @@ export interface SoundItem {
 }
 
 /** The Sound Modality's eight letters, consonants no two of which rhyme, each shown by its file's name. */
-export const LETTERS: SoundItem[] = Object.entries(SOUNDS.letters).map(([file, url]) => ({ label: file.toUpperCase(), url }));
+export const LETTERS: SoundItem[] = Object.entries(SOUNDS.letters).map(
+  ([file, url]) => ({ label: file.toUpperCase(), url })
+);
 
 /** The spoken operations of Arithmetic. */
 export const OPERATIONS: Record<Op, string> = SOUNDS.operations;
 
 /** A Session's letters, in a fresh order: which index stands for which letter changes per Session. */
 export function sample(rand: () => number): SoundItem[] {
-  const items = LETTERS.slice();
-  for (let i = items.length - 1; i > 0; i--) {
+  const items = [...LETTERS];
+  for (let i = items.length - 1; i > 0; i -= 1) {
     const j = Math.floor(rand() * (i + 1));
     [items[i], items[j]] = [items[j]!, items[i]!];
   }

@@ -50,8 +50,9 @@
   color: var(--text-muted);
 }
 
-.tool-save-decoder .pane-head .spacer { flex: 1; }
-
+.tool-save-decoder .pane-head .spacer {
+  flex: 1;
+}
 
 .tool-save-decoder .src {
   flex: 1;
@@ -80,9 +81,15 @@
 }
 
 /* Nothing to report, no bar: it appears with the first result or error. */
-.tool-save-decoder .statusbar:has(.status-text:empty) { display: none; }
-.tool-save-decoder .statusbar.error { color: var(--danger-text); }
+.tool-save-decoder .statusbar:has(.status-text:empty) {
+  display: none;
+}
+.tool-save-decoder .statusbar.error {
+  color: var(--danger-text);
+}
 
 @media (max-width: 1000px) {
-  .tool-save-decoder .panes { grid-template-columns: 1fr; }
+  .tool-save-decoder .panes {
+    grid-template-columns: 1fr;
+  }
 }

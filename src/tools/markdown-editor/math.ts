@@ -9,7 +9,7 @@ export interface MathItem {
   raw: string;
 }
 
-const PH = (i: number) => "M" + i + "";
+const PH = (i: number) => `M${i}`;
 const PH_RE = /(M\d+)/;
 const PH_ONE = /^M(\d+)$/;
 
@@ -23,8 +23,10 @@ const PH_ONE = /^M(\d+)$/;
 export function extractMath(src: string): { src: string; math: MathItem[] } {
   const math: MathItem[] = [];
   const out: string[] = [];
-  let inFence = false, fenceCh = "";
-  let disp: string[] | null = null, dispPrefix = "";
+  let inFence = false;
+  let fenceCh = "";
+  let disp: string[] | null = null;
+  let dispPrefix = "";
   for (const line of src.split("\n")) {
     if (disp) {
       const close = line.indexOf("$$");
@@ -34,7 +36,7 @@ export function extractMath(src: string): { src: string; math: MathItem[] } {
       }
       disp.push(line.slice(0, close));
       const tex = disp.join("\n");
-      math.push({ tex, display: true, raw: "$$" + tex + "$$" });
+      math.push({ tex, display: true, raw: `$$${tex}$$` });
       out.push(dispPrefix + PH(math.length - 1) + line.slice(close + 2));
       disp = null;
       dispPrefix = "";
@@ -45,7 +47,9 @@ export function extractMath(src: string): { src: string; math: MathItem[] } {
       if (!inFence) {
         inFence = true;
         fenceCh = fm[1]![0]!;
-      } else if (fm[1]![0] === fenceCh) inFence = false;
+      } else if (fm[1]![0] === fenceCh) {
+        inFence = false;
+      }
       out.push(line);
       continue;
     }
@@ -53,31 +57,40 @@ export function extractMath(src: string): { src: string; math: MathItem[] } {
       out.push(line);
       continue;
     }
-    let res = "", j = 0, opened = false;
+    let res = "";
+    let j = 0;
+    let opened = false;
     while (j < line.length) {
       const c = line[j];
       if (c === "`") {
         let k = j;
-        while (line[k] === "`") k++;
+        while (line[k] === "`") {
+          k += 1;
+        }
         const run = k - j;
-        let m = k, close = -1;
+        let m = k;
+        let close = -1;
         while (m < line.length) {
           if (line[m] === "`") {
             let m2 = m;
-            while (line[m2] === "`") m2++;
+            while (line[m2] === "`") {
+              m2 += 1;
+            }
             if (m2 - m === run) {
               close = m2;
               break;
             }
             m = m2;
-          } else m++;
+          } else {
+            m += 1;
+          }
         }
-        if (close !== -1) {
-          res += line.slice(j, close);
-          j = close;
-        } else {
+        if (close === -1) {
           res += line.slice(j, k);
           j = k;
+        } else {
+          res += line.slice(j, close);
+          j = close;
         }
         continue;
       }
@@ -86,20 +99,28 @@ export function extractMath(src: string): { src: string; math: MathItem[] } {
         const closer = display ? "\\]" : "\\)";
         const end = line.indexOf(closer, j + 2);
         if (end !== -1) {
-          math.push({ tex: line.slice(j + 2, end), display, raw: line.slice(j, end + 2) });
+          math.push({
+            tex: line.slice(j + 2, end),
+            display,
+            raw: line.slice(j, end + 2),
+          });
           res += PH(math.length - 1);
           j = end + 2;
           continue;
         }
         res += c;
-        j++;
+        j += 1;
         continue;
       }
       if (c === "$") {
         if (line[j + 1] === "$") {
           const end = line.indexOf("$$", j + 2);
           if (end !== -1) {
-            math.push({ tex: line.slice(j + 2, end), display: true, raw: line.slice(j, end + 2) });
+            math.push({
+              tex: line.slice(j + 2, end),
+              display: true,
+              raw: line.slice(j, end + 2),
+            });
             res += PH(math.length - 1);
             j = end + 2;
             continue;
@@ -110,10 +131,16 @@ export function extractMath(src: string): { src: string; math: MathItem[] } {
           break;
         }
         let end = -1;
-        for (let m = j + 1; m < line.length; m++) {
-          if (line[m] !== "$") continue;
-          if (line[m - 1] === "\\") continue; // an escaped dollar inside the math
-          if (line[m - 1] !== " " && m > j + 1) end = m;
+        for (let m = j + 1; m < line.length; m += 1) {
+          if (line[m] !== "$") {
+            continue;
+          }
+          if (line[m - 1] === "\\") {
+            continue;
+          } // an escaped dollar inside the math
+          if (line[m - 1] !== " " && m > j + 1) {
+            end = m;
+          }
           break;
         }
         if (end !== -1 && line[j + 1] !== " ") {
@@ -126,16 +153,20 @@ export function extractMath(src: string): { src: string; math: MathItem[] } {
           }
         }
         res += c;
-        j++;
+        j += 1;
         continue;
       }
       res += c;
-      j++;
+      j += 1;
     }
-    if (!opened) out.push(res);
+    if (!opened) {
+      out.push(res);
+    }
   }
   // an unterminated $$ is restored verbatim
-  if (disp) out.push(dispPrefix + "$$" + disp.join("\n"));
+  if (disp) {
+    out.push(`${dispPrefix}$$${disp.join("\n")}`);
+  }
   return { src: out.join("\n"), math };
 }
 
@@ -144,25 +175,37 @@ export function extractMath(src: string): { src: string; math: MathItem[] } {
  * for it: typeset math, or the source text while the typesetter is not here.
  * Placeholders inside code are left alone (they were never math).
  */
-export function injectMath(root: HTMLElement, math: MathItem[], render: (item: MathItem) => Node) {
-  if (!math.length) return;
+export function injectMath(
+  root: HTMLElement,
+  math: MathItem[],
+  render: (item: MathItem) => Node
+) {
+  if (!math.length) {
+    return;
+  }
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   const nodes: Text[] = [];
   let n: Node | null;
   while ((n = walker.nextNode())) {
-    if ((n.nodeValue ?? "").indexOf("") !== -1) nodes.push(n as Text);
+    if ((n.nodeValue ?? "").includes("")) {
+      nodes.push(n as Text);
+    }
   }
   for (const node of nodes) {
-    if (node.parentElement?.closest("code, pre")) continue;
+    if (node.parentElement?.closest("code, pre")) {
+      continue;
+    }
     const frag = document.createDocumentFragment();
     for (const part of (node.nodeValue ?? "").split(PH_RE)) {
       const m = PH_ONE.exec(part);
       const item = m ? math[+m[1]!] : undefined;
       if (!item) {
-        if (part) frag.appendChild(document.createTextNode(part));
+        if (part) {
+          frag.append(document.createTextNode(part));
+        }
         continue;
       }
-      frag.appendChild(render(item));
+      frag.append(render(item));
     }
     node.parentNode?.replaceChild(frag, node);
   }

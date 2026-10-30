@@ -34,7 +34,9 @@
   --control-h: 25px;
   --gutter: 2rem;
   --sidebar-width: 220px;
-  --sans: "Mona Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --sans:
+    "Mona Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui,
+    sans-serif;
   --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 }
 
@@ -54,14 +56,16 @@
   font-family: "Mona Sans";
   font-style: normal;
   font-weight: 200 900;
-  src: url("./fonts/mona-sans-latin-wght-normal.woff2") format("woff2-variations");
+  src: url("./fonts/mona-sans-latin-wght-normal.woff2")
+    format("woff2-variations");
 }
 @font-face {
   font-display: block;
   font-family: "Mona Sans";
   font-style: italic;
   font-weight: 200 900;
-  src: url("./fonts/mona-sans-latin-wght-italic.woff2") format("woff2-variations");
+  src: url("./fonts/mona-sans-latin-wght-italic.woff2")
+    format("woff2-variations");
 }
 @font-face {
   font-display: block;
@@ -92,7 +96,9 @@
   src: url("./fonts/ibm-plex-mono-latin-600-normal.woff2") format("woff2");
 }
 
-* { box-sizing: border-box; }
+* {
+  box-sizing: border-box;
+}
 
 body {
   margin: 0;
@@ -149,7 +155,9 @@ button {
   border: 0.5px solid var(--border-strong);
   border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: background 0.15s, filter 0.15s;
+  transition:
+    background 0.15s,
+    filter 0.15s;
 }
 
 button.primary {
@@ -162,24 +170,44 @@ button.primary {
 /* Hover styles stick after taps on touch screens; only offer them to
    devices that can actually hover. */
 @media (hover: hover) {
-  button:hover { background: var(--surface-2); }
-  button.primary:hover { background: var(--accent); filter: brightness(1.08); }
+  button:hover {
+    background: var(--surface-2);
+  }
+  button.primary:hover {
+    background: var(--accent);
+    filter: brightness(1.08);
+  }
 }
 
 /* Press: a 1px drop and a darker face, applied instantly. Not a scale:
    scaling resamples the 0.5px border at a fractional size and its curves
    come out ragged, while a whole-pixel translate leaves it untouched.
    After the hover rules so the pressed face wins while hovered. */
-button:active { transform: translateY(1px); background: var(--surface-3); transition: none; }
-button.primary:active { background: var(--accent); filter: brightness(0.92); }
+button:active {
+  transform: translateY(1px);
+  background: var(--surface-3);
+  transition: none;
+}
+button.primary:active {
+  background: var(--accent);
+  filter: brightness(0.92);
+}
 
 /* Disabled: nothing to act on yet, such as a Copy with nothing to copy.
    Dimmed, and deaf to hover, so it does not pretend it would work. One
    rule for every Tool. (A disabled button never matches :active.) */
-button:disabled { opacity: 0.4; cursor: default; }
+button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
 @media (hover: hover) {
-  button:disabled:hover { background: transparent; filter: none; }
-  button.primary:disabled:hover { background: var(--accent); }
+  button:disabled:hover {
+    background: transparent;
+    filter: none;
+  }
+  button.primary:disabled:hover {
+    background: var(--accent);
+  }
 }
 
 textarea {
@@ -200,7 +228,10 @@ textarea:focus {
   box-shadow: var(--ring-halo);
 }
 
-textarea::placeholder { color: var(--text-muted); opacity: 0.7; }
+textarea::placeholder {
+  color: var(--text-muted);
+  opacity: 0.7;
+}
 
 /* A select's native box runs taller than a button's for the same padding,
    so it is given the action height outright. */
@@ -219,7 +250,9 @@ select {
    the stroke is measured in screen pixels, so the 1.5px build.ts gives them
    is 1.5px at 12px and at 16px alike, matching the regular-weight text they
    sit beside. A rule may set a heavier one beside heavier text. */
-svg[stroke-width] * { vector-effect: non-scaling-stroke; }
+svg[stroke-width] * {
+  vector-effect: non-scaling-stroke;
+}
 
 input[type="checkbox"] {
   accent-color: var(--accent);
@@ -263,13 +296,18 @@ input[type="text"] {
   border-radius: var(--radius-sm);
 }
 @media (hover: hover) {
-  .seg button:hover { color: var(--text); background: transparent; }
+  .seg button:hover {
+    color: var(--text);
+    background: transparent;
+  }
 }
 .seg button.active {
   background: var(--surface-3);
   color: var(--text);
 }
-.seg button:active { transform: none; }
+.seg button:active {
+  transform: none;
+}
 
 /* Inline: a small action inside content. A Tool may restyle its colours. */
 button.inline {
@@ -314,7 +352,9 @@ button:focus-visible {
 /* Keep this breakpoint in sync with `narrow` in main.ts and shell.css. */
 @media (max-width: 767px) {
   /* Label text that only fits in the wide layout, e.g. "Paste[ from clipboard]". */
-  .wide-only { display: none; }
+  .wide-only {
+    display: none;
+  }
 
   /* Touch targets: 36px tall plus the 4px extension above is 44px. */
   .pane-head button,

@@ -3,6 +3,7 @@
 // follows the theme's own mapping for every kind of file the Tool knows,
 // with one liberty: stubs and Cython sources are Python too.
 
+import audio from "@react-symbols/icons/files/Audio";
 import bracketsPurple from "@react-symbols/icons/files/BracketsPurple";
 import bracketsYellow from "@react-symbols/icons/files/BracketsYellow";
 import codeOrange from "@react-symbols/icons/files/CodeOrange";
@@ -26,16 +27,14 @@ import shell from "@react-symbols/icons/files/Shell";
 import svg from "@react-symbols/icons/files/SVG";
 import text from "@react-symbols/icons/files/Text";
 import typescript from "@react-symbols/icons/files/TypeScript";
+import video from "@react-symbols/icons/files/Video";
 import xml from "@react-symbols/icons/files/XML";
 import yaml from "@react-symbols/icons/files/Yaml";
-import audio from "@react-symbols/icons/files/Audio";
-import video from "@react-symbols/icons/files/Video";
-import folder from "@react-symbols/icons/folders/Folder";
-import folderOpen from "@react-symbols/icons/folders/FolderOpen";
+
 import { basename } from "./project";
 
-export const ICON_FOLDER = folder;
-export const ICON_FOLDER_OPEN = folderOpen;
+export { default as ICON_FOLDER } from "@react-symbols/icons/folders/Folder";
+export { default as ICON_FOLDER_OPEN } from "@react-symbols/icons/folders/FolderOpen";
 
 const BY_NAME: Record<string, string> = {
   LICENSE: license,
@@ -47,35 +46,60 @@ const BY_NAME: Record<string, string> = {
 };
 
 const BY_EXTENSION: Record<string, string> = {
-  py: python, pyi: python, pyx: python,
-  toml: gear, env: gear,
-  md: markdown, markdown: markdown,
+  py: python,
+  pyi: python,
+  pyx: python,
+  toml: gear,
+  env: gear,
+  md: markdown,
+  markdown,
   txt: text,
   json: bracketsYellow,
-  csv: csv, tsv: csv,
-  yaml: yaml, yml: yaml,
-  html: codeOrange, htm: codeOrange,
+  csv,
+  tsv: csv,
+  yaml,
+  yml: yaml,
+  html: codeOrange,
+  htm: codeOrange,
   css: bracketsPurple,
-  js: js,
+  js,
   ts: typescript,
-  xml: xml,
-  svg: svg,
+  xml,
+  svg,
   sh: shell,
   sql: database,
-  lock: lock,
+  lock,
   ipynb: notebook,
-  pdf: pdf,
-  zip: compressed, gz: compressed, tar: compressed,
-  png: image, jpg: image, jpeg: image, gif: image, webp: image, bmp: image, ico: image,
-  wav: audio, mp3: audio, ogg: audio, flac: audio,
-  mp4: video, webm: video, mov: video,
+  pdf,
+  zip: compressed,
+  gz: compressed,
+  tar: compressed,
+  png: image,
+  jpg: image,
+  jpeg: image,
+  gif: image,
+  webp: image,
+  bmp: image,
+  ico: image,
+  wav: audio,
+  mp3: audio,
+  ogg: audio,
+  flac: audio,
+  mp4: video,
+  webm: video,
+  mov: video,
 };
 
 /** The icon for a file, by its name first and its extension second; a plain document otherwise. */
 export function fileIcon(path: string): string {
   const name = basename(path);
   const byName = BY_NAME[name];
-  if (byName) return byName;
+  if (byName) {
+    return byName;
+  }
   const dot = name.lastIndexOf(".");
-  return (dot > 0 ? BY_EXTENSION[name.slice(dot + 1).toLowerCase()] : undefined) ?? document;
+  return (
+    (dot > 0 ? BY_EXTENSION[name.slice(dot + 1).toLowerCase()] : undefined) ??
+    document
+  );
 }

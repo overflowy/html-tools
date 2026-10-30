@@ -19,7 +19,11 @@ export interface RuffDiagnostic {
   end_location: RuffLocation;
   fix: {
     message: string | null;
-    edits: { content: string | null; location: RuffLocation; end_location: RuffLocation }[];
+    edits: {
+      content: string | null;
+      location: RuffLocation;
+      end_location: RuffLocation;
+    }[];
   } | null;
 }
 
@@ -38,14 +42,18 @@ export type RuffResponse =
   | { type: "error"; id: number | null; message: string };
 
 interface Workspace {
-  format(source: string): string;
-  check(source: string): RuffDiagnostic[];
-  free(): void;
+  format: (source: string) => string;
+  check: (source: string) => RuffDiagnostic[];
+  free: () => void;
 }
 
 interface RuffModule {
-  default(init: { module_or_path: ArrayBuffer }): Promise<unknown>;
-  Workspace: { new (options: unknown, encoding: number): Workspace; version(): string; defaultSettings(): unknown };
+  default: (init: { module_or_path: ArrayBuffer }) => Promise<unknown>;
+  Workspace: {
+    new (options: unknown, encoding: number): Workspace;
+    version: () => string;
+    defaultSettings: () => unknown;
+  };
   PositionEncoding: { Utf16: number };
 }
 
@@ -59,30 +67,49 @@ self.onmessage = async (ev: MessageEvent<RuffRequest>) => {
   const msg = ev.data;
   try {
     if (msg.type === "load") {
-      const mod = (await import(scriptDataUrl(msg.glue, "ruff_wasm.js"))) as RuffModule;
+      const mod = (await import(
+        scriptDataUrl(msg.glue, "ruff_wasm.js")
+      )) as RuffModule;
       await mod.default({ module_or_path: msg.wasm });
       ruff = mod;
       post({ type: "loaded", version: mod.Workspace.version() });
       return;
     }
-    if (!ruff) throw new Error("Ruff has not loaded.");
+    if (!ruff) {
+      throw new Error("Ruff has not loaded.");
+    }
     if (msg.type === "configure") {
       workspace?.free();
       workspace = new ruff.Workspace(msg.options, ruff.PositionEncoding.Utf16);
       post({ type: "configured", id: msg.id });
       return;
     }
-    if (!workspace) throw new Error("Ruff has no settings yet.");
-    if (msg.type === "format") post({ type: "format", id: msg.id, formatted: workspace.format(msg.source) });
-    else if (msg.type === "check") post({ type: "check", id: msg.id, diagnostics: workspace.check(msg.source) });
-  } catch (e) {
+    if (!workspace) {
+      throw new Error("Ruff has no settings yet.");
+    }
+    if (msg.type === "format") {
+      post({
+        type: "format",
+        id: msg.id,
+        formatted: workspace.format(msg.source),
+      });
+    } else if (msg.type === "check") {
+      post({
+        type: "check",
+        id: msg.id,
+        diagnostics: workspace.check(msg.source),
+      });
+    }
+  } catch (error) {
     const id = "id" in msg ? msg.id : null;
-    post({ type: "error", id, message: describe(e) });
+    post({ type: "error", id, message: describe(error) });
   }
 };
 
 function describe(e: unknown): string {
-  if (e instanceof Error) return e.message;
+  if (e instanceof Error) {
+    return e.message;
+  }
   // Ruff raises plain strings for settings and syntax problems.
   return String(e);
 }

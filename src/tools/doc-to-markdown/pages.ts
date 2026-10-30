@@ -14,15 +14,23 @@ export function splitByMarkers(markdown: string): Map<number, string> {
   const pages = new Map<number, string>();
   const hits: { page: number; start: number; end: number }[] = [];
   for (const m of markdown.matchAll(MARKER)) {
-    hits.push({ page: Number(m[1]), start: m.index, end: m.index + m[0].length });
+    hits.push({
+      page: Number(m[1]),
+      start: m.index,
+      end: m.index + m[0].length,
+    });
   }
-  if (hits.length === 0) return pages;
+  if (hits.length === 0) {
+    return pages;
+  }
   const lead = markdown.slice(0, hits[0]!.start);
-  for (let i = 0; i < hits.length; i++) {
+  for (let i = 0; i < hits.length; i += 1) {
     const h = hits[i]!;
     const next = hits[i + 1];
     let body = markdown.slice(h.end, next ? next.start : markdown.length);
-    if (i === 0 && lead.trim()) body = lead + body;
+    if (i === 0 && lead.trim()) {
+      body = lead + body;
+    }
     const prev = pages.get(h.page);
     pages.set(h.page, prev ? prev + body : body);
   }
@@ -50,25 +58,36 @@ export function paragraphsFromTextItems(items: TextItem[]): string[][] {
   let lastY: number | null = null;
   let lastHeight = 0;
   const flushLine = () => {
-    if (line.trim()) lines.push(line.trim());
+    if (line.trim()) {
+      lines.push(line.trim());
+    }
     line = "";
   };
   const flushPara = () => {
     flushLine();
-    if (lines.length) paragraphs.push(lines);
+    if (lines.length) {
+      paragraphs.push(lines);
+    }
     lines = [];
   };
   for (const it of items) {
     const y = it.transform[5] ?? 0;
     const height = Math.abs(it.transform[3] ?? 0) || lastHeight;
     if (lastY !== null && Math.abs(y - lastY) > 0.5 * Math.max(height, 1)) {
-      if (Math.abs(y - lastY) > 1.5 * Math.max(height, lastHeight, 1)) flushPara();
-      else flushLine();
+      if (Math.abs(y - lastY) > 1.5 * Math.max(height, lastHeight, 1)) {
+        flushPara();
+      } else {
+        flushLine();
+      }
     }
     line += it.str;
-    if (it.hasEOL) flushLine();
+    if (it.hasEOL) {
+      flushLine();
+    }
     lastY = y;
-    if (height) lastHeight = height;
+    if (height) {
+      lastHeight = height;
+    }
   }
   flushPara();
   return paragraphs;
@@ -80,16 +99,33 @@ export function paragraphsFromTextItems(items: TextItem[]): string[][] {
  * numbering never skips. With markers off the body stands alone and an empty
  * page leaves nothing behind.
  */
-export function markPage(n: number, kind: "text" | "ocr", body: string, markers: boolean): string {
+export function markPage(
+  n: number,
+  kind: "text" | "ocr",
+  body: string,
+  markers: boolean
+): string {
   const empty = !body.trim();
-  if (!markers) return empty ? "" : body;
-  if (empty) return kind === "ocr" ? `<!-- page ${n}, OCR: no text found -->\n` : `<!-- page ${n}, no text -->\n`;
-  return (kind === "ocr" ? `<!-- page ${n}, OCR -->` : `<!-- page ${n} -->`) + "\n\n" + body;
+  if (!markers) {
+    return empty ? "" : body;
+  }
+  if (empty) {
+    return kind === "ocr"
+      ? `<!-- page ${n}, OCR: no text found -->\n`
+      : `<!-- page ${n}, no text -->\n`;
+  }
+  return `${
+    kind === "ocr" ? `<!-- page ${n}, OCR -->` : `<!-- page ${n} -->`
+  }\n\n${body}`;
 }
 
 /** Join page segments in page order into one document. Each segment already ends in a newline. */
-export function joinPages(segments: { page: number; markdown: string }[]): string {
+export function joinPages(
+  segments: { page: number; markdown: string }[]
+): string {
   const sorted = segments.toSorted((a, b) => a.page - b.page);
-  const parts = sorted.map((s) => s.markdown.replace(/\s+$/, "")).filter((s) => s.length > 0);
-  return parts.length ? parts.join("\n\n") + "\n" : "";
+  const parts = sorted
+    .map((s) => s.markdown.replace(/\s+$/, ""))
+    .filter((s) => s.length > 0);
+  return parts.length ? `${parts.join("\n\n")}\n` : "";
 }

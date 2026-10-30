@@ -22,14 +22,21 @@
   white-space: nowrap;
   line-height: normal;
 }
-.tool-speech-to-text .record-btn svg { width: 13px; height: 13px; flex: none; }
+.tool-speech-to-text .record-btn svg {
+  width: 13px;
+  height: 13px;
+  flex: none;
+}
 
 .tool-speech-to-text .keywords {
   width: 220px;
   min-width: 0;
   border-color: var(--border-strong);
 }
-.tool-speech-to-text .keywords::placeholder { color: var(--text-muted); opacity: 0.7; }
+.tool-speech-to-text .keywords::placeholder {
+  color: var(--text-muted);
+  opacity: 0.7;
+}
 
 .tool-speech-to-text .status {
   font-size: 13px;
@@ -55,7 +62,10 @@
   /* No lone word on a last line: wrapped lines come out even. */
   text-wrap: balance;
 }
-.tool-speech-to-text .empty-hint strong { color: var(--text); font-weight: 500; }
+.tool-speech-to-text .empty-hint strong {
+  color: var(--text);
+  font-weight: 500;
+}
 .tool-speech-to-text .empty-hint span {
   display: block;
   margin-top: 6px;
@@ -81,8 +91,12 @@
   border: 0.5px solid var(--border);
   border-radius: var(--radius-md);
 }
-.tool-speech-to-text .progress.on { display: flex; }
-.tool-speech-to-text .cancel-btn[hidden] { display: none; }
+.tool-speech-to-text .progress.on {
+  display: flex;
+}
+.tool-speech-to-text .cancel-btn[hidden] {
+  display: none;
+}
 
 .tool-speech-to-text .phase {
   font-size: 12.5px;
@@ -117,19 +131,33 @@
   animation: stt-sweep 1.1s var(--ease-out) infinite;
 }
 @keyframes stt-sweep {
-  from { transform: translateX(-100%); }
-  to { transform: translateX(300%); }
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(300%);
+  }
 }
 /* Without motion the busy bar stands still, full and dimmed; the phase
    beside it says what is going on. */
 @media (prefers-reduced-motion: reduce) {
-  .tool-speech-to-text .bar.busy .fill { width: 100%; opacity: 0.5; animation: none; }
+  .tool-speech-to-text .bar.busy .fill {
+    width: 100%;
+    opacity: 0.5;
+    animation: none;
+  }
 }
 
 /* While recording the bar gives way to the microphone's level. */
-.tool-speech-to-text .level { display: none; }
-.tool-speech-to-text.recording .level { display: block; }
-.tool-speech-to-text.recording .bar { display: none; }
+.tool-speech-to-text .level {
+  display: none;
+}
+.tool-speech-to-text.recording .level {
+  display: block;
+}
+.tool-speech-to-text.recording .bar {
+  display: none;
+}
 .tool-speech-to-text .level-fill {
   height: 100%;
   background: var(--ok);
@@ -151,7 +179,9 @@
   border-radius: var(--radius-lg);
   overflow: hidden;
 }
-.tool-speech-to-text .result.on { display: flex; }
+.tool-speech-to-text .result.on {
+  display: flex;
+}
 
 .tool-speech-to-text .pane-head {
   display: flex;
@@ -163,8 +193,12 @@
   color: var(--text-muted);
   flex-wrap: wrap;
 }
-.tool-speech-to-text .pane-head .spacer { flex: 1; }
-.tool-speech-to-text .pane-head .dl { font-family: var(--mono); }
+.tool-speech-to-text .pane-head .spacer {
+  flex: 1;
+}
+.tool-speech-to-text .pane-head .dl {
+  font-family: var(--mono);
+}
 .tool-speech-to-text .pane-head .meta {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -182,7 +216,9 @@
   /* Dark native controls, to sit on the Theme's surface. */
   color-scheme: dark;
 }
-.tool-speech-to-text .result.playable .player { display: block; }
+.tool-speech-to-text .result.playable .player {
+  display: block;
+}
 
 .tool-speech-to-text .cues {
   flex: 1;
@@ -233,12 +269,23 @@
   box-shadow: 0 0 0 2px var(--accent-soft);
 }
 .tool-speech-to-text .result.playable .w,
-.tool-speech-to-text .result.playable .t { cursor: pointer; }
-@media (hover: hover) {
-  .tool-speech-to-text .result.playable .w:hover { background: var(--surface-2); box-shadow: 0 0 0 2px var(--surface-2); }
-  .tool-speech-to-text .result.playable .t:hover { color: var(--text); background: transparent; }
+.tool-speech-to-text .result.playable .t {
+  cursor: pointer;
 }
-.tool-speech-to-text .cue .t:active { transform: none; background: transparent; }
+@media (hover: hover) {
+  .tool-speech-to-text .result.playable .w:hover {
+    background: var(--surface-2);
+    box-shadow: 0 0 0 2px var(--surface-2);
+  }
+  .tool-speech-to-text .result.playable .t:hover {
+    color: var(--text);
+    background: transparent;
+  }
+}
+.tool-speech-to-text .cue .t:active {
+  transform: none;
+  background: transparent;
+}
 
 /* The unconfirmed tail of a Recording: what the engine has heard but not yet committed. */
 .tool-speech-to-text .pending {
@@ -261,7 +308,9 @@
   font-size: 12.5px;
   color: var(--text-muted);
 }
-.tool-speech-to-text .note.on { display: flex; }
+.tool-speech-to-text .note.on {
+  display: flex;
+}
 .tool-speech-to-text .note svg {
   width: 14px;
   height: 14px;
@@ -270,8 +319,13 @@
   margin-top: 2.5px;
 }
 
-.tool-speech-to-text .error-box { display: none; flex-shrink: 0; }
-.tool-speech-to-text .error-box.on { display: block; }
+.tool-speech-to-text .error-box {
+  display: none;
+  flex-shrink: 0;
+}
+.tool-speech-to-text .error-box.on {
+  display: block;
+}
 
 /* ---- engines footer ---- */
 
@@ -289,19 +343,42 @@
   min-width: 0;
   font-variant-numeric: tabular-nums;
 }
-.tool-speech-to-text .engines-clear[hidden] { display: none; }
+.tool-speech-to-text .engines-clear[hidden] {
+  display: none;
+}
 
 @media (max-width: 767px) {
-  .tool-speech-to-text .status { max-width: 100%; margin-left: 0; }
-  .tool-speech-to-text .keywords { flex: 1 1 140px; width: auto; }
+  .tool-speech-to-text .status {
+    max-width: 100%;
+    margin-left: 0;
+  }
+  .tool-speech-to-text .keywords {
+    flex: 1 1 140px;
+    width: auto;
+  }
   .tool-speech-to-text .bar,
-  .tool-speech-to-text .level { width: 90px; }
+  .tool-speech-to-text .level {
+    width: 90px;
+  }
   .tool-speech-to-text .lang-select,
-  .tool-speech-to-text .keywords { min-height: 36px; }
-  .tool-speech-to-text .cue { flex-direction: column; gap: 0; }
-  .tool-speech-to-text .cue .t { min-width: 0; padding: 0; text-align: left; }
-  .tool-speech-to-text .pending { margin-left: 0; }
+  .tool-speech-to-text .keywords {
+    min-height: 36px;
+  }
+  .tool-speech-to-text .cue {
+    flex-direction: column;
+    gap: 0;
+  }
+  .tool-speech-to-text .cue .t {
+    min-width: 0;
+    padding: 0;
+    text-align: left;
+  }
+  .tool-speech-to-text .pending {
+    margin-left: 0;
+  }
   /* Touch targets for controls outside a pane head or toolbar. */
   .tool-speech-to-text .progress button,
-  .tool-speech-to-text .engines button { min-height: 36px; }
+  .tool-speech-to-text .engines button {
+    min-height: 36px;
+  }
 }

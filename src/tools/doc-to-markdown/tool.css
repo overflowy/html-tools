@@ -59,10 +59,16 @@
   user-select: none;
   transition: background 0.15s;
 }
-.tool-doc-to-markdown .langs summary::-webkit-details-marker { display: none; }
-.tool-doc-to-markdown .langs summary .dim { color: var(--text-muted); }
+.tool-doc-to-markdown .langs summary::-webkit-details-marker {
+  display: none;
+}
+.tool-doc-to-markdown .langs summary .dim {
+  color: var(--text-muted);
+}
 @media (hover: hover) {
-  .tool-doc-to-markdown .langs summary:hover { background: var(--surface-2); }
+  .tool-doc-to-markdown .langs summary:hover {
+    background: var(--surface-2);
+  }
 }
 .tool-doc-to-markdown .langs summary:focus-visible {
   outline: var(--ring-line);
@@ -92,7 +98,10 @@
 }
 
 /* flex: none, or the long list below squeezes it under its height. */
-.tool-doc-to-markdown .lang-filter { margin: 4px; flex: none; }
+.tool-doc-to-markdown .lang-filter {
+  margin: 4px;
+  flex: none;
+}
 
 .tool-doc-to-markdown .lang-list {
   overflow-y: auto;
@@ -111,9 +120,13 @@
   cursor: pointer;
 }
 @media (hover: hover) {
-  .tool-doc-to-markdown .lang-list label:hover { background: var(--surface-2); }
+  .tool-doc-to-markdown .lang-list label:hover {
+    background: var(--surface-2);
+  }
 }
-.tool-doc-to-markdown .lang-list label[hidden] { display: none; }
+.tool-doc-to-markdown .lang-list label[hidden] {
+  display: none;
+}
 .tool-doc-to-markdown .lang-list .name {
   white-space: nowrap;
   overflow: hidden;
@@ -144,7 +157,10 @@
   color: var(--text-muted);
   font-size: 14px;
 }
-.tool-doc-to-markdown .empty-hint strong { color: var(--text); font-weight: 500; }
+.tool-doc-to-markdown .empty-hint strong {
+  color: var(--text);
+  font-weight: 500;
+}
 .tool-doc-to-markdown .empty-hint span {
   display: block;
   margin-top: 6px;
@@ -170,7 +186,9 @@
   border: 0.5px solid var(--border);
   border-radius: var(--radius-md);
 }
-.tool-doc-to-markdown .progress.on { display: flex; }
+.tool-doc-to-markdown .progress.on {
+  display: flex;
+}
 
 .tool-doc-to-markdown .phase {
   font-size: 12.5px;
@@ -204,13 +222,21 @@
   animation: doc-sweep 1.1s var(--ease-out) infinite;
 }
 @keyframes doc-sweep {
-  from { transform: translateX(-100%); }
-  to { transform: translateX(300%); }
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(300%);
+  }
 }
 /* Without motion the busy bar stands still, full and dimmed; the phase
    beside it says what is going on. */
 @media (prefers-reduced-motion: reduce) {
-  .tool-doc-to-markdown .bar.busy .fill { width: 100%; opacity: 0.5; animation: none; }
+  .tool-doc-to-markdown .bar.busy .fill {
+    width: 100%;
+    opacity: 0.5;
+    animation: none;
+  }
 }
 
 /* ---- result ---- */
@@ -225,7 +251,9 @@
   border-radius: var(--radius-lg);
   overflow: hidden;
 }
-.tool-doc-to-markdown .result.on { display: flex; }
+.tool-doc-to-markdown .result.on {
+  display: flex;
+}
 
 .tool-doc-to-markdown .pane-head {
   display: flex;
@@ -237,7 +265,9 @@
   color: var(--text-muted);
   flex-wrap: wrap;
 }
-.tool-doc-to-markdown .pane-head .spacer { flex: 1; }
+.tool-doc-to-markdown .pane-head .spacer {
+  flex: 1;
+}
 .tool-doc-to-markdown .pane-head .meta {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -256,7 +286,11 @@
   white-space: pre;
   overflow: auto;
 }
-.tool-doc-to-markdown .output:focus { border: none; box-shadow: none; outline: none; }
+.tool-doc-to-markdown .output:focus {
+  border: none;
+  box-shadow: none;
+  outline: none;
+}
 
 .tool-doc-to-markdown .note {
   display: none;
@@ -268,10 +302,17 @@
   font-size: 12.5px;
   color: var(--text-muted);
 }
-.tool-doc-to-markdown .note.on { display: block; }
+.tool-doc-to-markdown .note.on {
+  display: block;
+}
 
-.tool-doc-to-markdown .error-box { display: none; flex-shrink: 0; }
-.tool-doc-to-markdown .error-box.on { display: block; }
+.tool-doc-to-markdown .error-box {
+  display: none;
+  flex-shrink: 0;
+}
+.tool-doc-to-markdown .error-box.on {
+  display: block;
+}
 
 /* ---- engines footer ---- */
 
@@ -289,12 +330,21 @@
   min-width: 0;
   font-variant-numeric: tabular-nums;
 }
-.tool-doc-to-markdown .engines-clear[hidden] { display: none; }
+.tool-doc-to-markdown .engines-clear[hidden] {
+  display: none;
+}
 
 @media (max-width: 767px) {
-  .tool-doc-to-markdown .status { max-width: 100%; margin-left: 0; }
-  .tool-doc-to-markdown .bar { width: 90px; }
-  .tool-doc-to-markdown .lang-panel { width: min(360px, calc(100vw - 2 * var(--gutter))); }
+  .tool-doc-to-markdown .status {
+    max-width: 100%;
+    margin-left: 0;
+  }
+  .tool-doc-to-markdown .bar {
+    width: 90px;
+  }
+  .tool-doc-to-markdown .lang-panel {
+    width: min(360px, calc(100vw - 2 * var(--gutter)));
+  }
   /* Touch targets for controls outside a pane head or toolbar. */
   .tool-doc-to-markdown .langs summary,
   .tool-doc-to-markdown .progress button,

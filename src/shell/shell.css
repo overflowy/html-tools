@@ -1,11 +1,21 @@
-html, body { height: 100%; }
+html,
+body {
+  height: 100%;
+}
 /* dvh tracks mobile browser chrome; the 100% above is the fallback. */
-html, body { height: 100dvh; }
-body { overflow: hidden; }
+html,
+body {
+  height: 100dvh;
+}
+body {
+  overflow: hidden;
+}
 
 /* One easing for everything that slides or fades in the shell: decelerating,
    so motion starts at full speed and settles rather than winding up. */
-:root { --ease-out: cubic-bezier(0.2, 0, 0, 1); }
+:root {
+  --ease-out: cubic-bezier(0.2, 0, 0, 1);
+}
 
 /* ---- sidebar ---- */
 
@@ -27,7 +37,9 @@ body { overflow: hidden; }
   border-right: 1px solid var(--border);
   transform: translateX(-100%);
   visibility: hidden;
-  transition: transform 0.2s var(--ease-out), visibility 0s 0.2s;
+  transition:
+    transform 0.2s var(--ease-out),
+    visibility 0s 0.2s;
 }
 
 .sidebar-head {
@@ -48,7 +60,11 @@ body { overflow: hidden; }
   font-weight: 600;
   letter-spacing: 0.04em;
 }
-.app-name .logo { width: 20px; height: 20px; flex-shrink: 0; }
+.app-name .logo {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+}
 
 /* Icon-only toggles: the one in the sidebar's corner hides it, the one in
    the tool header (.menu-btn, below) brings it back. */
@@ -69,11 +85,18 @@ body { overflow: hidden; }
   margin: -6px -6px -6px 0;
   color: var(--text-muted);
   border-color: transparent;
-  transition: color 0.15s, opacity 0.1s;
+  transition:
+    color 0.15s,
+    opacity 0.1s;
 }
-.collapse-btn svg { width: 16px; height: 16px; }
+.collapse-btn svg {
+  width: 16px;
+  height: 16px;
+}
 @media (hover: hover) {
-  .collapse-btn:hover { color: var(--text); }
+  .collapse-btn:hover {
+    color: var(--text);
+  }
 }
 /* The tool header's toggle takes over the moment the sidebar starts to
    leave; fade this one out so there is never a second icon riding out with
@@ -82,10 +105,15 @@ body { overflow: hidden; }
 body.sidebar-collapsed .collapse-btn {
   opacity: 0;
   visibility: hidden;
-  transition: color 0.15s, opacity 0.1s, visibility 0s 0.1s;
+  transition:
+    color 0.15s,
+    opacity 0.1s,
+    visibility 0s 0.1s;
 }
 
-.filter-wrap { position: relative; }
+.filter-wrap {
+  position: relative;
+}
 /* A field on its own at the head of the list, as tall as the rows below it. */
 .filter-wrap input {
   width: 100%;
@@ -128,12 +156,20 @@ body.sidebar-collapsed .collapse-btn {
   border-radius: var(--radius-sm);
 }
 @media (hover: hover) {
-  .tool-list button:hover { background: var(--surface-2); color: var(--text); }
+  .tool-list button:hover {
+    background: var(--surface-2);
+    color: var(--text);
+  }
 }
 /* One step above hover, so the selected tool still reads as selected while
    the pointer is over a neighbour. */
-.tool-list button.selected { background: var(--surface-3); color: var(--text); }
-.tool-list button.cursor { box-shadow: inset 0 0 0 1px var(--accent); }
+.tool-list button.selected {
+  background: var(--surface-3);
+  color: var(--text);
+}
+.tool-list button.cursor {
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
 .tool-list .no-match {
   font-size: 12px;
   color: var(--text-muted);
@@ -148,9 +184,14 @@ body.sidebar-collapsed .collapse-btn {
   font-size: 11px;
   color: var(--text-muted);
 }
-.sidebar-footer a { color: var(--text-muted); text-decoration: underline; }
+.sidebar-footer a {
+  color: var(--text-muted);
+  text-decoration: underline;
+}
 @media (hover: hover) {
-  .sidebar-footer a:hover { color: var(--text); }
+  .sidebar-footer a:hover {
+    color: var(--text);
+  }
 }
 
 /* ---- main pane ---- */
@@ -168,21 +209,30 @@ body.sidebar-collapsed .collapse-btn {
   gap: 12px;
   padding: 1.5rem var(--gutter) 0.75rem;
 }
-.tool-title { min-width: 0; }
+.tool-title {
+  min-width: 0;
+}
 /* A full-height Tool takes the header's place and brings its own Sidebar
    toggle. In the Narrow Layout the header stays: its hamburger is the Drawer's
    only button. */
 @media (min-width: 768px) {
-  body.tool-full-height .tool-header { display: none; }
+  body.tool-full-height .tool-header {
+    display: none;
+  }
 }
 
 .menu-btn {
   width: 40px;
   height: 40px;
 }
-.menu-btn svg { width: 16px; height: 16px; }
+.menu-btn svg {
+  width: 16px;
+  height: 16px;
+}
 /* Hamburger for the drawer on narrow screens, panel icon on wide ones. */
-.menu-btn .icon-panel { display: none; }
+.menu-btn .icon-panel {
+  display: none;
+}
 
 .hosts {
   flex: 1;
@@ -198,7 +248,9 @@ body.sidebar-collapsed .collapse-btn {
   display: flex;
   flex-direction: column;
 }
-.tool-host[hidden] { display: none; }
+.tool-host[hidden] {
+  display: none;
+}
 
 /* ---- drawer: the sidebar whenever it is not inline ---- */
 
@@ -209,7 +261,9 @@ body.sidebar-collapsed .collapse-btn {
   background: rgb(0 0 0 / 0.5);
   opacity: 0;
   visibility: hidden;
-  transition: opacity 0.2s var(--ease-out), visibility 0s 0.2s;
+  transition:
+    opacity 0.2s var(--ease-out),
+    visibility 0s 0.2s;
 }
 
 /* The drawer floats over the main pane, so unlike the inline sidebar it
@@ -218,7 +272,9 @@ body.sidebar-collapsed .collapse-btn {
 body.drawer-open .sidebar {
   transform: none;
   visibility: visible;
-  box-shadow: 0 0 0 1px rgb(0 0 0 / 0.3), 12px 0 32px rgb(0 0 0 / 0.4);
+  box-shadow:
+    0 0 0 1px rgb(0 0 0 / 0.3),
+    12px 0 32px rgb(0 0 0 / 0.4);
   transition: transform 0.2s var(--ease-out);
 }
 body.drawer-open .drawer-backdrop {
@@ -236,34 +292,59 @@ body.drawer-open .drawer-backdrop {
     visibility: visible;
     transition: transform 0.2s var(--ease-out);
   }
-  body:not(.sidebar-collapsed) .content { margin-left: var(--sidebar-width); }
+  body:not(.sidebar-collapsed) .content {
+    margin-left: var(--sidebar-width);
+  }
   /* Exactly one toggle on screen: the sidebar's own while inline, the
      tool header's while collapsed. */
-  body:not(.sidebar-collapsed) .menu-btn { display: none; }
-  .menu-btn .icon-menu { display: none; }
-  .menu-btn .icon-panel { display: block; }
+  body:not(.sidebar-collapsed) .menu-btn {
+    display: none;
+  }
+  .menu-btn .icon-menu {
+    display: none;
+  }
+  .menu-btn .icon-panel {
+    display: block;
+  }
 }
 
 /* ---- narrow layout: the sidebar is only ever the drawer ---- */
 
 @media (max-width: 767px) {
-  :root { --gutter: 1rem; }
+  :root {
+    --gutter: 1rem;
+  }
 
-  .filter-wrap kbd { display: none; }
+  .filter-wrap kbd {
+    display: none;
+  }
   /* The drawer closes from the backdrop, Escape, or picking a tool; the
      hamburger is its only button. */
-  .collapse-btn { display: none; }
+  .collapse-btn {
+    display: none;
+  }
 
-  .tool-header { padding-top: 0.75rem; padding-bottom: 0.5rem; }
+  .tool-header {
+    padding-top: 0.75rem;
+    padding-bottom: 0.5rem;
+  }
 
   /* 44px rows: these are touch targets here. */
-  .tool-list button { padding: 12px; font-size: 14px; }
+  .tool-list button {
+    padding: 12px;
+    font-size: 14px;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .sidebar, .drawer-backdrop, .content, .collapse-btn,
-  body.drawer-open .sidebar, body.drawer-open .drawer-backdrop,
-  body:not(.sidebar-collapsed) .sidebar, body.sidebar-collapsed .collapse-btn {
+  .sidebar,
+  .drawer-backdrop,
+  .content,
+  .collapse-btn,
+  body.drawer-open .sidebar,
+  body.drawer-open .drawer-backdrop,
+  body:not(.sidebar-collapsed) .sidebar,
+  body.sidebar-collapsed .collapse-btn {
     transition: none;
   }
 }

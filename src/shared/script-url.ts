@@ -16,11 +16,16 @@
 // in Firefox than in Chromium. So every data: URL script ends with a
 // `//# sourceURL=` pragma naming it, which is the name the engine uses instead.
 
-const CHUNK = 0x8000;
+const CHUNK = 0x80_00;
 
 function base64(bytes: Uint8Array): string {
   let bin = "";
-  for (let i = 0; i < bytes.length; i += CHUNK) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK) as unknown as number[]);
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    bin += String.fromCharCode.apply(
+      null,
+      bytes.subarray(i, i + CHUNK) as unknown as number[]
+    );
+  }
   return btoa(bin);
 }
 
@@ -28,13 +33,19 @@ function base64(bytes: Uint8Array): string {
  * A data: URL for JavaScript source, decoded as UTF-8 by the loader. `name`
  * is what stack traces and the console call the script.
  */
-export function scriptDataUrl(source: string | ArrayBuffer, name: string): string {
+export function scriptDataUrl(
+  source: string | ArrayBuffer,
+  name: string
+): string {
   const pragma = new TextEncoder().encode(`\n//# sourceURL=${name}\n`);
-  const body = typeof source === "string" ? new TextEncoder().encode(source) : new Uint8Array(source);
+  const body =
+    typeof source === "string"
+      ? new TextEncoder().encode(source)
+      : new Uint8Array(source);
   const bytes = new Uint8Array(body.length + pragma.length);
   bytes.set(body);
   bytes.set(pragma, body.length);
-  return "data:text/javascript;charset=utf-8;base64," + base64(bytes);
+  return `data:text/javascript;charset=utf-8;base64,${base64(bytes)}`;
 }
 
 /** A blob: URL for JavaScript source. Revoke it when the loader is done. */
@@ -53,7 +64,9 @@ let blobModuleWorkers: Promise<boolean> | null = null;
  * worker; Chromium answers with an error event within milliseconds.
  */
 export function blobModuleWorkersWork(): Promise<boolean> {
-  if (blobModuleWorkers) return blobModuleWorkers;
+  if (blobModuleWorkers) {
+    return blobModuleWorkers;
+  }
   blobModuleWorkers = new Promise((resolve) => {
     const url = scriptBlobUrl("self.postMessage(true)");
     let worker: Worker;

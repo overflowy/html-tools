@@ -6,8 +6,12 @@
   gap: 12px;
   padding: 0.25rem var(--gutter) 2rem;
 }
-.tool-big-text [hidden] { display: none !important; }
-.tool-big-text .spacer { flex: 1; }
+.tool-big-text [hidden] {
+  display: none !important;
+}
+.tool-big-text .spacer {
+  flex: 1;
+}
 
 /* ---- options ---- */
 
@@ -24,7 +28,9 @@
   color: var(--text-muted);
   font-size: 12.5px;
 }
-.tool-big-text .options :is(input[type="number"], input[type="text"], input[type="datetime-local"]) {
+.tool-big-text
+  .options
+  :is(input[type="number"], input[type="text"], input[type="datetime-local"]) {
   color-scheme: dark;
   height: var(--control-h);
   padding: 0 6px;
@@ -36,9 +42,16 @@
   font-size: 12px;
 }
 .tool-big-text .o-pad,
-.tool-big-text .o-secs { width: 56px; }
-.tool-big-text .o-timer { width: 110px; }
-.tool-big-text .options input.o-endtext { width: 160px; font-family: var(--sans); }
+.tool-big-text .o-secs {
+  width: 56px;
+}
+.tool-big-text .o-timer {
+  width: 110px;
+}
+.tool-big-text .options input.o-endtext {
+  width: 160px;
+  font-family: var(--sans);
+}
 .tool-big-text .options [aria-invalid="true"] {
   outline: 1.5px solid var(--danger-text);
   outline-offset: -1px;
@@ -95,7 +108,10 @@
   color: var(--text-muted);
   min-height: 42px;
 }
-.tool-big-text .slide-pos { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.tool-big-text .slide-pos {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
 
 .tool-big-text .o-message {
   flex: 1;
@@ -106,7 +122,11 @@
   resize: none;
   font-size: 13px;
 }
-.tool-big-text .o-message:focus { border: none; box-shadow: none; outline: none; }
+.tool-big-text .o-message:focus {
+  border: none;
+  box-shadow: none;
+  outline: none;
+}
 
 .tool-big-text .foot {
   display: flex;
@@ -117,8 +137,12 @@
   font-size: 12px;
   color: var(--text-muted);
 }
-.tool-big-text .note { color: var(--accent); }
-.tool-big-text .note:empty { display: none; }
+.tool-big-text .note {
+  color: var(--accent);
+}
+.tool-big-text .note:empty {
+  display: none;
+}
 /* What each mark does, shown done: one column beside the preview, more
    when the panes stack. */
 .tool-big-text .syntax {
@@ -127,16 +151,27 @@
   gap: 3px 16px;
   margin: 0;
 }
-.tool-big-text .syntax div { display: flex; align-items: baseline; gap: 10px; }
+.tool-big-text .syntax div {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
 .tool-big-text .syntax dt {
   min-width: 11ch;
   font-family: var(--mono);
   font-size: 11.5px;
   color: var(--text);
 }
-.tool-big-text .syntax dd { margin: 0; }
-.tool-big-text .syntax :is(strong, em, del, .h) { color: var(--text); }
-.tool-big-text .syntax .h { font-size: 13px; font-weight: 600; }
+.tool-big-text .syntax dd {
+  margin: 0;
+}
+.tool-big-text .syntax :is(strong, em, del, .h) {
+  color: var(--text);
+}
+.tool-big-text .syntax .h {
+  font-size: 13px;
+  font-weight: 600;
+}
 
 .tool-big-text .frame {
   flex: 1;
@@ -162,10 +197,21 @@
   -webkit-user-select: none;
   user-select: none;
 }
-.tool-big-text .stage:focus { outline: 1px solid oklch(1 0 0 / 0.1); }
-.tool-big-text .stage[data-font="sans"] { font-family: var(--sans); font-weight: 600; }
-.tool-big-text .stage[data-font="serif"] { font-family: ui-serif, "New York", Georgia, Cambria, "Times New Roman", serif; font-weight: 500; }
-.tool-big-text .stage[data-font="mono"] { font-family: var(--mono); font-weight: 500; }
+.tool-big-text .stage:focus {
+  outline: 1px solid oklch(1 0 0 / 0.1);
+}
+.tool-big-text .stage[data-font="sans"] {
+  font-family: var(--sans);
+  font-weight: 600;
+}
+.tool-big-text .stage[data-font="serif"] {
+  font-family: ui-serif, "New York", Georgia, Cambria, "Times New Roman", serif;
+  font-weight: 500;
+}
+.tool-big-text .stage[data-font="mono"] {
+  font-family: var(--mono);
+  font-weight: 500;
+}
 
 /* The padded area each Slide is fitted to: the margin is a share of the
    height above and below and of the width at the sides. */
@@ -183,17 +229,40 @@
   text-wrap: balance;
   font-kerning: normal;
 }
-.tool-big-text .stage.nowrap .text { white-space: pre; }
-.tool-big-text .text .h1 { font-size: 2em; }
-.tool-big-text .text .h2 { font-size: 1.5em; }
-.tool-big-text .text strong { font-weight: 850; }
-.tool-big-text .stage[data-font="mono"] .text strong { font-weight: 600; }
-.tool-big-text .text code { font-family: var(--mono); font-weight: 500; }
-.tool-big-text .text .cd { font-variant-numeric: tabular-nums; }
+.tool-big-text .stage.nowrap .text {
+  white-space: pre;
+}
+.tool-big-text .text .h1 {
+  font-size: 2em;
+}
+.tool-big-text .text .h2 {
+  font-size: 1.5em;
+}
+.tool-big-text .text strong {
+  font-weight: 850;
+}
+.tool-big-text .stage[data-font="mono"] .text strong {
+  font-weight: 600;
+}
+.tool-big-text .text code {
+  font-family: var(--mono);
+  font-weight: 500;
+}
+.tool-big-text .text .cd {
+  font-variant-numeric: tabular-nums;
+}
 
 /* Marquee: one line of text as tall as the area, running edge to edge. */
-.tool-big-text .stage.scroll .slide { left: 0; right: 0; justify-items: start; }
-.tool-big-text .stage.scroll .text { width: max-content; white-space: pre; text-align: left; }
+.tool-big-text .stage.scroll .slide {
+  left: 0;
+  right: 0;
+  justify-items: start;
+}
+.tool-big-text .stage.scroll .text {
+  width: max-content;
+  white-space: pre;
+  text-align: left;
+}
 
 /* ---- presenting: the display covers the window ---- */
 
@@ -206,7 +275,9 @@
   border-radius: 0;
   outline: none;
 }
-.tool-big-text .stage.presenting:not(.awake) { cursor: none; }
+.tool-big-text .stage.presenting:not(.awake) {
+  cursor: none;
+}
 
 .tool-big-text .chrome {
   position: absolute;
@@ -221,8 +292,12 @@
   transition: opacity 0.2s;
   pointer-events: none;
 }
-.tool-big-text .stage.presenting .chrome { display: flex; }
-.tool-big-text .stage.presenting.awake .chrome { opacity: 1; }
+.tool-big-text .stage.presenting .chrome {
+  display: flex;
+}
+.tool-big-text .stage.presenting.awake .chrome {
+  opacity: 1;
+}
 .tool-big-text .chrome .hint {
   display: inline-flex;
   align-items: center;
@@ -239,15 +314,25 @@
 
 /* Stacked, the panes take their own heights and the Tool scrolls. */
 @media (max-width: 1000px) {
-  .tool-big-text .panes { flex: none; grid-template-columns: 1fr; }
-  .tool-big-text .frame { flex: none; height: min(70vh, 640px); }
+  .tool-big-text .panes {
+    flex: none;
+    grid-template-columns: 1fr;
+  }
+  .tool-big-text .frame {
+    flex: none;
+    height: min(70vh, 640px);
+  }
 }
 
 @media (max-width: 767px) {
   /* Touch targets: as tall as the Theme's toolbar buttons here. */
-  .tool-big-text .pane-head button { min-height: 36px; }
+  .tool-big-text .pane-head button {
+    min-height: 36px;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .tool-big-text .chrome { transition: none; }
+  .tool-big-text .chrome {
+    transition: none;
+  }
 }

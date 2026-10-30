@@ -16,7 +16,9 @@
   flex-wrap: wrap;
   flex-shrink: 0;
 }
-.tool-markdown-editor .spacer { flex: 1; }
+.tool-markdown-editor .spacer {
+  flex: 1;
+}
 
 .tool-markdown-editor .filename-wrap {
   display: flex;
@@ -38,7 +40,9 @@
   width: 16ch;
 }
 @media (hover: hover) {
-  .tool-markdown-editor .filename:hover { border-color: var(--border-strong); }
+  .tool-markdown-editor .filename:hover {
+    border-color: var(--border-strong);
+  }
 }
 .tool-markdown-editor .filename:focus {
   outline: var(--ring-line);
@@ -49,7 +53,9 @@
 }
 
 /* Edit / Split / Preview: the Theme's choice pill. */
-.tool-markdown-editor .seg { flex: none; }
+.tool-markdown-editor .seg {
+  flex: none;
+}
 
 .tool-markdown-editor .toolbar button {
   display: inline-flex;
@@ -59,8 +65,16 @@
   flex: none;
   line-height: normal;
 }
-.tool-markdown-editor .toolbar button svg { width: 14px; height: 14px; }
-.tool-markdown-editor .toolbar button.icon { height: var(--control-h); padding: 0 7px; min-width: 30px; justify-content: center; }
+.tool-markdown-editor .toolbar button svg {
+  width: 14px;
+  height: 14px;
+}
+.tool-markdown-editor .toolbar button.icon {
+  height: var(--control-h);
+  padding: 0 7px;
+  min-width: 30px;
+  justify-content: center;
+}
 .tool-markdown-editor .new-btn.confirm {
   background: var(--danger-bg);
   border-color: var(--danger-text);
@@ -71,9 +85,16 @@
   color: var(--accent);
 }
 /* The contrast disc is half filled, and mirrored while the Light Document is on. */
-.tool-markdown-editor .light-btn svg path { fill: currentColor; }
-.tool-markdown-editor .light-btn.toggled svg { transform: scaleX(-1); }
-.tool-markdown-editor .format-btn[aria-busy] { opacity: 0.6; cursor: progress; }
+.tool-markdown-editor .light-btn svg path {
+  fill: currentColor;
+}
+.tool-markdown-editor .light-btn.toggled svg {
+  transform: scaleX(-1);
+}
+.tool-markdown-editor .format-btn[aria-busy] {
+  opacity: 0.6;
+  cursor: progress;
+}
 
 /* ---- the pane: Contents | editor | preview, with a status bar ---- */
 
@@ -108,10 +129,18 @@
   display: flex;
   flex-direction: column;
 }
-.tool-markdown-editor .editor-pane { border-right: 1px solid var(--border); }
-.tool-markdown-editor[data-view="edit"] .preview-pane { display: none; }
-.tool-markdown-editor[data-view="edit"] .editor-pane { border-right: none; }
-.tool-markdown-editor[data-view="preview"] .editor-pane { display: none; }
+.tool-markdown-editor .editor-pane {
+  border-right: 1px solid var(--border);
+}
+.tool-markdown-editor[data-view="edit"] .preview-pane {
+  display: none;
+}
+.tool-markdown-editor[data-view="edit"] .editor-pane {
+  border-right: none;
+}
+.tool-markdown-editor[data-view="preview"] .editor-pane {
+  display: none;
+}
 
 /* Both scrolling panes are size containers, so the tall bottom padding that
    lets the last line reach mid-pane is measured against the pane (cqh), not
@@ -152,7 +181,11 @@
   background: transparent;
   position: relative;
 }
-.tool-markdown-editor .editor:focus { outline: none; box-shadow: none; border: none; }
+.tool-markdown-editor .editor:focus {
+  outline: none;
+  box-shadow: none;
+  border: none;
+}
 .tool-markdown-editor .editor-marks {
   position: absolute;
   inset: 0;
@@ -166,7 +199,9 @@
   background: var(--accent-soft);
   border-radius: 2px;
 }
-.tool-markdown-editor .editor-marks mark.current { background: rgba(201, 100, 66, 0.45); }
+.tool-markdown-editor .editor-marks mark.current {
+  background: rgba(201, 100, 66, 0.45);
+}
 
 .tool-markdown-editor .preview-pane {
   overflow-y: auto;
@@ -211,7 +246,9 @@
   pointer-events: none;
   z-index: 6;
 }
-.tool-markdown-editor.dragging .drop-overlay { display: flex; }
+.tool-markdown-editor.dragging .drop-overlay {
+  display: flex;
+}
 .tool-markdown-editor .drop-overlay .card {
   border: 2px dashed var(--accent);
   border-radius: var(--radius-lg);
@@ -221,7 +258,12 @@
   color: var(--text);
   font-weight: 500;
 }
-.tool-markdown-editor .drop-overlay .sub { color: var(--text-muted); font-weight: 400; font-size: 12.5px; margin-top: 6px; }
+.tool-markdown-editor .drop-overlay .sub {
+  color: var(--text-muted);
+  font-weight: 400;
+  font-size: 12.5px;
+  margin-top: 6px;
+}
 
 /* ---- Contents: the leftmost column, or a drawer when the Tool is narrow ---- */
 
@@ -235,10 +277,14 @@
   padding: 20px 12px 20px 6px;
   font-size: 12.5px;
 }
-.tool-markdown-editor.toc-open .toc { display: block; }
+.tool-markdown-editor.toc-open .toc {
+  display: block;
+}
 /* Nothing to jump to while the preview is hidden. */
 .tool-markdown-editor[data-view="edit"] .toc,
-.tool-markdown-editor[data-view="edit"] .toc-backdrop { display: none !important; }
+.tool-markdown-editor[data-view="edit"] .toc-backdrop {
+  display: none !important;
+}
 
 .tool-markdown-editor .toc-backdrop {
   display: none;
@@ -255,13 +301,20 @@
   width: min(300px, 84vw);
   z-index: 30;
   background: var(--surface);
-  box-shadow: 0 0 0 1px rgb(0 0 0 / 0.3), 12px 0 32px rgb(0 0 0 / 0.4);
+  box-shadow:
+    0 0 0 1px rgb(0 0 0 / 0.3),
+    12px 0 32px rgb(0 0 0 / 0.4);
   padding: 16px 12px calc(16px + env(safe-area-inset-bottom, 0px));
   font-size: 14px;
   overscroll-behavior: contain;
 }
-.tool-markdown-editor.toc-drawer.toc-open .toc-backdrop { display: block; }
-.tool-markdown-editor.toc-drawer.toc-open .toc-link { padding-top: 9px; padding-bottom: 9px; }
+.tool-markdown-editor.toc-drawer.toc-open .toc-backdrop {
+  display: block;
+}
+.tool-markdown-editor.toc-drawer.toc-open .toc-link {
+  padding-top: 9px;
+  padding-bottom: 9px;
+}
 
 .tool-markdown-editor .toc-title {
   font-weight: 600;
@@ -271,7 +324,11 @@
   color: var(--text-muted);
   margin: 0 0 8px 10px;
 }
-.tool-markdown-editor .toc-empty { color: var(--text-muted); font-size: 12px; margin-left: 10px; }
+.tool-markdown-editor .toc-empty {
+  color: var(--text-muted);
+  font-size: 12px;
+  margin-left: 10px;
+}
 .tool-markdown-editor .toc-link {
   min-height: 0;
   display: block;
@@ -291,13 +348,29 @@
   transition: none;
 }
 @media (hover: hover) {
-  .tool-markdown-editor .toc-link:hover { color: var(--text); border-left-color: var(--accent); background: var(--accent-soft); }
+  .tool-markdown-editor .toc-link:hover {
+    color: var(--text);
+    border-left-color: var(--accent);
+    background: var(--accent-soft);
+  }
 }
-.tool-markdown-editor .toc-link:active { transform: none; background: var(--accent-soft); }
-.tool-markdown-editor .toc-link.active { color: var(--text); border-left-color: var(--accent); }
-.tool-markdown-editor .toc-link.d2 { padding-left: 20px; }
-.tool-markdown-editor .toc-link.d3 { padding-left: 32px; }
-.tool-markdown-editor .toc-link.d4 { padding-left: 44px; }
+.tool-markdown-editor .toc-link:active {
+  transform: none;
+  background: var(--accent-soft);
+}
+.tool-markdown-editor .toc-link.active {
+  color: var(--text);
+  border-left-color: var(--accent);
+}
+.tool-markdown-editor .toc-link.d2 {
+  padding-left: 20px;
+}
+.tool-markdown-editor .toc-link.d3 {
+  padding-left: 32px;
+}
+.tool-markdown-editor .toc-link.d4 {
+  padding-left: 44px;
+}
 
 /* ---- find and replace ---- */
 
@@ -311,7 +384,9 @@
   flex: none;
   flex-wrap: nowrap;
 }
-.tool-markdown-editor.find-open .find-bar { display: flex; }
+.tool-markdown-editor.find-open .find-bar {
+  display: flex;
+}
 .tool-markdown-editor .find-bar input {
   font-family: inherit;
   font-size: 12px;
@@ -341,8 +416,13 @@
   text-align: center;
   flex: none;
 }
-.tool-markdown-editor .find-count.none { color: var(--danger-text); }
-.tool-markdown-editor .find-bar button { padding: 2px 6px; flex: none; }
+.tool-markdown-editor .find-count.none {
+  color: var(--danger-text);
+}
+.tool-markdown-editor .find-bar button {
+  padding: 2px 6px;
+  flex: none;
+}
 
 /* ---- the Rendered Document ----
    Its palette is a set of tokens on the preview pane: the Theme's by
@@ -410,34 +490,87 @@
   color: var(--doc-text);
   overflow-wrap: break-word;
 }
-.tool-markdown-editor .doc h1, .tool-markdown-editor .doc h2, .tool-markdown-editor .doc h3,
-.tool-markdown-editor .doc h4, .tool-markdown-editor .doc h5, .tool-markdown-editor .doc h6 {
+.tool-markdown-editor .doc h1,
+.tool-markdown-editor .doc h2,
+.tool-markdown-editor .doc h3,
+.tool-markdown-editor .doc h4,
+.tool-markdown-editor .doc h5,
+.tool-markdown-editor .doc h6 {
   font-weight: 600;
   letter-spacing: -0.015em;
   line-height: 1.3;
   margin: 1.6em 0 0.55em;
   text-wrap: balance;
 }
-.tool-markdown-editor .doc > :first-child { margin-top: 0; }
-.tool-markdown-editor .doc h1 { font-size: 1.75em; padding-bottom: 0.35em; border-bottom: 1px solid var(--doc-border-soft); }
-.tool-markdown-editor .doc h2 { font-size: 1.35em; padding-bottom: 0.3em; border-bottom: 1px solid var(--doc-border-soft); }
-.tool-markdown-editor .doc h3 { font-size: 1.15em; }
-.tool-markdown-editor .doc h4 { font-size: 1em; }
-.tool-markdown-editor .doc h5, .tool-markdown-editor .doc h6 { font-size: 0.9em; color: var(--doc-text-soft); }
-.tool-markdown-editor .doc p, .tool-markdown-editor .doc ul, .tool-markdown-editor .doc ol,
-.tool-markdown-editor .doc blockquote, .tool-markdown-editor .doc pre, .tool-markdown-editor .doc table { margin: 0 0 0.9em; }
-.tool-markdown-editor .doc ul, .tool-markdown-editor .doc ol { padding-left: 1.6em; }
-.tool-markdown-editor .doc li { margin: 0.25em 0; }
-/* No lone word on the last line of a paragraph or list item. */
-.tool-markdown-editor .doc p, .tool-markdown-editor .doc li { text-wrap: pretty; }
-.tool-markdown-editor .doc li > ul, .tool-markdown-editor .doc li > ol { margin-bottom: 0; }
-.tool-markdown-editor .doc li.task { list-style: none; margin-left: -1.4em; }
-.tool-markdown-editor .doc li input[type="checkbox"] { margin-right: 0.45em; accent-color: var(--doc-accent); vertical-align: -1px; }
-.tool-markdown-editor .doc a { color: var(--doc-accent); text-decoration: none; }
-@media (hover: hover) {
-  .tool-markdown-editor .doc a:hover { text-decoration: underline; }
+.tool-markdown-editor .doc > :first-child {
+  margin-top: 0;
 }
-.tool-markdown-editor .doc strong { font-weight: 600; }
+.tool-markdown-editor .doc h1 {
+  font-size: 1.75em;
+  padding-bottom: 0.35em;
+  border-bottom: 1px solid var(--doc-border-soft);
+}
+.tool-markdown-editor .doc h2 {
+  font-size: 1.35em;
+  padding-bottom: 0.3em;
+  border-bottom: 1px solid var(--doc-border-soft);
+}
+.tool-markdown-editor .doc h3 {
+  font-size: 1.15em;
+}
+.tool-markdown-editor .doc h4 {
+  font-size: 1em;
+}
+.tool-markdown-editor .doc h5,
+.tool-markdown-editor .doc h6 {
+  font-size: 0.9em;
+  color: var(--doc-text-soft);
+}
+.tool-markdown-editor .doc p,
+.tool-markdown-editor .doc ul,
+.tool-markdown-editor .doc ol,
+.tool-markdown-editor .doc blockquote,
+.tool-markdown-editor .doc pre,
+.tool-markdown-editor .doc table {
+  margin: 0 0 0.9em;
+}
+.tool-markdown-editor .doc ul,
+.tool-markdown-editor .doc ol {
+  padding-left: 1.6em;
+}
+.tool-markdown-editor .doc li {
+  margin: 0.25em 0;
+}
+/* No lone word on the last line of a paragraph or list item. */
+.tool-markdown-editor .doc p,
+.tool-markdown-editor .doc li {
+  text-wrap: pretty;
+}
+.tool-markdown-editor .doc li > ul,
+.tool-markdown-editor .doc li > ol {
+  margin-bottom: 0;
+}
+.tool-markdown-editor .doc li.task {
+  list-style: none;
+  margin-left: -1.4em;
+}
+.tool-markdown-editor .doc li input[type="checkbox"] {
+  margin-right: 0.45em;
+  accent-color: var(--doc-accent);
+  vertical-align: -1px;
+}
+.tool-markdown-editor .doc a {
+  color: var(--doc-accent);
+  text-decoration: none;
+}
+@media (hover: hover) {
+  .tool-markdown-editor .doc a:hover {
+    text-decoration: underline;
+  }
+}
+.tool-markdown-editor .doc strong {
+  font-weight: 600;
+}
 .tool-markdown-editor .doc code {
   font-family: var(--mono);
   font-size: 0.86em;
@@ -453,20 +586,53 @@
   padding: 14px 16px;
   overflow-x: auto;
 }
-.tool-markdown-editor .doc pre code { background: none; border: none; padding: 0; font-size: 12.5px; line-height: 1.6; }
+.tool-markdown-editor .doc pre code {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 12.5px;
+  line-height: 1.6;
+}
 .tool-markdown-editor .doc blockquote {
   border-left: 3px solid var(--doc-border);
   padding: 0.1em 0 0.1em 1em;
   color: var(--doc-text-soft);
 }
-.tool-markdown-editor .doc blockquote > :last-child { margin-bottom: 0; }
-.tool-markdown-editor .doc hr { border: none; border-top: 1px solid var(--doc-border); margin: 2em 0; }
+.tool-markdown-editor .doc blockquote > :last-child {
+  margin-bottom: 0;
+}
+.tool-markdown-editor .doc hr {
+  border: none;
+  border-top: 1px solid var(--doc-border);
+  margin: 2em 0;
+}
 /* A hairline edge on every image, so one whose edge matches the page still reads as an image. */
-.tool-markdown-editor .doc img { max-width: 100%; border-radius: 8px; outline: 1px solid var(--doc-img-outline); outline-offset: -1px; }
-.tool-markdown-editor .doc table { border-collapse: collapse; width: 100%; font-size: 0.95em; display: block; overflow-x: auto; }
-.tool-markdown-editor .doc th, .tool-markdown-editor .doc td { border: 1px solid var(--doc-border); padding: 6px 12px; text-align: left; }
-.tool-markdown-editor .doc th { background: var(--doc-code-bg); font-weight: 600; }
-.tool-markdown-editor .doc del { color: var(--doc-text-faint); }
+.tool-markdown-editor .doc img {
+  max-width: 100%;
+  border-radius: 8px;
+  outline: 1px solid var(--doc-img-outline);
+  outline-offset: -1px;
+}
+.tool-markdown-editor .doc table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.95em;
+  display: block;
+  overflow-x: auto;
+}
+.tool-markdown-editor .doc th,
+.tool-markdown-editor .doc td {
+  border: 1px solid var(--doc-border);
+  padding: 6px 12px;
+  text-align: left;
+}
+.tool-markdown-editor .doc th {
+  background: var(--doc-code-bg);
+  font-weight: 600;
+}
+.tool-markdown-editor .doc del {
+  color: var(--doc-text-faint);
+}
 
 /* callouts */
 .tool-markdown-editor .doc blockquote.callout {
@@ -486,33 +652,91 @@
   margin-bottom: 5px;
 }
 /* A 2px stroke beside the semibold title, a step up from the Collection's 1.5px. */
-.tool-markdown-editor .doc .callout-title svg { width: 15px; height: 15px; flex: none; stroke-width: 2; }
-.tool-markdown-editor .doc .callout-note { --co: var(--co-note); }
-.tool-markdown-editor .doc .callout-tip { --co: var(--co-tip); }
-.tool-markdown-editor .doc .callout-important { --co: var(--co-important); }
-.tool-markdown-editor .doc .callout-warning { --co: var(--co-warning); }
-.tool-markdown-editor .doc .callout-caution { --co: var(--co-caution); }
+.tool-markdown-editor .doc .callout-title svg {
+  width: 15px;
+  height: 15px;
+  flex: none;
+  stroke-width: 2;
+}
+.tool-markdown-editor .doc .callout-note {
+  --co: var(--co-note);
+}
+.tool-markdown-editor .doc .callout-tip {
+  --co: var(--co-tip);
+}
+.tool-markdown-editor .doc .callout-important {
+  --co: var(--co-important);
+}
+.tool-markdown-editor .doc .callout-warning {
+  --co: var(--co-warning);
+}
+.tool-markdown-editor .doc .callout-caution {
+  --co: var(--co-caution);
+}
 
 /* syntax highlighting */
-.tool-markdown-editor .hljs { color: var(--doc-text); background: transparent; }
-.tool-markdown-editor .hljs-comment, .tool-markdown-editor .hljs-quote { color: var(--doc-text-faint); }
-.tool-markdown-editor .hljs-keyword, .tool-markdown-editor .hljs-selector-tag, .tool-markdown-editor .hljs-doctag,
-.tool-markdown-editor .hljs-section, .tool-markdown-editor .hljs-template-tag, .tool-markdown-editor .hljs-deletion,
-.tool-markdown-editor .hljs-meta .hljs-keyword { color: var(--hl-keyword); }
-.tool-markdown-editor .hljs-title, .tool-markdown-editor .hljs-title.class_, .tool-markdown-editor .hljs-title.function_ { color: var(--hl-title); }
-.tool-markdown-editor .hljs-attr, .tool-markdown-editor .hljs-attribute, .tool-markdown-editor .hljs-literal,
-.tool-markdown-editor .hljs-number, .tool-markdown-editor .hljs-operator, .tool-markdown-editor .hljs-variable,
-.tool-markdown-editor .hljs-selector-attr, .tool-markdown-editor .hljs-selector-class, .tool-markdown-editor .hljs-selector-id,
-.tool-markdown-editor .hljs-selector-pseudo, .tool-markdown-editor .hljs-meta { color: var(--hl-attr); }
-.tool-markdown-editor .hljs-string, .tool-markdown-editor .hljs-regexp, .tool-markdown-editor .hljs-addition,
-.tool-markdown-editor .hljs-meta .hljs-string { color: var(--hl-string); }
-.tool-markdown-editor .hljs-built_in, .tool-markdown-editor .hljs-symbol, .tool-markdown-editor .hljs-type { color: var(--hl-builtin); }
-.tool-markdown-editor .hljs-emphasis { font-style: italic; }
-.tool-markdown-editor .hljs-strong { font-weight: 600; }
+.tool-markdown-editor .hljs {
+  color: var(--doc-text);
+  background: transparent;
+}
+.tool-markdown-editor .hljs-comment,
+.tool-markdown-editor .hljs-quote {
+  color: var(--doc-text-faint);
+}
+.tool-markdown-editor .hljs-keyword,
+.tool-markdown-editor .hljs-selector-tag,
+.tool-markdown-editor .hljs-doctag,
+.tool-markdown-editor .hljs-section,
+.tool-markdown-editor .hljs-template-tag,
+.tool-markdown-editor .hljs-deletion,
+.tool-markdown-editor .hljs-meta .hljs-keyword {
+  color: var(--hl-keyword);
+}
+.tool-markdown-editor .hljs-title,
+.tool-markdown-editor .hljs-title.class_,
+.tool-markdown-editor .hljs-title.function_ {
+  color: var(--hl-title);
+}
+.tool-markdown-editor .hljs-attr,
+.tool-markdown-editor .hljs-attribute,
+.tool-markdown-editor .hljs-literal,
+.tool-markdown-editor .hljs-number,
+.tool-markdown-editor .hljs-operator,
+.tool-markdown-editor .hljs-variable,
+.tool-markdown-editor .hljs-selector-attr,
+.tool-markdown-editor .hljs-selector-class,
+.tool-markdown-editor .hljs-selector-id,
+.tool-markdown-editor .hljs-selector-pseudo,
+.tool-markdown-editor .hljs-meta {
+  color: var(--hl-attr);
+}
+.tool-markdown-editor .hljs-string,
+.tool-markdown-editor .hljs-regexp,
+.tool-markdown-editor .hljs-addition,
+.tool-markdown-editor .hljs-meta .hljs-string {
+  color: var(--hl-string);
+}
+.tool-markdown-editor .hljs-built_in,
+.tool-markdown-editor .hljs-symbol,
+.tool-markdown-editor .hljs-type {
+  color: var(--hl-builtin);
+}
+.tool-markdown-editor .hljs-emphasis {
+  font-style: italic;
+}
+.tool-markdown-editor .hljs-strong {
+  font-weight: 600;
+}
 
 /* footnotes */
-.tool-markdown-editor .doc .fn-ref { font-size: 0.75em; line-height: 0; }
-.tool-markdown-editor .doc .fn-ref a { text-decoration: none; padding: 0 0.15em; }
+.tool-markdown-editor .doc .fn-ref {
+  font-size: 0.75em;
+  line-height: 0;
+}
+.tool-markdown-editor .doc .fn-ref a {
+  text-decoration: none;
+  padding: 0 0.15em;
+}
 .tool-markdown-editor .doc .footnotes {
   margin-top: 2.4em;
   padding-top: 1em;
@@ -520,19 +744,48 @@
   font-size: 0.88em;
   color: var(--doc-text-soft);
 }
-.tool-markdown-editor .doc .footnotes ol { padding-left: 1.3em; }
-.tool-markdown-editor .doc .footnotes li { margin: 0.35em 0; }
-.tool-markdown-editor .doc .fn-back { text-decoration: none; margin-left: 0.3em; }
+.tool-markdown-editor .doc .footnotes ol {
+  padding-left: 1.3em;
+}
+.tool-markdown-editor .doc .footnotes li {
+  margin: 0.35em 0;
+}
+.tool-markdown-editor .doc .fn-back {
+  text-decoration: none;
+  margin-left: 0.3em;
+}
 
 /* math and diagrams */
-.tool-markdown-editor .doc .katex-block { overflow-x: auto; margin: 0 0 0.9em; padding: 2px 0; }
-.tool-markdown-editor .doc .katex { font-size: 1.08em; }
-.tool-markdown-editor .doc .math-err { color: var(--doc-danger); font-family: var(--mono); font-size: 0.85em; }
-.tool-markdown-editor .doc .mermaid-block { margin: 0 0 0.9em; overflow-x: auto; text-align: center; }
-.tool-markdown-editor .doc .mermaid-block svg { max-width: 100%; height: auto; }
+.tool-markdown-editor .doc .katex-block {
+  overflow-x: auto;
+  margin: 0 0 0.9em;
+  padding: 2px 0;
+}
+.tool-markdown-editor .doc .katex {
+  font-size: 1.08em;
+}
+.tool-markdown-editor .doc .math-err {
+  color: var(--doc-danger);
+  font-family: var(--mono);
+  font-size: 0.85em;
+}
+.tool-markdown-editor .doc .mermaid-block {
+  margin: 0 0 0.9em;
+  overflow-x: auto;
+  text-align: center;
+}
+.tool-markdown-editor .doc .mermaid-block svg {
+  max-width: 100%;
+  height: auto;
+}
 /* Copy on code blocks: shown on hover, or always where there is no hover. */
-.tool-markdown-editor .doc .code-wrap { position: relative; margin: 0 0 0.9em; }
-.tool-markdown-editor .doc .code-wrap pre { margin: 0; }
+.tool-markdown-editor .doc .code-wrap {
+  position: relative;
+  margin: 0 0 0.9em;
+}
+.tool-markdown-editor .doc .code-wrap pre {
+  margin: 0;
+}
 .tool-markdown-editor .doc .copy-btn {
   position: absolute;
   top: 6px;
@@ -542,15 +795,25 @@
   background: var(--doc-bg);
   color: var(--doc-text-soft);
   opacity: 0;
-  transition: opacity 0.12s, background 0.15s;
+  transition:
+    opacity 0.12s,
+    background 0.15s;
 }
 .tool-markdown-editor .doc .code-wrap:hover .copy-btn,
-.tool-markdown-editor .doc .copy-btn:focus-visible { opacity: 1; }
+.tool-markdown-editor .doc .copy-btn:focus-visible {
+  opacity: 1;
+}
 @media (hover: hover) {
-  .tool-markdown-editor .doc .copy-btn:hover { color: var(--doc-accent); border-color: var(--doc-accent); background: var(--doc-bg); }
+  .tool-markdown-editor .doc .copy-btn:hover {
+    color: var(--doc-accent);
+    border-color: var(--doc-accent);
+    background: var(--doc-bg);
+  }
 }
 @media (hover: none) {
-  .tool-markdown-editor .doc .copy-btn { opacity: 1; }
+  .tool-markdown-editor .doc .copy-btn {
+    opacity: 1;
+  }
 }
 .tool-markdown-editor .doc pre.mermaid-err {
   text-align: left;
@@ -562,35 +825,90 @@
 
 /* ---- narrow: Split stacks, editor above preview ---- */
 
-.tool-markdown-editor.stacked[data-view="split"] .body { flex-direction: column; }
-.tool-markdown-editor.stacked[data-view="split"] .editor-pane { border-right: none; border-bottom: 1px solid var(--border); }
-.tool-markdown-editor.stacked .doc { padding: 20px 18px 40cqh; }
-.tool-markdown-editor.stacked .editor, .tool-markdown-editor.stacked .editor-marks { padding: 18px 18px 40cqh; }
+.tool-markdown-editor.stacked[data-view="split"] .body {
+  flex-direction: column;
+}
+.tool-markdown-editor.stacked[data-view="split"] .editor-pane {
+  border-right: none;
+  border-bottom: 1px solid var(--border);
+}
+.tool-markdown-editor.stacked .doc {
+  padding: 20px 18px 40cqh;
+}
+.tool-markdown-editor.stacked .editor,
+.tool-markdown-editor.stacked .editor-marks {
+  padding: 18px 18px 40cqh;
+}
 
 @media (max-width: 767px) {
-  .tool-markdown-editor .filename { width: 12ch; }
+  .tool-markdown-editor .filename {
+    width: 12ch;
+  }
   /* Touch targets for the controls outside a pane head or toolbar. */
-  .tool-markdown-editor .find-bar :is(button, input) { min-height: 36px; }
+  .tool-markdown-editor .find-bar :is(button, input) {
+    min-height: 36px;
+  }
 }
 
 /* ---- Export PDF: only the Rendered Document, on a light page ---- */
 
 @media print {
-  html { height: auto; overflow: visible; }
-  body.md-print { height: auto; overflow: visible; }
-  body.md-print > :not(.content) { display: none !important; }
-  body.md-print .tool-header { display: none; }
-  body.md-print { background: #fff; }
+  html {
+    height: auto;
+    overflow: visible;
+  }
+  body.md-print {
+    height: auto;
+    overflow: visible;
+  }
+  body.md-print > :not(.content) {
+    display: none !important;
+  }
+  body.md-print .tool-header {
+    display: none;
+  }
+  body.md-print {
+    background: #fff;
+  }
   /* No transition: print lays out at time zero, and the margin would still be on its way. */
-  body.md-print .content { height: auto; margin-left: 0 !important; display: block; transition: none; }
-  body.md-print .hosts { display: block; }
-  body.md-print .tool-host { display: none; }
-  body.md-print .tool-markdown-editor { display: block; padding: 0; overflow: visible; height: auto; }
-  .tool-markdown-editor .toolbar, .tool-markdown-editor .toc, .tool-markdown-editor .toc-backdrop,
-  .tool-markdown-editor .editor-pane, .tool-markdown-editor .footer, .tool-markdown-editor .drop-overlay,
-  .tool-markdown-editor .copy-btn { display: none !important; }
-  .tool-markdown-editor .pane { display: block; border: none; border-radius: 0; overflow: visible; background: #fff; min-height: 0; }
-  .tool-markdown-editor .body { display: block; }
+  body.md-print .content {
+    height: auto;
+    margin-left: 0 !important;
+    display: block;
+    transition: none;
+  }
+  body.md-print .hosts {
+    display: block;
+  }
+  body.md-print .tool-host {
+    display: none;
+  }
+  body.md-print .tool-markdown-editor {
+    display: block;
+    padding: 0;
+    overflow: visible;
+    height: auto;
+  }
+  .tool-markdown-editor .toolbar,
+  .tool-markdown-editor .toc,
+  .tool-markdown-editor .toc-backdrop,
+  .tool-markdown-editor .editor-pane,
+  .tool-markdown-editor .footer,
+  .tool-markdown-editor .drop-overlay,
+  .tool-markdown-editor .copy-btn {
+    display: none !important;
+  }
+  .tool-markdown-editor .pane {
+    display: block;
+    border: none;
+    border-radius: 0;
+    overflow: visible;
+    background: #fff;
+    min-height: 0;
+  }
+  .tool-markdown-editor .body {
+    display: block;
+  }
   .tool-markdown-editor .preview-pane {
     display: block !important;
     overflow: visible;
@@ -618,9 +936,25 @@
     --hl-string: #116329;
     --hl-builtin: #953800;
   }
-  .tool-markdown-editor .doc { padding: 0; max-width: none; }
-  .tool-markdown-editor .doc pre, .tool-markdown-editor .doc blockquote, .tool-markdown-editor .doc table,
-  .tool-markdown-editor .doc img, .tool-markdown-editor .doc .mermaid-block, .tool-markdown-editor .doc .katex-block { break-inside: avoid; }
-  .tool-markdown-editor .doc h1, .tool-markdown-editor .doc h2, .tool-markdown-editor .doc h3, .tool-markdown-editor .doc h4 { break-after: avoid; }
-  @page { margin: 16mm; }
+  .tool-markdown-editor .doc {
+    padding: 0;
+    max-width: none;
+  }
+  .tool-markdown-editor .doc pre,
+  .tool-markdown-editor .doc blockquote,
+  .tool-markdown-editor .doc table,
+  .tool-markdown-editor .doc img,
+  .tool-markdown-editor .doc .mermaid-block,
+  .tool-markdown-editor .doc .katex-block {
+    break-inside: avoid;
+  }
+  .tool-markdown-editor .doc h1,
+  .tool-markdown-editor .doc h2,
+  .tool-markdown-editor .doc h3,
+  .tool-markdown-editor .doc h4 {
+    break-after: avoid;
+  }
+  @page {
+    margin: 16mm;
+  }
 }

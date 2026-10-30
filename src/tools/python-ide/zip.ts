@@ -10,24 +10,32 @@ export interface ZipEntry {
 
 const CRC_TABLE = (() => {
   const t = new Uint32Array(256);
-  for (let n = 0; n < 256; n++) {
+  for (let n = 0; n < 256; n += 1) {
     let c = n;
-    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    for (let k = 0; k < 8; k += 1) {
+      c = c & 1 ? 0xed_b8_83_20 ^ (c >>> 1) : c >>> 1;
+    }
     t[n] = c >>> 0;
   }
   return t;
 })();
 
 function crc32(bytes: Uint8Array): number {
-  let c = 0xffffffff;
-  for (let i = 0; i < bytes.length; i++) c = CRC_TABLE[(c ^ bytes[i]!) & 0xff]! ^ (c >>> 8);
-  return (c ^ 0xffffffff) >>> 0;
+  let c = 0xff_ff_ff_ff;
+  for (let i = 0; i < bytes.length; i += 1) {
+    c = CRC_TABLE[(c ^ bytes[i]!) & 0xff]! ^ (c >>> 8);
+  }
+  return (c ^ 0xff_ff_ff_ff) >>> 0;
 }
 
 function dosDateTime(ms: number): [number, number] {
   const d = new Date(ms);
-  const time = (d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1);
-  const date = ((Math.max(1980, d.getFullYear()) - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate();
+  const time =
+    (d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1);
+  const date =
+    ((Math.max(1980, d.getFullYear()) - 1980) << 9) |
+    ((d.getMonth() + 1) << 5) |
+    d.getDate();
   return [time, date];
 }
 
@@ -41,9 +49,9 @@ export function writeZip(entries: ZipEntry[], mtime = Date.now()): Blob {
     const name = encoder.encode(e.path);
     const crc = crc32(e.data);
     const local = new DataView(new ArrayBuffer(30));
-    local.setUint32(0, 0x04034b50, true);
+    local.setUint32(0, 0x04_03_4b_50, true);
     local.setUint16(4, 20, true);
-    local.setUint16(6, 0x0800, true); // UTF-8 names
+    local.setUint16(6, 0x08_00, true); // UTF-8 names
     local.setUint16(8, 0, true); // stored
     local.setUint16(10, time, true);
     local.setUint16(12, date, true);
@@ -55,10 +63,10 @@ export function writeZip(entries: ZipEntry[], mtime = Date.now()): Blob {
     parts.push(new Uint8Array(local.buffer), name, e.data);
 
     const c = new DataView(new ArrayBuffer(46));
-    c.setUint32(0, 0x02014b50, true);
+    c.setUint32(0, 0x02_01_4b_50, true);
     c.setUint16(4, 20, true);
     c.setUint16(6, 20, true);
-    c.setUint16(8, 0x0800, true);
+    c.setUint16(8, 0x08_00, true);
     c.setUint16(10, 0, true);
     c.setUint16(12, time, true);
     c.setUint16(14, date, true);
@@ -76,9 +84,11 @@ export function writeZip(entries: ZipEntry[], mtime = Date.now()): Blob {
     offset += 30 + name.length + e.data.length;
   }
   let centralSize = 0;
-  for (const c of central) centralSize += c.length;
+  for (const c of central) {
+    centralSize += c.length;
+  }
   const end = new DataView(new ArrayBuffer(22));
-  end.setUint32(0, 0x06054b50, true);
+  end.setUint32(0, 0x06_05_4b_50, true);
   end.setUint16(4, 0, true);
   end.setUint16(6, 0, true);
   end.setUint16(8, entries.length, true);
@@ -86,7 +96,10 @@ export function writeZip(entries: ZipEntry[], mtime = Date.now()): Blob {
   end.setUint32(12, centralSize, true);
   end.setUint32(16, offset, true);
   end.setUint16(20, 0, true);
-  return new Blob([...parts, ...central, new Uint8Array(end.buffer)] as BlobPart[], { type: "application/zip" });
+  return new Blob(
+    [...parts, ...central, new Uint8Array(end.buffer)] as BlobPart[],
+    { type: "application/zip" }
+  );
 }
 
 async function inflateRaw(data: Uint8Array): Promise<Uint8Array> {
@@ -101,20 +114,28 @@ export async function readZip(buffer: ArrayBuffer): Promise<ZipEntry[]> {
   const view = new DataView(buffer);
   // The end-of-central-directory record is within the last 64 KB + 22 bytes.
   let eocd = -1;
-  for (let i = bytes.length - 22; i >= Math.max(0, bytes.length - 65558); i--) {
-    if (view.getUint32(i, true) === 0x06054b50) {
+  for (
+    let i = bytes.length - 22;
+    i >= Math.max(0, bytes.length - 65_558);
+    i--
+  ) {
+    if (view.getUint32(i, true) === 0x06_05_4b_50) {
       eocd = i;
       break;
     }
   }
-  if (eocd === -1) throw new Error("Not a zip file.");
+  if (eocd === -1) {
+    throw new Error("Not a zip file.");
+  }
   const count = view.getUint16(eocd + 10, true);
   let pos = view.getUint32(eocd + 16, true);
   const decoder = new TextDecoder();
   const cp437 = new TextDecoder("latin1");
   const entries: ZipEntry[] = [];
-  for (let n = 0; n < count; n++) {
-    if (view.getUint32(pos, true) !== 0x02014b50) throw new Error("Corrupt zip directory.");
+  for (let n = 0; n < count; n += 1) {
+    if (view.getUint32(pos, true) !== 0x02_01_4b_50) {
+      throw new Error("Corrupt zip directory.");
+    }
     const flags = view.getUint16(pos + 8, true);
     const method = view.getUint16(pos + 10, true);
     const compressed = view.getUint32(pos + 20, true);
@@ -124,19 +145,31 @@ export async function readZip(buffer: ArrayBuffer): Promise<ZipEntry[]> {
     const commentLen = view.getUint16(pos + 32, true);
     const localOffset = view.getUint32(pos + 42, true);
     const nameBytes = bytes.subarray(pos + 46, pos + 46 + nameLen);
-    const path = (flags & 0x0800 ? decoder : cp437).decode(nameBytes);
+    const path = (flags & 0x08_00 ? decoder : cp437).decode(nameBytes);
     pos += 46 + nameLen + extraLen + commentLen;
-    if (path.endsWith("/")) continue;
-    if (view.getUint32(localOffset, true) !== 0x04034b50) throw new Error("Corrupt zip entry.");
+    if (path.endsWith("/")) {
+      continue;
+    }
+    if (view.getUint32(localOffset, true) !== 0x04_03_4b_50) {
+      throw new Error("Corrupt zip entry.");
+    }
     const localNameLen = view.getUint16(localOffset + 26, true);
     const localExtraLen = view.getUint16(localOffset + 28, true);
     const start = localOffset + 30 + localNameLen + localExtraLen;
     const raw = bytes.slice(start, start + compressed);
     let data: Uint8Array;
-    if (method === 0) data = raw;
-    else if (method === 8) data = await inflateRaw(raw);
-    else throw new Error(`Unsupported compression (method ${method}) for ${path}.`);
-    if (data.length !== size && size !== 0xffffffff) throw new Error(`Size mismatch for ${path}.`);
+    if (method === 0) {
+      data = raw;
+    } else if (method === 8) {
+      data = await inflateRaw(raw);
+    } else {
+      throw new Error(
+        `Unsupported compression (method ${method}) for ${path}.`
+      );
+    }
+    if (data.length !== size && size !== 0xff_ff_ff_ff) {
+      throw new Error(`Size mismatch for ${path}.`);
+    }
     entries.push({ path, data });
   }
   return entries;
