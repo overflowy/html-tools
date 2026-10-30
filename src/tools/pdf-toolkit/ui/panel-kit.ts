@@ -70,6 +70,8 @@ export const resultFoot = (api: Api, o: FootOptions) => {
     current = r;
     const has = Boolean(r?.doc ?? r?.files?.length);
     dl.disabled = !has;
+    // Several files go down together, as one zip.
+    dl.textContent = (r?.files?.length ?? 0) > 1 ? "Download all" : "Download";
     apply.disabled = !r?.doc;
     status.textContent = text;
   };

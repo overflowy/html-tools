@@ -4760,8 +4760,10 @@ const ptkFiles = {
   beta: path.join(ptkDir, "beta.pdf"),
   locked: path.join(ptkDir, "locked.pdf"),
   logo: path.join(ptkDir, "logo.png"),
+  pictures: path.join(ptkDir, "pictures.pdf"),
   scan: path.join(ptkDir, "scan.pdf"),
   scanDense: path.join(ptkDir, "scan-dense.pdf"),
+  secret: path.join(ptkDir, "secret.pdf"),
   signed: path.join(ptkDir, "signed.pdf"),
   signedLocked: path.join(ptkDir, "signed-locked.pdf"),
 };
@@ -4818,6 +4820,34 @@ await Bun.write(
   pix.clear(128);
   await Bun.write(ptkFiles.logo, pix.asPNG());
   await Bun.write(ptkFiles.badImage, "not an image at all");
+  const light = new ptkEnv.mupdf.Pixmap(
+    ptkEnv.mupdf.ColorSpace.DeviceRGB,
+    [0, 0, 60, 40],
+    false
+  );
+  light.clear(220);
+  await Bun.write(
+    ptkFiles.pictures,
+    imagesToPdf(ptkEnv, [pix.asPNG(), light.asPNG()], {
+      fit: "contain",
+      margin: 0,
+      orientation: "auto",
+      page: "image",
+    })
+  );
+}
+{
+  // A word on the page, in the title, and in a note stuck over it.
+  const doc = openTest(makePdf(1, { label: "Codename" }));
+  doc.setMetaData("info:Title", "Codename plans");
+  const note = doc.loadPage(0).createAnnotation("Text");
+  note.setRect([80, 50, 100, 70]);
+  note.setContents("Codename, as discussed");
+  note.update();
+  await Bun.write(
+    ptkFiles.secret,
+    new Uint8Array(doc.saveToBuffer("").asUint8Array())
+  );
 }
 /** A scan: a page of text rendered to a JPEG, made into a page with no text layer. */
 const ptkScan = (pdf: Uint8Array) => {
@@ -5823,6 +5853,93 @@ await ptkPreview();
     `${applyOffered} / ${foot}`
   );
 }
+
+// Extract images: two images are downloaded together, and the foot says so.
+await ptkPanel("organize");
+await page.setInputFiles(`${ptk}.open-input`, [ptkFiles.pictures]);
+await ptkIdle();
+await ptkPanel("images-out");
+await page
+  .locator(`${ptk}.panel-body button`, { hasText: "Find images" })
+  .click();
+await page.waitForSelector(`${ptk}.gallery`);
+check(
+  "pdf: Extract images shows every image, and its foot offers Download all",
+  (await page.locator(`${ptk}.gallery .image-tile`).count()) === 2 &&
+    (await page
+      .locator(`${ptk}.panel-foot button:not(.primary)`)
+      .textContent()) === "Download all",
+  await ptkFoot()
+);
+
+// Compress: one word a choice, and the line under them says what it does.
+await ptkPanel("compress");
+const imageChoices = page.locator(`${ptk}.field-seg`).first();
+await imageChoices.locator("button", { hasText: "Small" }).click();
+const imageLabels = await imageChoices.locator("button").allTextContents();
+const imagesHint = await textOf(imageChoices.locator(".hint"));
+check(
+  "pdf: Compress names its image choices in a word and explains the one chosen",
+  imageLabels.join(",") === "Keep,High,Medium,Small" &&
+    imagesHint.includes("96 dpi"),
+  imagesHint
+);
+await imageChoices.locator("button", { hasText: "Medium" }).click();
+
+// A note comes over the pages, not above them: nothing moves.
+await page.setInputFiles(`${ptk}.open-input`, [ptkFiles.secret]);
+await ptkIdle();
+await ptkPanel("redact");
+const firstPage = page.locator(`${ptk}.viewer-body .page`).first();
+const pageBefore = await firstPage.boundingBox();
+const redactQuery = page.locator(`${ptk}.panel-body input[type=search]`);
+await redactQuery.fill("nowhere");
+await redactQuery.press("Enter");
+await page.waitForSelector(`${ptk}.viewer .note.float.on`);
+check(
+  "pdf: a note shows over the pages and leaves them where they were",
+  (await textOf(page.locator(`${ptk}.note-text`))) ===
+    "“nowhere” is not in the document." &&
+    JSON.stringify(await firstPage.boundingBox()) ===
+      JSON.stringify(pageBefore),
+  `${JSON.stringify(pageBefore)} → ${JSON.stringify(await firstPage.boundingBox())}`
+);
+await page.locator(`${ptk}.note-close`).click();
+check(
+  "pdf: a note's close button dismisses it",
+  (await page.locator(`${ptk}.note.on`).count()) === 0
+);
+
+// Mark all marks the word on the page and lists where else it is; the note
+// stuck over it goes with the redaction, and the title, out of reach, stays.
+await redactQuery.fill("codename");
+await redactQuery.press("Enter");
+await page.waitForSelector(`${ptk}.elsewhere .places li`);
+const places = await page
+  .locator(`${ptk}.elsewhere .places li`)
+  .allTextContents();
+check(
+  "pdf: Mark all lists where the text is out of the marks' reach",
+  places.includes("Document information: Title") &&
+    places.includes("Comment on page 1") &&
+    (await page.locator(`${ptk}.annots li`).count()) === 1,
+  places.join(" | ")
+);
+await page.locator(`${ptk}.panel-body button`, { hasText: "Preview" }).click();
+await ptkIdle();
+const redactBody = await textOf(page.locator(`${ptk}.panel-body`));
+const secretOut = await ptkDownload(() =>
+  page.locator(`${ptk}.panel-foot button`, { hasText: "Download" }).click()
+);
+const secretDoc = openTest(secretOut.bytes);
+check(
+  "pdf: redaction takes the comment over a mark with it, and says so",
+  secretDoc.loadPage(0).getAnnotations().length === 0 &&
+    pageTexts(secretOut.bytes)[0] === "1" &&
+    secretDoc.getMetaData("info:Title") === "Codename plans" &&
+    redactBody.includes("Also removed 1 comment that lay over the marks."),
+  redactBody
+);
 
 // Compare: a view chosen while the text diff is still being read wins.
 await ptkPanel("organize");

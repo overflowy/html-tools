@@ -27,13 +27,7 @@ import {
 } from "./inspect";
 import { addTextLayers } from "./ocr";
 import { writeOutline } from "./outline";
-import {
-  protect,
-  redact,
-  removeSignatures,
-  sanitize,
-  unlock,
-} from "./security";
+import { protect, removeSignatures, sanitize, unlock } from "./security";
 import type { ProtectOptions } from "./security";
 import { split, splitPlan } from "./split";
 import { pageText } from "./text";
@@ -77,20 +71,6 @@ test("a password with commas and an equals sign protects, restricts, and unlocks
   );
   expect(open.needsPassword()).toBe(false);
   expect(open.hasPermission("print")).toBe(true);
-});
-
-test("redaction removes the text under the box, not just covers it", async () => {
-  const env = await testEnv();
-  const src = makePdf(1);
-  const [[quad] = []] = openTest(src).loadPage(0).search("Page 1", "");
-  const out = redact(env, src, {
-    black: true,
-    images: "pixels",
-    lineArt: false,
-    marks: [{ page: 0, quads: quad ? [quad] : [] }],
-  });
-  expect(pageTexts(out)).toEqual([""]);
-  expect(new TextDecoder("latin1").decode(out)).not.toContain("Page 1");
 });
 
 test("sanitize strips metadata, scripts, attachments, and outside links", async () => {

@@ -4,6 +4,7 @@
 // checked.
 
 import type { AttachmentInfo } from "../../pdf/attachments";
+import { IMAGE_PRESETS } from "../../pdf/images";
 import type { InfoReport, Metadata } from "../../pdf/inspect";
 import { parsePdfDate } from "../../pdf/inspect";
 import type { Bookmark } from "../../pdf/outline";
@@ -805,16 +806,7 @@ const images = transformPanel({
       fig.addEventListener("click", () => download(blob, file.name));
       grid.append(fig);
     }
-    return el(
-      "div",
-      {},
-      el("p", {
-        class: "sel-info",
-        text: `${count(files.length, "image", "images")}. Click one to save it; Download saves them all.`,
-      }),
-      broken,
-      grid
-    );
+    return el("div", {}, broken, grid);
   },
   runLabel: "Find images",
   suffix: "-images",
@@ -824,19 +816,41 @@ const images = transformPanel({
 
 /* ---------------- compress ---------------- */
 
+type ImagePreset = keyof typeof IMAGE_PRESETS;
+
+/** What each Images choice is for, after what it does to a photograph. */
+const IMAGE_USES: Record<ImagePreset, string> = {
+  high: "good for print",
+  low: "for reading on screen and sending by email",
+  medium: "sharp on screen, fine for everyday printing",
+};
+
+const isImagePreset = (choice: string): choice is ImagePreset =>
+  Object.hasOwn(IMAGE_PRESETS, choice);
+
+/** The line under Images: what the choice does, so its button can stay one word. */
+const imagesHint = (choice: string): string => {
+  if (!isImagePreset(choice)) {
+    return "Images stay as they are; fonts and the file's structure still shrink.";
+  }
+  const { dpi, quality } = IMAGE_PRESETS[choice];
+  return `Photos sharper than ${dpi} dpi are scaled down to it and saved as JPEG at quality ${quality}: ${IMAGE_USES[choice]}.`;
+};
+
 const compress = transformPanel({
   applyLabel: "the compression",
   defaults: { images: "medium", objectStreams: true, subsetFonts: true },
   fields: [
     {
+      hint: (v) => imagesHint(String(v.images)),
       key: "images",
       kind: "seg",
       label: "Images",
       options: [
         ["keep", "Keep"],
-        ["high", "High (200 dpi)"],
-        ["medium", "Medium (150 dpi)"],
-        ["low", "Small (96 dpi)"],
+        ["high", "High"],
+        ["medium", "Medium"],
+        ["low", "Small"],
       ],
     },
     {

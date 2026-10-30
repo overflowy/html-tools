@@ -7,8 +7,10 @@ import type { PDFDocument, PDFObject, PDFPage } from "mupdf";
 
 import { openPdf, savePdf } from "./doc";
 import type { Env } from "./doc";
+import { intersect, normalize } from "./geometry";
 import type { Rect } from "./geometry";
 import { dig, itemsOf, keysOf, nameTree, textOf } from "./objects";
+import { scrubPage, scrubStructTree } from "./scrub";
 import type { Quad } from "./text";
 
 /* ---------------- passwords ---------------- */
@@ -89,6 +91,41 @@ export const unlock = (
   ).bytes;
 };
 
+/* ---------------- shared ---------------- */
+
+/** Remove `key` from `dict` if present; 1 if it was. */
+const drop = (dict: PDFObject | null, key: string): number => {
+  if (!dict?.isDictionary() || dict.get(key).isNull()) {
+    return 0;
+  }
+  dict.delete(key);
+  return 1;
+};
+
+const sameObject = (a: PDFObject, b: PDFObject) =>
+  a.isIndirect() && b.isIndirect() && a.asIndirect() === b.asIndirect();
+
+/** Take `target` out of a field tree; returns whether anything was removed. */
+const pruneField = (list: PDFObject, target: PDFObject): boolean => {
+  let removed = false;
+  for (let i = list.length - 1; i >= 0; i -= 1) {
+    const item = list.get(i);
+    if (sameObject(item, target)) {
+      list.delete(i);
+      removed = true;
+      continue;
+    }
+    const kids = item.get("Kids");
+    if (kids.isArray() && pruneField(kids, target)) {
+      removed = true;
+      if (kids.length === 0) {
+        list.delete(i);
+      }
+    }
+  }
+  return removed;
+};
+
 /* ---------------- redaction ---------------- */
 
 export interface RedactMark {
@@ -105,46 +142,196 @@ export interface RedactOptions {
   black: boolean;
   /** Images under a box: blank only the pixels under it, remove the whole image, or leave images alone. */
   images: "pixels" | "remove" | "none";
-  /** Remove drawings (lines, shapes) the box covers entirely. */
-  lineArt: boolean;
+  /**
+   * Drawings (lines, shapes) under a box: "keep" leaves them all; "covered"
+   * removes those a box covers entirely, leaving one that crosses its edge
+   * whole, the covered part included; "touched" removes every one a box
+   * touches, its parts outside the box too.
+   */
+  lineArt: "keep" | "covered" | "touched";
+}
+
+export interface RedactResult {
+  bytes: Uint8Array;
+  /** Comments (annotations other than form fields) removed for lying under a mark. */
+  annotations: number;
+  /** Form fields removed for lying under a mark. */
+  fields: number;
 }
 
 const IMAGE_METHOD = { none: 0, pixels: 2, remove: 1 } as const;
+const LINE_ART_METHOD = { covered: 1, keep: 0, touched: 2 } as const;
+/** MuPDF's PDFPage.REDACT_TEXT_REMOVE. */
+const TEXT_REMOVE = 0;
 
+/** The marks of each page that has any, by 0-based page; marks off the document are dropped. */
+const marksByPage = (
+  marks: RedactMark[],
+  pages: number
+): Map<number, RedactMark[]> => {
+  const byPage = new Map<number, RedactMark[]>();
+  for (const m of marks) {
+    if (m.page >= 0 && m.page < pages) {
+      byPage.set(m.page, [...(byPage.get(m.page) ?? []), m]);
+    }
+  }
+  return byPage;
+};
+
+/** The areas a mark covers, in display space: its box, or the bounds of each quad. */
+const markAreas = (m: RedactMark): Rect[] => {
+  if (m.quads?.length) {
+    return m.quads.map((q) => {
+      const xs = [q[0], q[2], q[4], q[6]];
+      const ys = [q[1], q[3], q[5], q[7]];
+      return [
+        Math.min(...xs),
+        Math.min(...ys),
+        Math.max(...xs),
+        Math.max(...ys),
+      ];
+    });
+  }
+  return m.rect ? [normalize(m.rect)] : [];
+};
+
+const overlapsAny = (r: Rect, areas: Rect[]) =>
+  areas.some((a) => intersect(normalize(r), a) !== null);
+
+/** The field a widget belongs to: the widget itself when it carries the name, else its parent. */
+const fieldOf = (widget: PDFObject): PDFObject =>
+  widget.get("T").isNull() && widget.get("Parent").isDictionary()
+    ? widget.get("Parent")
+    : widget;
+
+/** Object numbers of every field still in the form's tree. */
+const fieldNumbers = (list: PDFObject, out = new Set<number>(), depth = 0) => {
+  for (const item of itemsOf(list)) {
+    if (item.isIndirect() && !out.has(item.asIndirect()) && depth < 32) {
+      out.add(item.asIndirect());
+      fieldNumbers(item.get("Kids"), out, depth + 1);
+    }
+  }
+  return out;
+};
+
+/**
+ * After fields were taken out of the form: the calculation order lists only
+ * fields still there (it would keep a removed one, and its value, in the
+ * file), and XFA, which keeps every field's value in its own XML, goes.
+ */
+const tidyForm = (form: PDFObject) => {
+  const order = form.get("CO");
+  if (order.isArray()) {
+    const live = fieldNumbers(form.get("Fields"));
+    for (let i = order.length - 1; i >= 0; i -= 1) {
+      const f = order.get(i);
+      if (!(f.isIndirect() && live.has(f.asIndirect()))) {
+        order.delete(i);
+      }
+    }
+  }
+  drop(form, "XFA");
+};
+
+interface Removed {
+  annotations: number;
+  /** Object numbers of the fields whose widgets were removed. */
+  fields: Set<number>;
+}
+
+/**
+ * Remove the comments and form fields that lie under any of `areas`: they
+ * are drawn over the page, so a box on the page would not hide them, and
+ * MuPDF's redaction leaves most kinds in place. A comment's pop-up goes with
+ * it. A field shown in several places loses only the widgets under a box;
+ * its value stays for the others, as they show it anyway.
+ */
+const removeCovered = (
+  doc: PDFDocument,
+  page: PDFPage,
+  areas: Rect[],
+  removed: Removed
+) => {
+  // Chosen first, deleted after: MuPDF hands back its own list, and deleting splices it.
+  const comments = page
+    .getAnnotations()
+    .filter(
+      (a) => a.getType() !== "Redact" && overlapsAny(a.getBounds(), areas)
+    );
+  for (const annot of comments) {
+    page.deleteAnnotation(annot);
+    removed.annotations += 1;
+  }
+  const form = doc.getTrailer().get("Root").get("AcroForm");
+  const widgets = page
+    .getWidgets()
+    .filter((w) => overlapsAny(w.getBounds(), areas));
+  for (const widget of widgets) {
+    const obj = widget.getObject();
+    const field = fieldOf(obj);
+    removed.fields.add(field.isIndirect() ? field.asIndirect() : -1);
+    if (form.isDictionary() && form.get("Fields").isArray()) {
+      pruneField(form.get("Fields"), obj);
+    }
+    page.deleteAnnotation(widget);
+  }
+  if (widgets.length > 0 && form.isDictionary()) {
+    tidyForm(form);
+  }
+};
+
+const addRedaction = (page: PDFPage, m: RedactMark) => {
+  const annot = page.createAnnotation("Redact");
+  if (m.quads?.length) {
+    annot.setQuadPoints(m.quads);
+  } else if (m.rect) {
+    annot.setRect(m.rect);
+  }
+  annot.update();
+};
+
+/**
+ * Remove what lies under the marks: text, images (as `images` says),
+ * drawings (as `lineArt` says), and the comments and form fields over them.
+ * Then what does not show but could tell what was there: stand-in text,
+ * thumbnails, resources nothing uses (see scrub.ts), and glyphs of fonts no
+ * remaining text draws.
+ */
 export const redact = (
   env: Env,
   bytes: Uint8Array,
   o: RedactOptions
-): Uint8Array => {
+): RedactResult => {
   const doc = openPdf(env, bytes);
   try {
-    const byPage = new Map<number, RedactMark[]>();
-    for (const m of o.marks) {
-      byPage.set(m.page, [...(byPage.get(m.page) ?? []), m]);
-    }
-    for (const [index, marks] of byPage) {
-      if (index < 0 || index >= doc.countPages()) {
-        continue;
-      }
+    const removed: Removed = { annotations: 0, fields: new Set() };
+    const pages: PDFPage[] = [];
+    for (const [index, marks] of marksByPage(o.marks, doc.countPages())) {
       const page = doc.loadPage(index);
+      removeCovered(doc, page, marks.flatMap(markAreas), removed);
       for (const m of marks) {
-        const annot = page.createAnnotation("Redact");
-        if (m.quads?.length) {
-          annot.setQuadPoints(m.quads);
-        } else if (m.rect) {
-          annot.setRect(m.rect);
-        }
-        annot.update();
+        addRedaction(page, m);
       }
       page.applyRedactions(
         o.black,
         IMAGE_METHOD[o.images],
-        o.lineArt ? 1 : 0,
-        0
+        LINE_ART_METHOD[o.lineArt],
+        TEXT_REMOVE
       );
+      scrubPage(doc, page);
+      pages.push(page);
     }
+    scrubStructTree(doc, pages);
     // Everything removed goes from the file too, not just from the pages.
-    return savePdf(env, doc, { extra: ["garbage=deduplicate"] });
+    return {
+      annotations: removed.annotations,
+      bytes: savePdf(env, doc, {
+        extra: ["garbage=deduplicate"],
+        subset: true,
+      }),
+      fields: removed.fields.size,
+    };
   } finally {
     doc.destroy();
   }
@@ -201,15 +388,6 @@ const actionIs = (
   return chained.some(
     (a) => !a.isNull() && actionIs(a.resolve(), kinds, depth + 1)
   );
-};
-
-/** Remove `key` from `dict` if present; 1 if it was. */
-const drop = (dict: PDFObject | null, key: string): number => {
-  if (!dict?.isDictionary() || dict.get(key).isNull()) {
-    return 0;
-  }
-  dict.delete(key);
-  return 1;
 };
 
 const sanitizeCatalog = (
@@ -364,30 +542,6 @@ export interface UnsignOptions {
   /** Remove the signature fields themselves, not just the signatures in them. */
   removeFields: boolean;
 }
-
-const sameObject = (a: PDFObject, b: PDFObject) =>
-  a.isIndirect() && b.isIndirect() && a.asIndirect() === b.asIndirect();
-
-/** Take `target` out of a field tree; returns whether anything was removed. */
-const pruneField = (list: PDFObject, target: PDFObject): boolean => {
-  let removed = false;
-  for (let i = list.length - 1; i >= 0; i -= 1) {
-    const item = list.get(i);
-    if (sameObject(item, target)) {
-      list.delete(i);
-      removed = true;
-      continue;
-    }
-    const kids = item.get("Kids");
-    if (kids.isArray() && pruneField(kids, target)) {
-      removed = true;
-      if (kids.length === 0) {
-        list.delete(i);
-      }
-    }
-  }
-  return removed;
-};
 
 export const removeSignatures = (
   env: Env,

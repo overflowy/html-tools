@@ -220,11 +220,76 @@
 .tool-pdf-toolkit .note.on {
   display: flex;
 }
-.tool-pdf-toolkit .note svg {
+.tool-pdf-toolkit .note > svg {
   width: 14px;
   height: 14px;
   flex: none;
   margin-top: 2.5px;
+}
+.tool-pdf-toolkit .note-text {
+  flex: 1;
+  min-width: 0;
+  text-wrap: pretty;
+}
+.tool-pdf-toolkit .note button.note-close {
+  width: 20px;
+  height: 20px;
+  min-height: 0;
+  margin: -1px -6px -1px 0;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  border-radius: var(--radius-sm);
+}
+.tool-pdf-toolkit .note button.note-close svg {
+  width: 12px;
+  height: 12px;
+}
+@media (hover: hover) {
+  .tool-pdf-toolkit .note button.note-close:hover {
+    color: var(--text);
+    background: var(--surface-3);
+  }
+}
+/* Over the pages: lifted off them, and faded in and out where it stands, so nothing below moves. */
+.tool-pdf-toolkit .viewer {
+  position: relative;
+}
+.tool-pdf-toolkit .note.float {
+  position: absolute;
+  bottom: 14px;
+  left: 50%;
+  z-index: 3;
+  display: flex;
+  width: max-content;
+  max-width: min(560px, calc(100% - 28px));
+  background: var(--surface-2);
+  border: none;
+  box-shadow:
+    0 0 0 0.5px var(--border-strong),
+    0 8px 24px rgb(0 0 0 / 0.45);
+  color: var(--text);
+  opacity: 0;
+  visibility: hidden;
+  translate: -50% 6px;
+  transition:
+    opacity 0.15s var(--ease-out),
+    translate 0.15s var(--ease-out),
+    visibility 0s 0.15s;
+}
+.tool-pdf-toolkit .note.float.on {
+  opacity: 1;
+  visibility: visible;
+  translate: -50% 0;
+  transition:
+    opacity 0.18s var(--ease-out),
+    translate 0.18s var(--ease-out);
+}
+@media (prefers-reduced-motion: reduce) {
+  .tool-pdf-toolkit .note.float,
+  .tool-pdf-toolkit .note.float.on {
+    translate: -50% 0;
+  }
 }
 .tool-pdf-toolkit .error-box {
   display: none;
@@ -900,6 +965,7 @@
 .tool-pdf-toolkit .annots,
 .tool-pdf-toolkit .plan,
 .tool-pdf-toolkit .lines,
+.tool-pdf-toolkit .places,
 .tool-pdf-toolkit .bookmarks {
   margin: 0;
   padding: 0;
@@ -911,6 +977,7 @@
 }
 .tool-pdf-toolkit .files li,
 .tool-pdf-toolkit .annots li,
+.tool-pdf-toolkit .places li,
 .tool-pdf-toolkit .plan li {
   display: flex;
   align-items: center;
@@ -919,6 +986,18 @@
   padding: 2px 6px;
   border-radius: var(--radius-sm);
   background: var(--surface-2);
+}
+/* Where the text searched for is, out of the marks' reach. */
+.tool-pdf-toolkit .elsewhere:empty {
+  display: none;
+}
+.tool-pdf-toolkit .elsewhere {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.tool-pdf-toolkit .elsewhere .hint {
+  margin: 0;
 }
 .tool-pdf-toolkit .annots li > :first-child + * {
   flex: 1;

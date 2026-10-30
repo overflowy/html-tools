@@ -17,7 +17,8 @@ export type Values = Record<string, Value>;
 interface Base {
   key: string;
   label: string;
-  hint?: string;
+  /** A line under the control; a function to say what the current values mean. */
+  hint?: string | ((v: Values) => string);
   /** Shown only when this holds of the current values. */
   show?: (v: Values) => boolean;
 }
@@ -75,6 +76,8 @@ export class Form {
   readonly values: Values;
   private readonly fields: Field[];
   private readonly rows = new Map<string, HTMLElement>();
+  /** Hints that change with the values, and where each is shown. */
+  private readonly hints = new Map<HTMLElement, (v: Values) => string>();
   private readonly setters = new Map<string, (v: Value) => void>();
   private readonly onChange: (key: string) => void;
 
@@ -108,12 +111,15 @@ export class Form {
     this.refresh();
   }
 
-  /** Show and hide Fields that depend on others. */
+  /** Show and hide Fields that depend on others, and say what the values mean. */
   refresh() {
     for (const f of this.fields) {
       this.rows
         .get(f.key)
         ?.classList.toggle("off", f.show ? !f.show(this.values) : false);
+    }
+    for (const [p, say] of this.hints) {
+      p.textContent = say(this.values);
     }
   }
 
@@ -127,8 +133,12 @@ export class Form {
     } else {
       row.append(el("label", { attrs: { for: id }, text: f.label }), control);
     }
-    if (f.hint) {
+    if (typeof f.hint === "string") {
       row.append(el("p", { class: "hint", text: f.hint }));
+    } else if (f.hint) {
+      const p = el("p", { attrs: { "aria-live": "polite" }, class: "hint" });
+      this.hints.set(p, f.hint);
+      row.append(p);
     }
     return row;
   }

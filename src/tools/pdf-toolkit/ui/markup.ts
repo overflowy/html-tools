@@ -1,6 +1,7 @@
 // The PDF Toolkit's markup, and its elements by name.
 
 import ICON_INFO from "lucide-static/icons/info.svg";
+import ICON_X from "lucide-static/icons/x.svg";
 
 const ACCEPT = ".pdf,application/pdf,image/*,.epub,.cbz,.fb2,.mobi,.xhtml";
 
@@ -30,7 +31,7 @@ export const MARKUP = `
     <div class="bar"><div class="fill"></div></div>
     <button type="button" class="cancel-btn">Cancel</button>
   </div>
-  <div class="note" role="status">${ICON_INFO}<span class="note-text"></span></div>
+  <div class="note" role="status">${ICON_INFO}<span class="note-text"></span><button type="button" class="icon note-close" aria-label="Dismiss" title="Dismiss">${ICON_X}</button></div>
   <div class="error-box" role="alert"></div>
   <div class="workspace">
     <section class="viewer" aria-label="Pages">
@@ -111,6 +112,7 @@ export const grab = (root: HTMLElement) => {
     locked: $(".locked"),
     lockedText: $(".locked-text"),
     note: $(".note"),
+    noteClose: $<HTMLButtonElement>(".note-close"),
     noteText: $(".note-text"),
     openBtn: $<HTMLButtonElement>(".open-btn"),
     openInput: $<HTMLInputElement>(".open-input"),
@@ -132,6 +134,7 @@ export const grab = (root: HTMLElement) => {
     undoSlot: $(".undo-slot"),
     unlockBtn: $<HTMLButtonElement>(".unlock-btn"),
     unlockPw: $<HTMLInputElement>(".unlock-pw"),
+    viewer: $(".viewer"),
     viewerSlot: $(".viewer-slot"),
     viewerTools: $(".viewer-tools"),
     workspace: $(".workspace"),

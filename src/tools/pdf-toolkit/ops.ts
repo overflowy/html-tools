@@ -14,6 +14,8 @@ import {
 import type { AttachOptions } from "./pdf/attachments";
 import { openPdf, savePdf } from "./pdf/doc";
 import type { Env, OutFile } from "./pdf/doc";
+import { findElsewhere } from "./pdf/elsewhere";
+import type { Place } from "./pdf/elsewhere";
 import { addFields, fillFields, flatten, readFields } from "./pdf/forms";
 import type { FillOptions, FlattenOptions, NewField } from "./pdf/forms";
 import { compress, extractImages } from "./pdf/images";
@@ -128,6 +130,23 @@ export const OPS = {
   crop: (env: Env, b: Uint8Array, o: CropOptions) => pdf(crop(env, b, o)),
   editAttachments: (env: Env, b: Uint8Array, o: AttachOptions) =>
     pdf(editAttachments(env, b, o)),
+  /** Where the query appears outside the pages' content: what redaction does not reach. */
+  elsewhere: (
+    env: Env,
+    b: Uint8Array,
+    o: { query: string; options: SearchOptions }
+  ): OpOutput<{ error: string; places: Place[] }> => {
+    const re = queryRegExp(o.query, o.options);
+    if (typeof re === "string") {
+      return { report: { error: re, places: [] } };
+    }
+    return {
+      report: {
+        error: "",
+        places: reading(env, b, (doc) => findElsewhere(doc, re)),
+      },
+    };
+  },
   extractAttachments: (env: Env, b: Uint8Array, o: { keys: string[] }) => ({
     files: extractAttachments(env, b, o.keys),
   }),
@@ -171,7 +190,13 @@ export const OPS = {
   }),
   recolor: (env: Env, b: Uint8Array, o: RecolorOptions) =>
     pdf(recolor(env, b, o)),
-  redact: (env: Env, b: Uint8Array, o: RedactOptions) => pdf(redact(env, b, o)),
+  redact: (env: Env, b: Uint8Array, o: RedactOptions) => {
+    const r = redact(env, b, o);
+    return {
+      bytes: r.bytes,
+      report: { annotations: r.annotations, fields: r.fields },
+    };
+  },
   repair: (env: Env, b: Uint8Array, _o: NoOptions) => {
     const r = repair(env, b);
     return {

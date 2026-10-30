@@ -74,6 +74,10 @@ const PANELS: PanelDef[] = [
 const DEFAULT_PANEL = "organize";
 /** Steps of the Page List kept for Undo. */
 const HISTORY = 50;
+/** How long a note over the pages stays: time to read it, and no longer than this. */
+const NOTE_MS = 4000;
+const NOTE_MS_PER_CHAR = 60;
+const NOTE_MS_MAX = 15_000;
 
 interface Source {
   key: string;
@@ -174,6 +178,10 @@ export class Toolkit {
   private hits: { page: number; quads: Quad[] }[] = [];
   private hitAt = -1;
   private dragDepth = 0;
+  private noteTimer: ReturnType<typeof setTimeout> | undefined;
+  /** The pointer is on the note, or focus is in it: it stays until both leave. */
+  private noteHovered = false;
+  private noteFocused = false;
 
   /** The Toolkit, built into `root`: it lives as long as the page, as the Shell mounts a Tool once. */
   static mount(root: HTMLElement, ctx: ToolContext): Toolkit {
@@ -240,6 +248,7 @@ export class Toolkit {
     this.wirePanels();
     this.wireDrops();
     this.wireKeys();
+    this.wireNote();
     ctx.onRestore((payload) => this.restore(payload));
     this.panelDef = panelById(DEFAULT_PANEL) ?? null;
     this.ui.panelSelect.value = DEFAULT_PANEL;
@@ -260,9 +269,70 @@ export class Toolkit {
         : `${Math.round(Math.max(0, Math.min(1, p.fraction)) * 100)}%`;
   }
 
+  /**
+   * A note floats over the pages while there are any, so nothing moves when
+   * it comes and goes, and leaves by itself once read. Before there are
+   * pages it sits above where they will be, until the next action clears it.
+   */
   private showNote(text: string) {
-    this.ui.noteText.textContent = text;
-    this.ui.note.classList.toggle("on", text !== "");
+    const { note, noteText, viewer, errorBox } = this.ui;
+    clearTimeout(this.noteTimer);
+    if (!text) {
+      note.classList.remove("on");
+      return;
+    }
+    const floating = this.pages.length > 0;
+    if (floating && note.parentElement !== viewer) {
+      viewer.append(note);
+    } else if (!floating && note.nextElementSibling !== errorBox) {
+      errorBox.before(note);
+    }
+    note.classList.toggle("float", floating);
+    noteText.textContent = text;
+    note.classList.add("on");
+    this.armNote();
+  }
+
+  /** Start the floating note's time to leave, unless it is being read or used. */
+  private armNote() {
+    const { note, noteText } = this.ui;
+    clearTimeout(this.noteTimer);
+    if (
+      !note.classList.contains("float") ||
+      this.noteHovered ||
+      this.noteFocused
+    ) {
+      return;
+    }
+    const ms = Math.min(
+      NOTE_MS_MAX,
+      NOTE_MS + (noteText.textContent ?? "").length * NOTE_MS_PER_CHAR
+    );
+    this.noteTimer = setTimeout(() => note.classList.remove("on"), ms);
+  }
+
+  private wireNote() {
+    const { note, noteClose } = this.ui;
+    note.addEventListener("pointerenter", () => {
+      this.noteHovered = true;
+      clearTimeout(this.noteTimer);
+    });
+    note.addEventListener("pointerleave", () => {
+      this.noteHovered = false;
+      this.armNote();
+    });
+    note.addEventListener("focusin", () => {
+      this.noteFocused = true;
+      clearTimeout(this.noteTimer);
+    });
+    note.addEventListener("focusout", (e) => {
+      const to = e.relatedTarget;
+      if (!(to instanceof Node && note.contains(to))) {
+        this.noteFocused = false;
+        this.armNote();
+      }
+    });
+    noteClose.addEventListener("click", () => this.showNote(""));
   }
 
   private showError(text: string) {

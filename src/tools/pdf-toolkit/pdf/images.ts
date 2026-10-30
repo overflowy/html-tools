@@ -231,7 +231,8 @@ export interface CompressReport {
 }
 
 /** Highest resolution kept, and JPEG quality, per preset. */
-const PRESETS = {
+/** What each Images choice of Compress does to a photograph. */
+export const IMAGE_PRESETS = {
   high: { dpi: 200, quality: 85 },
   low: { dpi: 96, quality: 50 },
   medium: { dpi: 150, quality: 70 },
@@ -337,7 +338,7 @@ export const compress = (
     let replaced = 0;
     let kept = 0;
     if (o.images !== "keep") {
-      const preset = PRESETS[o.images];
+      const preset = IMAGE_PRESETS[o.images];
       for (const img of allImages(doc)) {
         const r = recompress(env, doc, img, preset);
         if (r === true) {

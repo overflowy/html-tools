@@ -3,10 +3,15 @@
 // signatures, checked and removed.
 
 import { isIdentity } from "../../pdf/assemble";
+import type { Place } from "../../pdf/elsewhere";
 import type { Rect } from "../../pdf/geometry";
 import { PII_KINDS, PII_NAMES } from "../../pdf/pii";
 import type { PiiFinding, PiiKind } from "../../pdf/pii";
-import type { RedactMark, SanitizeReport } from "../../pdf/security";
+import type {
+  RedactMark,
+  RedactOptions,
+  SanitizeReport,
+} from "../../pdf/security";
 import type { Check, SignatureReport } from "../../pdf/signatures";
 import type { Quad } from "../../pdf/text";
 import type { PanelDef } from "../api";
@@ -142,8 +147,56 @@ export interface RedactHandoff {
   what: string;
 }
 
+type Drawings = RedactOptions["lineArt"];
+
+const DRAWINGS_HINTS: Record<Drawings, string> = {
+  covered:
+    "A line or shape that crosses a mark's edge stays whole under the fill, where it can be found: choose Remove any a mark touches to take it too.",
+  keep: "Lines and shapes stay under the fill, where they can be found.",
+  touched:
+    "A line or shape a mark touches goes entirely, its parts outside the mark too: a table rule crossing a mark disappears.",
+};
+
+const isDrawings = (v: unknown): v is Drawings =>
+  typeof v === "string" && Object.hasOwn(DRAWINGS_HINTS, v);
+
+/** Where a Place is, in words. */
+const placeText = (p: Place): string => {
+  const on = p.page === undefined ? "" : ` on page ${p.page + 1}`;
+  switch (p.kind) {
+    case "bookmark": {
+      return `Bookmark “${p.label}”`;
+    }
+    case "metadata": {
+      return p.label === "XMP"
+        ? "Document metadata (XMP)"
+        : `Document information: ${p.label}`;
+    }
+    case "comment": {
+      return `Comment${on}`;
+    }
+    case "field": {
+      return `Form field “${p.label}”${on}`;
+    }
+    case "destination": {
+      return `Link target “${p.label}”`;
+    }
+    case "pageLabel": {
+      return `Page label${on}`;
+    }
+    default: {
+      return `Attachment “${p.label}”${on}`;
+    }
+  }
+};
+
 const redact: PanelDef = {
-  defaults: { black: true, images: "pixels", lineArt: true, mode: "box" },
+  defaults: {
+    black: true,
+    drawings: "covered",
+    images: "pixels",
+    mode: "box",
+  },
   fields: [
     {
       key: "mode",
@@ -169,7 +222,18 @@ const redact: PanelDef = {
         ["none", "Leave them"],
       ],
     },
-    { key: "lineArt", kind: "check", label: "Remove drawings the marks cover" },
+    {
+      hint: (v) =>
+        DRAWINGS_HINTS[isDrawings(v.drawings) ? v.drawings : "covered"],
+      key: "drawings",
+      kind: "select",
+      label: "Drawings under a mark",
+      options: [
+        ["covered", "Remove those a mark covers"],
+        ["touched", "Remove any a mark touches"],
+        ["keep", "Leave them"],
+      ],
+    },
   ],
   group: GROUP,
   id: "redact",
@@ -187,6 +251,10 @@ const redact: PanelDef = {
         type: "search",
       },
     });
+    /** What went with the marks besides the page content: comments and fields over it. */
+    const outcome = el("p", { attrs: { hidden: "" }, class: "hint" });
+    /** Where the text searched for also is, out of Redact's reach. */
+    const outside = el("div", { class: "elsewhere" });
     const foot = resultFoot(api, {
       applyLabel: "the redactions",
       fileName: (a) => `${a.name()}-redacted.pdf`,
@@ -197,7 +265,7 @@ const redact: PanelDef = {
         {
           black: values.black === true,
           images: values.images as "pixels" | "remove" | "none",
-          lineArt: values.lineArt === true,
+          lineArt: isDrawings(values.drawings) ? values.drawings : "covered",
           marks,
         },
         "Redacting"
@@ -208,12 +276,22 @@ const redact: PanelDef = {
           r,
           `Redacted: ${describeResult(r)}. Check the After view, then Apply or Download.`
         );
+        const { annotations, fields } = r.report;
+        const also = [
+          annotations ? count(annotations, "comment", "comments") : "",
+          fields ? count(fields, "form field", "form fields") : "",
+        ].filter(Boolean);
+        outcome.textContent = also.length
+          ? `Also removed ${also.join(" and ")} that lay over the marks.`
+          : "";
+        outcome.hidden = also.length === 0;
       }
     };
     const preview = button("Preview", () => {
       void runIt();
     });
     const changed = () => {
+      outcome.hidden = true;
       foot.show(
         null,
         marks.length
@@ -320,6 +398,56 @@ const redact: PanelDef = {
         }
       });
     };
+    /** List where `q` is outside the pages' content, and return those places. */
+    const findOutside = async (q: string): Promise<Place[]> => {
+      outside.replaceChildren();
+      const r = await api.run(
+        "elsewhere",
+        {
+          options: { caseSensitive: false, regex: false, wholeWords: false },
+          query: q,
+        },
+        "Finding",
+        { quiet: true }
+      );
+      const places = r?.report.places ?? [];
+      if (!places.length) {
+        return places;
+      }
+      const shown = places.slice(0, 50);
+      const kinds = new Set(places.map((p) => p.kind));
+      const fixes: HTMLElement[] = [];
+      if (kinds.has("metadata") || kinds.has("attachment")) {
+        fixes.push(button("Open Sanitize", () => api.open("sanitize")));
+      }
+      if (kinds.has("bookmark")) {
+        fixes.push(button("Open Bookmarks", () => api.open("bookmarks")));
+      }
+      outside.append(
+        el("p", {
+          class: "hint warn",
+          text: `“${q}” is also here, where Mark all cannot mark it:`,
+        }),
+        el(
+          "ul",
+          { class: "places" },
+          ...shown.map((p) => el("li", { text: placeText(p) })),
+          ...(places.length > shown.length
+            ? [el("li", { text: `and ${places.length - shown.length} more` })]
+            : [])
+        ),
+        ...(kinds.has("comment") || kinds.has("field")
+          ? [
+              el("p", {
+                class: "hint",
+                text: "A comment or form field goes with the redaction only if a mark lies over it.",
+              }),
+            ]
+          : []),
+        ...(fixes.length ? [row(...fixes)] : [])
+      );
+      return places;
+    };
     const markAll = async () => {
       const q = query.value.trim();
       if (!q) {
@@ -338,11 +466,14 @@ const redact: PanelDef = {
       for (const h of hits) {
         marks.push({ page: h.page, quads: h.quads });
       }
-      api.note(
-        hits.length
-          ? `Marked ${count(hits.length, "match", "matches")} of “${q}”.`
-          : `“${q}” is not in the document.`
-      );
+      const places = await findOutside(q);
+      let said = `“${q}” is not in the document.`;
+      if (hits.length) {
+        said = `Marked ${count(hits.length, "match", "matches")} of “${q}”.`;
+      } else if (places.length) {
+        said = `“${q}” is not on the pages; see where it is below.`;
+      }
+      api.note(said);
       changed();
     };
     query.addEventListener("keydown", (e) => {
@@ -365,6 +496,7 @@ const redact: PanelDef = {
           void markAll();
         })
       ),
+      outside,
       row(
         preview,
         button("Clear marks", () => {
@@ -372,11 +504,12 @@ const redact: PanelDef = {
           changed();
         })
       ),
+      outcome,
       el("h3", { text: "Marks" }),
       list,
       el("p", {
         class: "hint",
-        text: "Document information (title, author) and attachments are not page content: Sanitize removes those.",
+        text: "Comments and form fields over a mark go with it. Document information (title, author), attachments, and bookmarks are not page content: Mark all lists where the text is in them, and Sanitize and Bookmarks remove it.",
       })
     );
     if (handoff) {
@@ -393,6 +526,7 @@ const redact: PanelDef = {
       },
       docChanged: () => {
         marks.length = 0;
+        outside.replaceChildren();
         changed();
       },
     };
