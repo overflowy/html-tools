@@ -137,12 +137,16 @@ export const LANGUAGES: Language[] = RAW.map(([code, name]) => ({
   code,
   name,
 }));
-LANGUAGES.sort((a, b) =>
-  a.code === "eng" ? -1 : b.code === "eng" ? 1 : a.name.localeCompare(b.name)
-);
+LANGUAGES.sort((a, b) => {
+  if (a.code === "eng") {
+    return -1;
+  }
+  if (b.code === "eng") {
+    return 1;
+  }
+  return a.name.localeCompare(b.name);
+});
 
 const BY_CODE = new Map(LANGUAGES.map((l) => [l.code, l.name]));
 
-export function languageName(code: string): string {
-  return BY_CODE.get(code) ?? code;
-}
+export const languageName = (code: string): string => BY_CODE.get(code) ?? code;

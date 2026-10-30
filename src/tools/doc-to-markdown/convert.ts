@@ -8,6 +8,7 @@ import { createWorker } from "tesseract.js";
 import type { Worker as TessWorker } from "tesseract.js";
 
 import { scriptBlobUrl, scriptDataUrl } from "../../shared/script-url";
+import { ConvertError } from "./convert-error";
 import { detect } from "./detect";
 import type { ImageFormat, OfficeFormat } from "./detect";
 import { ENGINES, getEngine, languageAsset, pdfjsAsset } from "./engines";
@@ -22,7 +23,7 @@ import {
   splitByMarkers,
 } from "./pages";
 import type { TextItem } from "./pages";
-import { ConvertError, ConvertWorker } from "./worker-client";
+import { ConvertWorker } from "./worker-client";
 
 export interface Phase {
   text: string;
@@ -51,25 +52,24 @@ const CANCELLED = "The conversion was cancelled.";
 const OCR_DPI = 300;
 const OCR_MAX_EDGE = 4000;
 
-function formatBytes(n: number) {
-  return n < 1024 * 1024
+const formatBytes = (n: number) =>
+  n < 1024 * 1024
     ? `${(n / 1024).toFixed(0)} KB`
     : `${(n / 1024 / 1024).toFixed(1)} MB`;
-}
 
 const FORMAT_NAMES: Record<OfficeFormat, string> = {
+  csv: "CSV",
   doc: "Word",
   docx: "Word",
+  epub: "EPUB",
+  odp: "OpenDocument presentation",
+  ods: "OpenDocument spreadsheet",
   odt: "OpenDocument text",
   pdf: "PDF",
   ppt: "PowerPoint",
   pptx: "PowerPoint",
   rtf: "RTF",
-  epub: "EPUB",
   xlsx: "Excel",
-  ods: "OpenDocument spreadsheet",
-  odp: "OpenDocument presentation",
-  csv: "CSV",
 };
 
 /* ---------------- the run in progress ---------------- */
@@ -85,7 +85,7 @@ let convertWorker: ConvertWorker | null = null;
 let tess: { key: string; worker: TessWorker } | null = null;
 
 /** Stop whatever is running. Engines already cached stay cached; the workers are thrown away and respawned next time. */
-export function cancelConversion() {
+export const cancelConversion = () => {
   const run = active;
   if (!run) {
     return;
@@ -99,23 +99,23 @@ export function cancelConversion() {
     tess.worker.terminate();
     tess = null;
   }
-}
+};
 
-function checkCancelled(run: Run) {
+const checkCancelled = (run: Run) => {
   if (run.signal.aborted) {
     throw new Error(CANCELLED);
   }
-}
+};
 
 /** Fetch one engine with the phase line following its download. */
-async function engine(run: Run, asset: EngineAsset): Promise<ArrayBuffer> {
+const engine = async (run: Run, asset: EngineAsset): Promise<ArrayBuffer> => {
   const onProgress = (p: Progress) => {
     if (p.fromCache) {
       return;
     }
     run.onPhase({
-      text: `Downloading ${p.asset.label} (${formatBytes(p.loaded)} of ${formatBytes(p.total)})`,
       fraction: p.total ? p.loaded / p.total : null,
+      text: `Downloading ${p.asset.label} (${formatBytes(p.loaded)} of ${formatBytes(p.total)})`,
     });
   };
   const bytes = await getEngine(asset, (p) => {
@@ -125,18 +125,17 @@ async function engine(run: Run, asset: EngineAsset): Promise<ArrayBuffer> {
   });
   checkCancelled(run);
   return bytes;
-}
+};
 
-async function engineText(run: Run, asset: EngineAsset): Promise<string> {
-  return new TextDecoder().decode(await engine(run, asset));
-}
+const engineText = async (run: Run, asset: EngineAsset): Promise<string> =>
+  new TextDecoder().decode(await engine(run, asset));
 
 /* ---------------- converter worker ---------------- */
 
-async function converter(
+const converter = async (
   run: Run,
   which: "anydoc" | "pdf-inspector"
-): Promise<ConvertWorker> {
+): Promise<ConvertWorker> => {
   if (!convertWorker) {
     convertWorker = new ConvertWorker();
   }
@@ -152,14 +151,14 @@ async function converter(
             await engineText(run, ENGINES.pdfInspectorJs),
             await engine(run, ENGINES.pdfInspectorWasm),
           ];
-    run.onPhase({ text: `Starting ${which}`, fraction: null });
+    run.onPhase({ fraction: null, text: `Starting ${which}` });
     await w.load(which, glue, wasm);
     checkCancelled(run);
   }
   return w;
-}
+};
 
-function explain(e: unknown): Error {
+const explain = (e: unknown): Error => {
   if (e instanceof ConvertError) {
     switch (e.code) {
       case "encrypted": {
@@ -180,11 +179,13 @@ function explain(e: unknown): Error {
           `The document is too large for the converter: ${e.message}`
         );
       }
+      default: {
+        return new Error(e.message);
+      }
     }
-    return new Error(e.message);
   }
   if (e instanceof Error) {
-    if (/encrypted/i.test(e.message)) {
+    if (/encrypted/iu.test(e.message)) {
       return new Error(
         "The PDF is password protected; remove the password first."
       );
@@ -192,7 +193,7 @@ function explain(e: unknown): Error {
     return e;
   }
   return new Error(String(e));
-}
+};
 
 /* ---------------- tesseract ---------------- */
 
@@ -213,14 +214,13 @@ const hasSimd = (() => {
  * given as bytes (upstream PR #1052). The worker script is ours to patch; a
  * release that has fixed it simply has nothing to replace.
  */
-function patchTesseractWorker(src: string): string {
-  return src.replace(
-    '"string"==typeof t?t:t.data',
-    '"string"==typeof t?t:t.code'
-  );
-}
+const patchTesseractWorker = (src: string): string =>
+  src.replace('"string"==typeof t?t:t.data', '"string"==typeof t?t:t.code');
 
-async function ocrWorker(run: Run, languages: string[]): Promise<TessWorker> {
+const ocrWorker = async (
+  run: Run,
+  languages: string[]
+): Promise<TessWorker> => {
   const key = languages.join("+");
   if (tess && tess.key === key) {
     return tess.worker;
@@ -244,8 +244,8 @@ async function ocrWorker(run: Run, languages: string[]): Promise<TessWorker> {
     });
   }
   run.onPhase({
-    text: `Starting OCR (${languages.map(languageName).join(", ")})`,
     fraction: null,
+    text: `Starting OCR (${languages.map(languageName).join(", ")})`,
   });
 
   // One classic worker that first defines TesseractCore from the single-file
@@ -261,24 +261,23 @@ async function ocrWorker(run: Run, languages: string[]): Promise<TessWorker> {
     const core = TesseractCore;
     TesseractCore = (m = {}) => core({ printErr: (s) => console.warn("tesseract: " + s), ...m });`
   );
-  let failed: ((e: Error) => void) | null = null;
-  const failure = new Promise<never>((_, reject) => (failed = reject));
+  const failure = Promise.withResolvers<never>();
   try {
     const worker = await Promise.race([
       createWorker(models as unknown as string[], 1, {
-        workerPath: bootUrl,
-        workerBlobURL: false,
         cacheMethod: "none",
         errorHandler: (e: unknown) =>
-          failed?.(
+          failure.reject(
             new Error(
               `OCR could not start: ${
                 e instanceof Error ? e.message : String(e)
               }`
             )
           ),
+        workerBlobURL: false,
+        workerPath: bootUrl,
       }),
-      failure,
+      failure.promise,
     ]);
     checkCancelled(run);
     tess = { key, worker };
@@ -286,7 +285,7 @@ async function ocrWorker(run: Run, languages: string[]): Promise<TessWorker> {
   } finally {
     URL.revokeObjectURL(bootUrl);
   }
-}
+};
 
 interface TessBlocks {
   blocks?:
@@ -296,49 +295,61 @@ interface TessBlocks {
 }
 
 /** Recognize one image; resolves to the confident paragraphs of lines. Cancel terminates the worker, so race it. */
-async function recognize(
+const recognize = async (
   run: Run,
   worker: TessWorker,
   image: HTMLCanvasElement | Uint8Array,
   label: string
-): Promise<OcrParagraph[]> {
-  run.onPhase({ text: `OCR ${label}`, fraction: null });
-  const cancelled = new Promise<never>((_, reject) =>
-    run.signal.addEventListener("abort", () => reject(new Error(CANCELLED)), {
-      once: true,
-    })
+): Promise<OcrParagraph[]> => {
+  run.onPhase({ fraction: null, text: `OCR ${label}` });
+  const cancelled = Promise.withResolvers<never>();
+  run.signal.addEventListener(
+    "abort",
+    () => cancelled.reject(new Error(CANCELLED)),
+    { once: true }
   );
   const res = await Promise.race([
-    worker.recognize(image as never, {}, { text: true, blocks: true }),
-    cancelled,
+    worker.recognize(image as never, {}, { blocks: true, text: true }),
+    cancelled.promise,
   ]);
   checkCancelled(run);
   const data = res.data as unknown as TessBlocks;
   if (!data.blocks) {
     // No layout came back: keep the plain text, ungated, rather than nothing.
-    return data.text ? data.text.split(/\n{2,}/).map((p) => p.split("\n")) : [];
+    return data.text
+      ? data.text.split(/\n{2,}/u).map((p) => p.split("\n"))
+      : [];
   }
   const paragraphs: OcrLine[][] = [];
   for (const b of data.blocks) {
     for (const p of b.paragraphs) {
       paragraphs.push(
         p.lines.map((l) => ({
-          text: l.text.replace(/\n$/, ""),
           confidence: l.confidence,
+          text: l.text.replace(/\n$/u, ""),
         }))
       );
     }
   }
   return gateByConfidence(paragraphs);
-}
+};
 
 /* ---------------- images ---------------- */
 
+/** A canvas's 2D context; every browser this runs in has one. */
+const context2d = (canvas: HTMLCanvasElement): CanvasRenderingContext2D => {
+  const ctx = canvas.getContext("2d");
+  if (!ctx) {
+    throw new Error("This browser cannot draw on a canvas.");
+  }
+  return ctx;
+};
+
 /** Browser-decoded formats go through a canvas (honours EXIF orientation); TIFF cannot, so its bytes go in as they are. */
-async function imageInput(
+const imageInput = async (
   bytes: ArrayBuffer,
   format: ImageFormat
-): Promise<HTMLCanvasElement | Uint8Array> {
+): Promise<HTMLCanvasElement | Uint8Array> => {
   if (format === "tiff") {
     return new Uint8Array(bytes);
   }
@@ -351,21 +362,21 @@ async function imageInput(
   const canvas = document.createElement("canvas");
   canvas.width = bitmap.width;
   canvas.height = bitmap.height;
-  const ctx = canvas.getContext("2d")!;
+  const ctx = context2d(canvas);
   ctx.fillStyle = "#fff";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   ctx.drawImage(bitmap, 0, 0);
   bitmap.close();
   return canvas;
-}
+};
 
-async function convertImage(
+const convertImage = async (
   run: Run,
   bytes: ArrayBuffer,
   format: ImageFormat,
   languages: string[],
   markers: boolean
-): Promise<ConvertOutcome> {
+): Promise<ConvertOutcome> => {
   const worker = await ocrWorker(run, languages);
   const input = await imageInput(bytes, format);
   const paragraphs = await recognize(run, worker, input, "image");
@@ -373,17 +384,17 @@ async function convertImage(
     markdown: ocrMarkdown(markers ? "image" : null, paragraphs),
     summary: `${format} · OCR ${languages.join("+")}`,
   };
-}
+};
 
 /* ---------------- office ---------------- */
 
-async function convertOffice(
+const convertOffice = async (
   run: Run,
   bytes: ArrayBuffer,
   format: OfficeFormat
-): Promise<ConvertOutcome> {
+): Promise<ConvertOutcome> => {
   const w = await converter(run, "anydoc");
-  run.onPhase({ text: `Converting ${FORMAT_NAMES[format]}`, fraction: null });
+  run.onPhase({ fraction: null, text: `Converting ${FORMAT_NAMES[format]}` });
   let markdown: string;
   try {
     markdown = await w.office(bytes, format);
@@ -395,7 +406,7 @@ async function convertOffice(
     markdown += "\n";
   }
   return { markdown, summary: FORMAT_NAMES[format] };
-}
+};
 
 /* ---------------- pdf ---------------- */
 
@@ -424,7 +435,7 @@ interface PdfPage {
 let pdfjsModule: Promise<{ lib: PdfJs; workerUrl: string }> | null = null;
 
 /** The pdf.js library, imported once, plus the data: URL its worker is imported from per document. */
-function pdfjs(run: Run): Promise<{ lib: PdfJs; workerUrl: string }> {
+const pdfjs = (run: Run): Promise<{ lib: PdfJs; workerUrl: string }> => {
   if (pdfjsModule) {
     return pdfjsModule;
   }
@@ -444,7 +455,7 @@ function pdfjs(run: Run): Promise<{ lib: PdfJs; workerUrl: string }> {
   pdfjsModule = p;
   p.catch(() => (pdfjsModule = null));
   return p;
-}
+};
 
 /**
  * pdf.js's own worker spawning fails from file:// (module worker from a blob:
@@ -459,12 +470,12 @@ const PDF_BOOT = `self.onmessage = async (e) => {
   port.start();
 };`;
 
-function spawnPdfWorker(lib: PdfJs, workerUrl: string) {
+const spawnPdfWorker = (lib: PdfJs, workerUrl: string) => {
   const worker = new Worker(scriptDataUrl(PDF_BOOT, "pdf-bootstrap.js"), {
     type: "module",
   });
   const channel = new MessageChannel();
-  worker.postMessage({ url: workerUrl, port: channel.port2 }, [channel.port2]);
+  worker.postMessage({ port: channel.port2, url: workerUrl }, [channel.port2]);
   const pdfWorker = new lib.PDFWorker({ port: channel.port1 });
   channel.port1.start();
   return {
@@ -475,11 +486,13 @@ function spawnPdfWorker(lib: PdfJs, workerUrl: string) {
       channel.port1.close();
     },
   };
-}
+};
 
 /** Serves pdf.js the decoders, CMaps and fonts it asks for by name, through the engine cache. */
-function binaryDataFactory(run: Run) {
-  return class {
+const binaryDataFactory = (run: Run) =>
+  class {
+    readonly run = run;
+
     async fetch({
       kind,
       filename,
@@ -493,14 +506,12 @@ function binaryDataFactory(run: Run) {
           `pdf.js asked for an unknown file: ${kind}/${filename}`
         );
       }
-      return new Uint8Array(await engine(run, asset));
+      return new Uint8Array(await engine(this.run, asset));
     }
   };
-}
 
-function isTextItem(it: TextItem | { type: string }): it is TextItem {
-  return "str" in it;
-}
+const isTextItem = (it: TextItem | { type: string }): it is TextItem =>
+  "str" in it;
 
 /**
  * Page Markers on an accepted PDF. The converter gives one Markdown string
@@ -509,16 +520,16 @@ function isTextItem(it: TextItem | { type: string }): it is TextItem {
  * including the ones with nothing on them. If pdf-inspector has no Markdown
  * for the document, the converter's unmarked text stands.
  */
-async function markAcceptedPdf(
+const markAcceptedPdf = async (
   run: Run,
   bytes: ArrayBuffer,
   unmarked: string
-): Promise<ConvertOutcome> {
+): Promise<ConvertOutcome> => {
   const inspector = await converter(run, "pdf-inspector");
-  run.onPhase({ text: "Marking pages", fraction: null });
+  run.onPhase({ fraction: null, text: "Marking pages" });
   let result;
   try {
-    result = await inspector.pdf(bytes.slice(0));
+    result = await inspector.pdf(structuredClone(bytes));
   } catch (error) {
     throw explain(error);
   }
@@ -528,17 +539,30 @@ async function markAcceptedPdf(
   if (!result.markdown) {
     return {
       markdown: unmarked,
-      summary,
       note: "Page markers are not available for this PDF.",
+      summary,
     };
   }
   const byPage = splitByMarkers(result.markdown);
   const segments = Array.from({ length: total }, (_, i) => ({
-    page: i + 1,
     markdown: markPage(i + 1, "text", byPage.get(i + 1) ?? "", true),
+    page: i + 1,
   }));
   return { markdown: joinPages(segments), summary };
-}
+};
+
+/** Destroy the pdf.js document, then terminate its worker whether or not that went cleanly. */
+const closePdf = async (
+  task: ReturnType<PdfJs["getDocument"]>,
+  spawned: ReturnType<typeof spawnPdfWorker>
+) => {
+  try {
+    await task.destroy();
+  } catch {
+    // The worker is terminated next either way.
+  }
+  spawned.terminate();
+};
 
 /**
  * A PDF goes to the converter first, like any office document, and its
@@ -548,17 +572,17 @@ async function markAcceptedPdf(
  * recognized, the rest converted structurally, and both spliced in page
  * order.
  */
-async function convertPdf(
+const convertPdf = async (
   run: Run,
   bytes: ArrayBuffer,
   languages: string[],
   markers: boolean
-): Promise<ConvertOutcome> {
+): Promise<ConvertOutcome> => {
   const w = await converter(run, "anydoc");
-  run.onPhase({ text: "Converting PDF", fraction: null });
+  run.onPhase({ fraction: null, text: "Converting PDF" });
   let refusal: ConvertError;
   try {
-    let markdown = await w.office(bytes.slice(0), "pdf");
+    let markdown = await w.office(structuredClone(bytes), "pdf");
     checkCancelled(run);
     if (!markdown.endsWith("\n")) {
       markdown += "\n";
@@ -576,12 +600,12 @@ async function convertPdf(
   checkCancelled(run);
 
   const { lib, workerUrl } = await pdfjs(run);
-  run.onPhase({ text: "Opening PDF", fraction: null });
+  run.onPhase({ fraction: null, text: "Opening PDF" });
   const spawned = spawnPdfWorker(lib, workerUrl);
   const task = lib.getDocument({
-    data: new Uint8Array(bytes.slice(0)),
-    worker: spawned.pdfWorker,
     BinaryDataFactory: binaryDataFactory(run),
+    data: new Uint8Array(structuredClone(bytes)),
+    worker: spawned.pdfWorker,
   });
   run.signal.addEventListener("abort", () => spawned.terminate(), {
     once: true,
@@ -614,12 +638,12 @@ async function convertPdf(
     if (textPages.length) {
       const inspector = await converter(run, "pdf-inspector");
       run.onPhase({
-        text: `Converting ${textPages.length} text page${textPages.length === 1 ? "" : "s"}`,
         fraction: null,
+        text: `Converting ${textPages.length} text page${textPages.length === 1 ? "" : "s"}`,
       });
       let result;
       try {
-        result = await inspector.pdf(bytes.slice(0), textPages);
+        result = await inspector.pdf(structuredClone(bytes), textPages);
       } catch (error) {
         throw explain(error);
       }
@@ -631,8 +655,8 @@ async function convertPdf(
         const md = byPage.get(n);
         if (md !== undefined && md.trim()) {
           segments.push({
-            page: n,
             markdown: markPage(n, "text", md, markers),
+            page: n,
           });
         } else {
           // The converter had nothing for a page it did not flag: use the text layer as plain paragraphs.
@@ -647,19 +671,18 @@ async function convertPdf(
             ? `${paragraphs.map((p) => p.join("\n")).join("\n\n")}\n`
             : "";
           segments.push({
-            page: n,
             markdown: markPage(n, "text", body, markers),
+            page: n,
           });
         }
       }
     }
 
     const worker = await ocrWorker(run, languages);
-    for (let i = 0; i < scanned.length; i += 1) {
-      const n = scanned[i]!;
+    for (const [i, n] of scanned.entries()) {
       run.onPhase({
-        text: `Rendering page ${n}`,
         fraction: i / scanned.length,
+        text: `Rendering page ${n}`,
       });
       const page = await doc.getPage(n);
       const base = page.getViewport({ scale: 1 });
@@ -671,40 +694,36 @@ async function convertPdf(
       const canvas = document.createElement("canvas");
       canvas.width = Math.ceil(viewport.width);
       canvas.height = Math.ceil(viewport.height);
-      const ctx = canvas.getContext("2d")!;
+      const ctx = context2d(canvas);
       await page.render({ canvas, canvasContext: ctx, viewport }).promise;
       page.cleanup();
       checkCancelled(run);
       const paragraphs = await recognize(run, worker, canvas, `page ${n}`);
-      canvas.width = canvas.height = 0;
+      canvas.width = 0;
+      canvas.height = 0;
       segments.push({
-        page: n,
         markdown: markPage(n, "ocr", ocrBody(paragraphs), markers),
+        page: n,
       });
     }
 
     const summary = `PDF · ${total} page${total === 1 ? "" : "s"} · ${scanned.length} via OCR (${languages.join("+")})`;
     return { markdown: joinPages(segments), summary };
   } finally {
-    task
-      .destroy()
-      .catch(() => {
-        // The worker is terminated next either way.
-      })
-      .then(() => spawned.terminate());
+    closePdf(task, spawned);
   }
-}
+};
 
 /* ---------------- entry ---------------- */
 
-export async function convertDocument(
+export const convertDocument = async (
   bytes: ArrayBuffer,
   name: string,
   opts: ConvertOptions
-): Promise<ConvertOutcome> {
+): Promise<ConvertOutcome> => {
   cancelConversion();
   const abort = new AbortController();
-  const run: Run = { abort, signal: abort.signal, onPhase: opts.onPhase };
+  const run: Run = { abort, onPhase: opts.onPhase, signal: abort.signal };
   active = run;
   try {
     const kind = detect(new Uint8Array(bytes), name);
@@ -739,4 +758,4 @@ export async function convertDocument(
       active = null;
     }
   }
-}
+};

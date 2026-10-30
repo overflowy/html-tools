@@ -15,15 +15,14 @@ const LANG_KEY = "html-tools:doc-to-markdown:langs";
 const MARKERS_KEY = "html-tools:doc-to-markdown:markers";
 const DEFAULT_LANGS = ["eng"];
 
-function esc(s: string) {
-  return s
+const esc = (s: string) =>
+  s
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;");
-}
 
-function formatBytes(n: number) {
+const formatBytes = (n: number) => {
   if (n < 1024) {
     return `${n} B`;
   }
@@ -31,14 +30,14 @@ function formatBytes(n: number) {
     return `${(n / 1024).toFixed(0)} KB`;
   }
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
-}
+};
 
-function baseName(name: string) {
+const baseName = (name: string) => {
   const dot = name.lastIndexOf(".");
   return dot > 0 ? name.slice(0, dot) : name || "document";
-}
+};
 
-function downloadText(text: string, name: string) {
+const downloadText = (text: string, name: string) => {
   const url = URL.createObjectURL(
     new Blob([text], { type: "text/markdown;charset=utf-8" })
   );
@@ -47,16 +46,16 @@ function downloadText(text: string, name: string) {
   a.download = name;
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
+};
 
-function flash(btn: HTMLButtonElement, label: string) {
+const flash = (btn: HTMLButtonElement, label: string) => {
   const prev = btn.textContent;
   btn.textContent = label;
   setTimeout(() => (btn.textContent = prev), 1200);
-}
+};
 
 /** Only codes the picker knows; order as picked, English first if present. */
-function normalizeLangs(codes: string[]): string[] {
+const normalizeLangs = (codes: string[]): string[] => {
   const known = new Set(LANGUAGES.map((l) => l.code));
   const out: string[] = [];
   for (const c of codes) {
@@ -65,13 +64,10 @@ function normalizeLangs(codes: string[]): string[] {
     }
   }
   return out.length ? out : [...DEFAULT_LANGS];
-}
+};
 
 const tool: Tool = {
   id: "doc-to-markdown",
-  name: "Document to Markdown",
-  subtitle:
-    "Convert a document, a scanned PDF, or an image of text to Markdown.",
   keywords: [
     "ocr",
     "pdf",
@@ -176,7 +172,7 @@ const tool: Tool = {
     ).join("");
     const boxes = [...langList.querySelectorAll("input")] as HTMLInputElement[];
 
-    function renderLangs() {
+    const renderLangs = () => {
       for (const b of boxes) {
         b.checked = selected.includes(b.value);
       }
@@ -186,10 +182,10 @@ const tool: Tool = {
           ? `${names.slice(0, 2).join(", ")} +${names.length - 2}`
           : names.join(", ");
       langSummary.innerHTML = `<span class="dim">OCR:</span> ${esc(shown)}`;
-    }
+    };
 
     /** State layout: `<langs joined by +>`, then `.p0` when Page Markers are off. Defaults leave the Deep Link empty. */
-    function publishState() {
+    const publishState = () => {
       localStorage.setItem(LANG_KEY, selected.join("+"));
       localStorage.setItem(MARKERS_KEY, markers ? "1" : "0");
       markersBox.checked = markers;
@@ -199,7 +195,7 @@ const tool: Tool = {
         payload += ".p0";
       }
       ctx.setState(payload);
-    }
+    };
 
     markersBox.addEventListener("change", () => {
       markers = markersBox.checked;
@@ -218,9 +214,9 @@ const tool: Tool = {
       const q = langFilter.value.trim().toLowerCase();
       let any = false;
       for (const label of langList.querySelectorAll("label")) {
-        const hit = !q || label.textContent!.toLowerCase().includes(q);
+        const hit = !q || (label.textContent ?? "").toLowerCase().includes(q);
         label.hidden = !hit;
-        any = any || hit;
+        any ||= hit;
       }
       let none = langList.querySelector(".lang-none") as HTMLElement | null;
       if (!any && !none) {
@@ -271,7 +267,7 @@ const tool: Tool = {
 
     /* ---- engines footer ---- */
 
-    async function renderEngines() {
+    const renderEngines = async () => {
       const ok = await cacheAvailable();
       if (!ok) {
         enginesText.textContent =
@@ -292,7 +288,7 @@ const tool: Tool = {
         .map((f) => `${f.label} ${formatBytes(f.bytes)}`)
         .join("\n");
       enginesClear.hidden = false;
-    }
+    };
     enginesClear.addEventListener("click", async () => {
       if (running) {
         return;
@@ -309,12 +305,12 @@ const tool: Tool = {
 
     /* ---- conversion ---- */
 
-    function showError(msg: string) {
+    const showError = (msg: string) => {
       errorBox.textContent = msg;
       errorBox.classList.add("on");
-    }
+    };
 
-    function setPhase(p: Phase) {
+    const setPhase = (p: Phase) => {
       phase.textContent = p.text;
       if (p.fraction === null) {
         bar.classList.add("busy");
@@ -323,9 +319,9 @@ const tool: Tool = {
         bar.classList.remove("busy");
         fill.style.width = `${Math.round(Math.max(0, Math.min(1, p.fraction)) * 100)}%`;
       }
-    }
+    };
 
-    function reset() {
+    const reset = () => {
       if (running) {
         cancelConversion();
       }
@@ -340,13 +336,14 @@ const tool: Tool = {
       result.classList.remove("on");
       progress.classList.remove("on");
       emptyHint.style.display = "block";
-    }
+    };
 
-    async function load(blob: Blob, name: string) {
+    const load = async (blob: Blob, name: string) => {
       if (running) {
         cancelConversion();
       }
-      const id = ++runId;
+      runId += 1;
+      const id = runId;
       running = true;
       currentName = name;
       currentMarkdown = "";
@@ -356,7 +353,7 @@ const tool: Tool = {
       result.classList.remove("on");
       emptyHint.style.display = "none";
       progress.classList.add("on");
-      setPhase({ text: "Reading file", fraction: null });
+      setPhase({ fraction: null, text: "Reading file" });
       try {
         const bytes = await blob.arrayBuffer();
         if (id !== runId) {
@@ -364,8 +361,8 @@ const tool: Tool = {
         }
         const out = await convertDocument(bytes, name, {
           languages: [...selected],
-          pageMarkers: markers,
           onPhase: (p) => id === runId && setPhase(p),
+          pageMarkers: markers,
         });
         if (id !== runId) {
           return;
@@ -402,7 +399,7 @@ const tool: Tool = {
           renderEngines();
         }
       }
-    }
+    };
 
     $(".cancel-btn").addEventListener("click", () => {
       if (running) {
@@ -451,7 +448,8 @@ const tool: Tool = {
     });
     el.addEventListener("dragover", (e) => e.preventDefault());
     el.addEventListener("dragleave", () => {
-      if (--dragDepth <= 0) {
+      dragDepth -= 1;
+      if (dragDepth <= 0) {
         dragDepth = 0;
         el.classList.remove("dragging");
       }
@@ -495,6 +493,9 @@ const tool: Tool = {
       }
     });
   },
+  name: "Document to Markdown",
+  subtitle:
+    "Convert a document, a scanned PDF, or an image of text to Markdown.",
 };
 
 export default tool;

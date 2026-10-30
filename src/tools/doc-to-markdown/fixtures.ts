@@ -4,7 +4,7 @@
 
 const enc = new TextEncoder();
 
-function concat(parts: (Uint8Array | string)[]): Uint8Array {
+const concat = (parts: (Uint8Array | string)[]): Uint8Array => {
   const chunks = parts.map((p) => (typeof p === "string" ? enc.encode(p) : p));
   const out = new Uint8Array(chunks.reduce((n, c) => n + c.length, 0));
   let off = 0;
@@ -13,7 +13,7 @@ function concat(parts: (Uint8Array | string)[]): Uint8Array {
     off += c.length;
   }
   return out;
-}
+};
 
 /* ---------------- PDF ---------------- */
 
@@ -25,7 +25,7 @@ export interface PdfPageSpec {
 }
 
 /** A Letter-size PDF with one page per spec. Text pages have a real text layer; image pages have none. */
-export function buildPdf(pages: PdfPageSpec[]): Uint8Array {
+export const buildPdf = (pages: PdfPageSpec[]): Uint8Array => {
   const objects: (Uint8Array | string)[] = [];
   const add = (body: Uint8Array | string) => {
     objects.push(body);
@@ -35,14 +35,15 @@ export function buildPdf(pages: PdfPageSpec[]): Uint8Array {
   const H = 792;
   const fontId = add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
   const pageIds: number[] = [];
-  const pagesId = objects.length + 1 + pages.length * 3; // reserved after all page objects
+  // Reserved after all page objects.
+  const pagesId = objects.length + 1 + pages.length * 3;
   for (const spec of pages) {
     let content = "";
     const resources: string[] = [`/Font << /F1 ${fontId} 0 R >>`];
     if (spec.text) {
       content += "BT /F1 14 Tf 72 720 Td 18 TL\n";
       for (const line of spec.text) {
-        content += `(${line.replaceAll(/[\\()]/g, (c) => `\\${c}`)}) Tj T*\n`;
+        content += `(${line.replaceAll(/[\\()]/gu, (c) => `\\${c}`)}) Tj T*\n`;
       }
       content += "ET\n";
     }
@@ -64,9 +65,10 @@ export function buildPdf(pages: PdfPageSpec[]): Uint8Array {
     const pageId = add(
       `<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 ${W} ${H}] /Resources << ${resources.join(" ")} >> /Contents ${contentId} 0 R >>`
     );
+    // Keep the object count per page constant so pagesId is right.
     if (!spec.jpeg) {
       add("<< >>");
-    } // keep the object count per page constant so pagesId is right
+    }
     pageIds.push(pageId);
   }
   const realPagesId = add(
@@ -84,7 +86,7 @@ export function buildPdf(pages: PdfPageSpec[]): Uint8Array {
   ];
   const offsets: number[] = [];
   let { length } = enc.encode(parts[0] as string);
-  objects.forEach((body, i) => {
+  for (const [i, body] of objects.entries()) {
     offsets.push(length);
     const head = `${i + 1} 0 obj\n`;
     const tail = "\nendobj\n";
@@ -93,7 +95,7 @@ export function buildPdf(pages: PdfPageSpec[]): Uint8Array {
       enc.encode(head).length +
       (typeof body === "string" ? enc.encode(body).length : body.length) +
       enc.encode(tail).length;
-  });
+  }
   const xref = length;
   let table = `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
   for (const o of offsets) {
@@ -102,48 +104,77 @@ export function buildPdf(pages: PdfPageSpec[]): Uint8Array {
   table += `trailer\n<< /Size ${objects.length + 1} /Root ${catalogId} 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
   parts.push(table);
   return concat(parts);
-}
+};
 
 /* ---------------- DOCX ---------------- */
+
+/**
+ * XOR of two unsigned 32-bit integers, one bit at a time. The fixtures only
+ * checksum a few kilobytes, so plain arithmetic is fast enough.
+ */
+const xor32 = (a: number, b: number): number => {
+  let out = 0;
+  let x = a;
+  let y = b;
+  let place = 1;
+  for (let bit = 0; bit < 32; bit += 1) {
+    if (x % 2 !== y % 2) {
+      out += place;
+    }
+    x = Math.floor(x / 2);
+    y = Math.floor(y / 2);
+    place *= 2;
+  }
+  return out;
+};
 
 const CRC_TABLE = (() => {
   const t = new Uint32Array(256);
   for (let n = 0; n < 256; n += 1) {
     let c = n;
     for (let k = 0; k < 8; k += 1) {
-      c = c & 1 ? 0xed_b8_83_20 ^ (c >>> 1) : c >>> 1;
+      const shifted = Math.floor(c / 2);
+      c = c % 2 === 1 ? xor32(0xed_b8_83_20, shifted) : shifted;
     }
-    t[n] = c >>> 0;
+    t[n] = c;
   }
   return t;
 })();
 
-function crc32(bytes: Uint8Array): number {
+const crcEntry = (index: number): number => {
+  const entry = CRC_TABLE[index];
+  if (entry === undefined) {
+    throw new Error(`fixture: no CRC table entry ${index}`);
+  }
+  return entry;
+};
+
+const crc32 = (bytes: Uint8Array): number => {
   let c = 0xff_ff_ff_ff;
   for (const b of bytes) {
-    c = CRC_TABLE[(c ^ b) & 0xff]! ^ (c >>> 8);
+    c = xor32(crcEntry(xor32(c % 256, b)), Math.floor(c / 256));
   }
-  return (c ^ 0xff_ff_ff_ff) >>> 0;
-}
+  // XOR with all ones is the same as subtracting from all ones.
+  return 0xff_ff_ff_ff - c;
+};
 
-function le16(n: number) {
-  return new Uint8Array([n & 0xff, (n >> 8) & 0xff]);
-}
-function le32(n: number) {
-  return new Uint8Array([
-    n & 0xff,
-    (n >> 8) & 0xff,
-    (n >> 16) & 0xff,
-    (n >>> 24) & 0xff,
-  ]);
-}
+const le16 = (n: number) => {
+  const out = new Uint8Array(2);
+  new DataView(out.buffer).setUint16(0, n, true);
+  return out;
+};
+const le32 = (n: number) => {
+  const out = new Uint8Array(4);
+  new DataView(out.buffer).setUint32(0, n, true);
+  return out;
+};
 
-/** A stored (uncompressed) zip. */
-export function buildZip(files: Record<string, string>): Uint8Array {
+/** A stored (uncompressed) zip, entries in the given order. */
+export const buildZip = (files: [name: string, text: string][]): Uint8Array => {
   const locals: Uint8Array[] = [];
   const centrals: Uint8Array[] = [];
   let offset = 0;
-  for (const [name, text] of Object.entries(files)) {
+  for (const [name, text] of files) {
     const nameBytes = enc.encode(name);
     const data = enc.encode(text);
     const crc = crc32(data);
@@ -199,20 +230,38 @@ export function buildZip(files: Record<string, string>): Uint8Array {
     le16(0),
   ]);
   return concat([...locals, central, eocd]);
-}
+};
 
 /** A minimal Word document: a heading and paragraphs. */
-export function buildDocx(heading: string, paragraphs: string[]): Uint8Array {
+export const buildDocx = (
+  heading: string,
+  paragraphs: string[]
+): Uint8Array => {
   const escapeXml = (s: string) =>
     s.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
   const body = `<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>${escapeXml(heading)}</w:t></w:r></w:p>${paragraphs
     .map((p) => `<w:p><w:r><w:t>${escapeXml(p)}</w:t></w:r></w:p>`)
     .join("")}`;
-  return buildZip({
-    "[Content_Types].xml": `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/></Types>`,
-    "_rels/.rels": `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>`,
-    "word/_rels/document.xml.rels": `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`,
-    "word/styles.xml": `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/><w:pPr><w:outlineLvl w:val="0"/></w:pPr></w:style></w:styles>`,
-    "word/document.xml": `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${body}</w:body></w:document>`,
-  });
-}
+  return buildZip([
+    [
+      "[Content_Types].xml",
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/></Types>`,
+    ],
+    [
+      "_rels/.rels",
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>`,
+    ],
+    [
+      "word/_rels/document.xml.rels",
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`,
+    ],
+    [
+      "word/styles.xml",
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/><w:pPr><w:outlineLvl w:val="0"/></w:pPr></w:style></w:styles>`,
+    ],
+    [
+      "word/document.xml",
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${body}</w:body></w:document>`,
+    ],
+  ]);
+};

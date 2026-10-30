@@ -5,20 +5,9 @@
 // reloads the engines from the cache, which is cheap.
 
 import { scriptDataUrl } from "../../shared/script-url";
+import { ConvertError } from "./convert-error";
 import type { OfficeFormat } from "./detect";
 import type { WorkerRequest, WorkerResponse } from "./worker";
-
-export class ConvertError extends Error {
-  code?: string;
-  pages?: number[];
-  pageCount?: number;
-  constructor(r: Extract<WorkerResponse, { type: "error" }>) {
-    super(r.message);
-    this.code = r.code;
-    this.pages = r.pages;
-    this.pageCount = r.pageCount;
-  }
-}
 
 export interface PdfResult {
   markdown: string | undefined;
@@ -116,20 +105,18 @@ export class ConvertWorker {
     if (inFlight) {
       return inFlight;
     }
-    const p = new Promise<void>((resolve, reject) => {
-      this.loads.set(engine, { resolve: () => resolve(), reject });
-      try {
-        // Copy the wasm: the cache's buffer must survive for the next worker.
-        this.send({ type: "load", engine, glue, wasm: wasm.slice(0) });
-      } catch (error) {
-        this.loads.delete(engine);
-        reject(error as Error);
-      }
-    });
+    const { promise: p, resolve, reject } = Promise.withResolvers<undefined>();
+    this.loads.set(engine, { reject, resolve: () => resolve(undefined) });
+    try {
+      // Copy the wasm: the cache's buffer must survive for the next worker.
+      this.send({ engine, glue, type: "load", wasm: structuredClone(wasm) });
+    } catch (error) {
+      this.loads.delete(engine);
+      reject(error as Error);
+    }
     this.loading.set(engine, p);
-    p.then(
-      () => this.loading.delete(engine),
-      () => this.loading.delete(engine)
+    p.then(() => this.loading.delete(engine)).catch(() =>
+      this.loading.delete(engine)
     );
     return p;
   }
@@ -138,34 +125,34 @@ export class ConvertWorker {
     msg: Extract<WorkerRequest, { id: number }>,
     transfer: Transferable[]
   ): Promise<WorkerResponse> {
-    return new Promise((resolve, reject) => {
-      this.pending.set(msg.id, { resolve, reject });
-      try {
-        this.send(msg, transfer);
-      } catch (error) {
-        this.pending.delete(msg.id);
-        reject(error as Error);
-      }
-    });
+    const { promise, resolve, reject } =
+      Promise.withResolvers<WorkerResponse>();
+    this.pending.set(msg.id, { reject, resolve });
+    try {
+      this.send(msg, transfer);
+    } catch (error) {
+      this.pending.delete(msg.id);
+      reject(error as Error);
+    }
+    return promise;
   }
 
   async office(bytes: ArrayBuffer, format: OfficeFormat): Promise<string> {
-    const r = await this.ask(
-      { type: "office", id: this.nextId++, bytes, format },
-      [bytes]
-    );
+    const id = this.nextId;
+    this.nextId += 1;
+    const r = await this.ask({ bytes, format, id, type: "office" }, [bytes]);
     return (r as Extract<WorkerResponse, { type: "office" }>).markdown;
   }
 
   async pdf(bytes: ArrayBuffer, pages?: number[]): Promise<PdfResult> {
-    const r = await this.ask({ type: "pdf", id: this.nextId++, bytes, pages }, [
-      bytes,
-    ]);
+    const id = this.nextId;
+    this.nextId += 1;
+    const r = await this.ask({ bytes, id, pages, type: "pdf" }, [bytes]);
     const { markdown, pdfType, pageCount, pagesNeedingOcr } = r as Extract<
       WorkerResponse,
       { type: "pdf" }
     >;
-    return { markdown, pdfType, pageCount, pagesNeedingOcr };
+    return { markdown, pageCount, pagesNeedingOcr, pdfType };
   }
 
   terminate() {

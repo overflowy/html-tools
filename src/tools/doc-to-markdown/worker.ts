@@ -66,21 +66,22 @@ interface PdfInspectorModule {
 let anydoc: AnydocModule | null = null;
 let pdfInspector: PdfInspectorModule | null = null;
 
-// A dedicated worker has no targetOrigin to give.
-// oxlint-disable-next-line unicorn/require-post-message-target-origin
-const post = (msg: WorkerResponse) => self.postMessage(msg);
+// A dedicated worker has no targetOrigin to give; the options form of
+// postMessage (with nothing to transfer) is the one that applies here.
+const post = (msg: WorkerResponse) => self.postMessage(msg, { transfer: [] });
 
 /** Import a module from its source text. The glue never resolves a sibling file when given the wasm bytes directly. */
-function importGlue<T>(glue: string, name: string): Promise<T> {
-  return import(scriptDataUrl(glue, name)) as Promise<T>;
-}
+const importGlue = <T>(glue: string, name: string): Promise<T> =>
+  import(scriptDataUrl(glue, name)) as Promise<T>;
 
-function describe(e: unknown): {
+const describe = (
+  e: unknown
+): {
   message: string;
   code?: string;
   pages?: number[];
   pageCount?: number;
-} {
+} => {
   if (e instanceof Error) {
     const x = e as Error & {
       code?: string;
@@ -88,14 +89,14 @@ function describe(e: unknown): {
       pageCount?: number;
     };
     return {
-      message: e.message,
       code: x.code,
-      pages: x.pages,
+      message: e.message,
       pageCount: x.pageCount,
+      pages: x.pages,
     };
   }
   return { message: String(e) };
-}
+};
 
 self.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
   const msg = ev.data;
@@ -113,7 +114,7 @@ self.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
         await mod.default({ module_or_path: msg.wasm });
         pdfInspector = mod;
       }
-      post({ type: "loaded", engine: msg.engine });
+      post({ engine: msg.engine, type: "loaded" });
       return;
     }
     if (msg.type === "office") {
@@ -125,9 +126,9 @@ self.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
       // for content it cannot recognize (CSV has no signature).
       const format = anydoc.formatFromBytes(bytes) ?? msg.format;
       post({
-        type: "office",
         id: msg.id,
         markdown: anydoc.toMarkdownBytes(bytes, format),
+        type: "office",
       });
       return;
     }
@@ -136,23 +137,22 @@ self.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
         throw new Error("pdf-inspector is not loaded");
       }
       const res = pdfInspector.processPdf(new Uint8Array(msg.bytes), {
-        pages: msg.pages,
         includePageMarkers: true,
+        pages: msg.pages,
       });
       post({
-        type: "pdf",
         id: msg.id,
         markdown: res.markdown,
-        pdfType: res.pdfType,
         pageCount: res.pageCount,
         pagesNeedingOcr: res.pagesNeedingOcr,
+        pdfType: res.pdfType,
+        type: "pdf",
       });
-      return;
     }
   } catch (error) {
     post({
-      type: "error",
       id: "id" in msg ? msg.id : null,
+      type: "error",
       ...describe(error),
     });
   }

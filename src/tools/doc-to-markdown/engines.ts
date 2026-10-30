@@ -30,111 +30,111 @@ const PDFJS = `${NPM}pdfjs-dist@${PDFJS_VERSION}/`;
 
 export const ENGINES = {
   anydocJs: {
+    approxBytes: 14_000,
     id: "anydoc-js",
     label: "anydoc glue",
-    version: ANYDOC_VERSION,
     url: `${NPM}@firecrawl/anydoc-wasm@${ANYDOC_VERSION}/anydoc_wasm.js`,
-    approxBytes: 14_000,
+    version: ANYDOC_VERSION,
   },
   anydocWasm: {
+    approxBytes: 6_700_000,
     id: "anydoc-wasm",
     label: "anydoc",
-    version: ANYDOC_VERSION,
     url: `${NPM}@firecrawl/anydoc-wasm@${ANYDOC_VERSION}/anydoc_wasm_bg.wasm`,
-    approxBytes: 6_700_000,
+    version: ANYDOC_VERSION,
   },
   pdfInspectorJs: {
+    approxBytes: 23_000,
     id: "pdf-inspector-js",
     label: "pdf-inspector glue",
-    version: PDF_INSPECTOR_VERSION,
     url: `${NPM}@firecrawl/pdf-inspector-wasm@${PDF_INSPECTOR_VERSION}/pdf_inspector_wasm.js`,
-    approxBytes: 23_000,
+    version: PDF_INSPECTOR_VERSION,
   },
   pdfInspectorWasm: {
+    approxBytes: 5_300_000,
     id: "pdf-inspector-wasm",
     label: "pdf-inspector",
-    version: PDF_INSPECTOR_VERSION,
     url: `${NPM}@firecrawl/pdf-inspector-wasm@${PDF_INSPECTOR_VERSION}/pdf_inspector_wasm_bg.wasm`,
-    approxBytes: 5_300_000,
+    version: PDF_INSPECTOR_VERSION,
   },
   // The legacy build polyfills what the modern one assumes (Uint8Array.toHex,
   // Float16Array, ...), and is what pdf.js itself recommends for the public web.
   pdfjs: {
+    approxBytes: 520_000,
     id: "pdfjs",
     label: "pdf.js",
-    version: PDFJS_VERSION,
     url: `${PDFJS}legacy/build/pdf.min.mjs`,
-    approxBytes: 520_000,
+    version: PDFJS_VERSION,
   },
   pdfjsWorker: {
+    approxBytes: 1_320_000,
     id: "pdfjs-worker",
     label: "pdf.js worker",
-    version: PDFJS_VERSION,
     url: `${PDFJS}legacy/build/pdf.worker.min.mjs`,
-    approxBytes: 1_320_000,
-  },
-  tesseractWorker: {
-    id: "tesseract-worker",
-    label: "tesseract.js worker",
-    version: TESSERACT_VERSION,
-    url: `${NPM}tesseract.js@${TESSERACT_VERSION}/dist/worker.min.js`,
-    approxBytes: 111_000,
+    version: PDFJS_VERSION,
   },
   tesseractCore: {
+    approxBytes: 3_900_000,
     id: "tesseract-core",
     label: "tesseract core",
-    version: TESSERACT_CORE_VERSION,
     url: `${NPM}tesseract.js-core@${TESSERACT_CORE_VERSION}/tesseract-core-simd-lstm.wasm.js`,
-    approxBytes: 3_900_000,
+    version: TESSERACT_CORE_VERSION,
   },
   tesseractCoreNoSimd: {
+    approxBytes: 3_900_000,
     id: "tesseract-core-nosimd",
     label: "tesseract core (no SIMD)",
-    version: TESSERACT_CORE_VERSION,
     url: `${NPM}tesseract.js-core@${TESSERACT_CORE_VERSION}/tesseract-core-lstm.wasm.js`,
-    approxBytes: 3_900_000,
+    version: TESSERACT_CORE_VERSION,
+  },
+  tesseractWorker: {
+    approxBytes: 111_000,
+    id: "tesseract-worker",
+    label: "tesseract.js worker",
+    url: `${NPM}tesseract.js@${TESSERACT_VERSION}/dist/worker.min.js`,
+    version: TESSERACT_VERSION,
   },
 } satisfies Record<string, EngineAsset>;
+
+/** Where each kind of file lives in the pdf.js package. */
+const PDFJS_DIRS = new Map([
+  ["wasmUrl", "wasm"],
+  ["cMapUrl", "cmaps"],
+  ["standardFontDataUrl", "standard_fonts"],
+]);
+
+const PDFJS_LABELS = new Map([
+  ["jbig2.wasm", "pdf.js JBIG2 decoder"],
+  ["openjpeg.wasm", "pdf.js JPEG 2000 decoder"],
+]);
 
 /**
  * A file pdf.js asks for by name while rendering: the JBIG2 and JPEG 2000
  * decoders (scans are very often one of those), a CMap, or a standard font.
  * Fetched through the cache like any other engine, only when a PDF needs it.
  */
-export function pdfjsAsset(kind: string, filename: string): EngineAsset | null {
-  const dir =
-    kind === "wasmUrl"
-      ? "wasm"
-      : kind === "cMapUrl"
-        ? "cmaps"
-        : kind === "standardFontDataUrl"
-          ? "standard_fonts"
-          : null;
-  if (!dir || !/^[\w.-]+$/.test(filename)) {
+export const pdfjsAsset = (
+  kind: string,
+  filename: string
+): EngineAsset | null => {
+  const dir = PDFJS_DIRS.get(kind);
+  if (!dir || !/^[\w.-]+$/u.test(filename)) {
     return null;
   }
-  const label =
-    filename === "jbig2.wasm"
-      ? "pdf.js JBIG2 decoder"
-      : filename === "openjpeg.wasm"
-        ? "pdf.js JPEG 2000 decoder"
-        : `pdf.js ${filename}`;
   return {
-    id: `pdfjs-${dir}-${filename}`,
-    label,
-    version: PDFJS_VERSION,
-    url: `${PDFJS}${dir}/${filename}`,
     approxBytes: 250_000,
+    id: `pdfjs-${dir}-${filename}`,
+    label: PDFJS_LABELS.get(filename) ?? `pdf.js ${filename}`,
+    url: `${PDFJS}${dir}/${filename}`,
+    version: PDFJS_VERSION,
   };
-}
+};
 
 /** The recognition model for one Language. */
-export function languageAsset(code: string): EngineAsset {
-  return {
-    id: `tessdata-${code}`,
-    label: `tesseract ${code}`,
-    version: TESSDATA_VERSION,
-    url: `${GH}tesseract-ocr/tessdata_fast@${TESSDATA_VERSION}/${code}.traineddata`,
-    approxBytes: 4_000_000,
-  };
-}
+export const languageAsset = (code: string): EngineAsset => ({
+  approxBytes: 4_000_000,
+  id: `tessdata-${code}`,
+  label: `tesseract ${code}`,
+  url: `${GH}tesseract-ocr/tessdata_fast@${TESSDATA_VERSION}/${code}.traineddata`,
+  version: TESSDATA_VERSION,
+});
