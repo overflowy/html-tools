@@ -25,17 +25,17 @@ import fixtures from "./fixtures.json";
 const keys = fixtures.dkim_keys;
 
 /** A resolver over a fixed zone; names not listed have no TXT records. */
-function zone(
+const zone = (
   records: Record<string, string[]>
-): TxtResolver & { calls: string[] } {
+): TxtResolver & { calls: string[] } => {
   const calls: string[] = [];
-  const fn = (async (name: string) => {
+  const fn = ((name: string) => {
     calls.push(name);
-    return records[name] ?? [];
+    return Promise.resolve(records[name] ?? []);
   }) as TxtResolver & { calls: string[] };
   fn.calls = calls;
   return fn;
-}
+};
 
 const serial: Runner = async (items, fn) => {
   const out = [];
@@ -69,14 +69,14 @@ describe("SPF", () => {
   });
   test("counts lookups through includes and redirects", async () => {
     const dns = zone({
-      "example.com": [
-        "v=spf1 include:_spf.example.net a mx ip4:192.0.2.0/24 -all",
-      ],
+      "_netblocks.example.net": ["v=spf1 ip4:198.51.100.0/24 ~all"],
+      "_netblocks2.example.net": ["v=spf1 redirect=_netblocks.example.net"],
       "_spf.example.net": [
         "v=spf1 include:_netblocks.example.net include:_netblocks2.example.net ~all",
       ],
-      "_netblocks.example.net": ["v=spf1 ip4:198.51.100.0/24 ~all"],
-      "_netblocks2.example.net": ["v=spf1 redirect=_netblocks.example.net"],
+      "example.com": [
+        "v=spf1 include:_spf.example.net a mx ip4:192.0.2.0/24 -all",
+      ],
     });
     const r = await checkSpf("example.com", dns);
     // include, a, mx, include, include, redirect = 6
@@ -109,18 +109,20 @@ describe("SPF", () => {
     ).toBe(true);
   });
   test("+all fails, ?all and missing all warn, ~all is fine", async () => {
-    expect((await checkSpf("a", zone({ a: ["v=spf1 +all"] }))).verdict).toBe(
-      "fail"
+    const plusAll = await checkSpf("a", zone({ a: ["v=spf1 +all"] }));
+    expect(plusAll.verdict).toBe("fail");
+    const neutralAll = await checkSpf(
+      "a",
+      zone({ a: ["v=spf1 ip4:192.0.2.1 ?all"] })
     );
-    expect(
-      (await checkSpf("a", zone({ a: ["v=spf1 ip4:192.0.2.1 ?all"] }))).verdict
-    ).toBe("warn");
-    expect(
-      (await checkSpf("a", zone({ a: ["v=spf1 ip4:192.0.2.1"] }))).verdict
-    ).toBe("warn");
-    expect(
-      (await checkSpf("a", zone({ a: ["v=spf1 ip4:192.0.2.1 ~all"] }))).verdict
-    ).toBe("ok");
+    expect(neutralAll.verdict).toBe("warn");
+    const noAll = await checkSpf("a", zone({ a: ["v=spf1 ip4:192.0.2.1"] }));
+    expect(noAll.verdict).toBe("warn");
+    const softFail = await checkSpf(
+      "a",
+      zone({ a: ["v=spf1 ip4:192.0.2.1 ~all"] })
+    );
+    expect(softFail.verdict).toBe("ok");
   });
   test("multiple records, dangling include, junk after all, ptr, unknown mechanism", async () => {
     const r = await checkSpf(
@@ -188,18 +190,16 @@ describe("DMARC", () => {
     ).toBe(true);
   });
   test("p=none, missing rua, and partial pct warn", async () => {
-    expect(
-      (
-        await checkDmarc(
-          "a",
-          zone({ "_dmarc.a": ["v=DMARC1; p=none; rua=mailto:x@a"] })
-        )
-      ).verdict
-    ).toBe("warn");
-    expect(
-      (await checkDmarc("a", zone({ "_dmarc.a": ["v=DMARC1; p=reject"] })))
-        .verdict
-    ).toBe("warn");
+    const monitorOnly = await checkDmarc(
+      "a",
+      zone({ "_dmarc.a": ["v=DMARC1; p=none; rua=mailto:x@a"] })
+    );
+    expect(monitorOnly.verdict).toBe("warn");
+    const noRua = await checkDmarc(
+      "a",
+      zone({ "_dmarc.a": ["v=DMARC1; p=reject"] })
+    );
+    expect(noRua.verdict).toBe("warn");
     const pct = await checkDmarc(
       "a",
       zone({ "_dmarc.a": ["v=DMARC1; p=reject; pct=50; rua=mailto:x@a"] })
@@ -209,32 +209,27 @@ describe("DMARC", () => {
     ).toBe(true);
   });
   test("missing p, unknown p, and duplicates fail", async () => {
-    expect(
-      (
-        await checkDmarc(
-          "a",
-          zone({ "_dmarc.a": ["v=DMARC1; rua=mailto:x@a"] })
-        )
-      ).verdict
-    ).toBe("fail");
-    expect(
-      (await checkDmarc("a", zone({ "_dmarc.a": ["v=DMARC1; p=block"] })))
-        .verdict
-    ).toBe("fail");
-    expect(
-      (
-        await checkDmarc(
-          "a",
-          zone({ "_dmarc.a": ["v=DMARC1; p=reject", "v=DMARC1; p=none"] })
-        )
-      ).verdict
-    ).toBe("fail");
+    const noPolicy = await checkDmarc(
+      "a",
+      zone({ "_dmarc.a": ["v=DMARC1; rua=mailto:x@a"] })
+    );
+    expect(noPolicy.verdict).toBe("fail");
+    const unknownPolicy = await checkDmarc(
+      "a",
+      zone({ "_dmarc.a": ["v=DMARC1; p=block"] })
+    );
+    expect(unknownPolicy.verdict).toBe("fail");
+    const twoRecords = await checkDmarc(
+      "a",
+      zone({ "_dmarc.a": ["v=DMARC1; p=reject", "v=DMARC1; p=none"] })
+    );
+    expect(twoRecords.verdict).toBe("fail");
   });
   test("parseTags keeps the first of duplicate keys and tolerates spacing", () => {
     expect(parseTags(" v = DMARC1 ;p=reject; p=none;; sp = none")).toEqual({
-      v: "DMARC1",
       p: "reject",
       sp: "none",
+      v: "DMARC1",
     });
   });
 });
@@ -276,6 +271,20 @@ describe("DKIM", () => {
     expect(rsaBits(new Uint8Array([1, 2, 3]))).toBeNull();
     expect(rsaBits(new Uint8Array(0))).toBeNull();
   });
+  test("a four-byte DER length is read as a signed 32-bit number", () => {
+    // SEQUENCE { SEQUENCE {}, BIT STRING { 00, SEQUENCE { INTEGER, length 0x80000000 } } }
+    const spki = Uint8Array.from([
+      0x30, 0x0e, 0x30, 0x00, 0x03, 0x0a, 0x00, 0x30, 0x07, 0x02, 0x84, 0x80,
+      0x00, 0x00, 0x00, 0x01,
+    ]);
+    expect(rsaBits(spki)).toBe((-(2 ** 31) - 1) * 8 + 1);
+    // Lengths below 2^31 read as they are.
+    const short = Uint8Array.from([
+      0x30, 0x0e, 0x30, 0x00, 0x03, 0x0a, 0x00, 0x30, 0x07, 0x02, 0x84, 0x00,
+      0x00, 0x00, 0x01, 0x01,
+    ]);
+    expect(rsaBits(short)).toBe(1);
+  });
   test("record detection tolerates missing v= but not a foreign v=", () => {
     expect(
       dkimRecords([
@@ -289,9 +298,9 @@ describe("DKIM", () => {
   });
   test("selector probe finds keys and ignores the rest", async () => {
     const dns = zone({
+      "default._domainkey.example.com": ["some unrelated txt"],
       "google._domainkey.example.com": [`v=DKIM1; k=rsa; p=${keys.rsa2048}`],
       "k1._domainkey.example.com": ["v=DKIM1; k=rsa; p="],
-      "default._domainkey.example.com": ["some unrelated txt"],
     });
     const r = await checkDkim("example.com", dns, serial, [
       "default",
@@ -302,7 +311,7 @@ describe("DKIM", () => {
     expect(r.probed).toBe(4);
     expect(r.keys.map((k) => k.selector)).toEqual(["google", "k1"]);
     expect(r.verdict).toBe("ok");
-    expect(r.findings[0]!.text).toContain("1 signing key found: google");
+    expect(r.findings[0].text).toContain("1 signing key found: google");
     expect(await checkDkimSelector("example.com", "nothing", dns)).toBeNull();
   });
   test("a wildcard record is shown once", async () => {
@@ -313,24 +322,20 @@ describe("DKIM", () => {
     );
     const r = await checkDkim("x", dns, serial, ["a", "b", "c", "d", "e"]);
     expect(r.keys.length).toBe(1);
-    expect(r.keys[0]!.selector).toBe("*");
-    expect(r.keys[0]!.selectors).toEqual(["a", "b", "c", "d"]);
-    expect(r.keys[0]!.findings[0]!.text).toContain("wildcard");
+    expect(r.keys[0].selector).toBe("*");
+    expect(r.keys[0].selectors).toEqual(["a", "b", "c", "d"]);
+    expect(r.keys[0].findings[0].text).toContain("wildcard");
   });
   test("no keys anywhere is none, only revoked keys warns", async () => {
-    expect((await checkDkim("a", zone({}), serial, ["x"])).verdict).toBe(
-      "none"
+    const nothing = await checkDkim("a", zone({}), serial, ["x"]);
+    expect(nothing.verdict).toBe("none");
+    const revokedOnly = await checkDkim(
+      "a",
+      zone({ "x._domainkey.a": ["v=DKIM1; p="] }),
+      serial,
+      ["x"]
     );
-    expect(
-      (
-        await checkDkim(
-          "a",
-          zone({ "x._domainkey.a": ["v=DKIM1; p="] }),
-          serial,
-          ["x"]
-        )
-      ).verdict
-    ).toBe("warn");
+    expect(revokedOnly.verdict).toBe("warn");
   });
 });
 
@@ -345,7 +350,7 @@ describe("MX", () => {
   });
   test("null MX and no MX", () => {
     expect(evaluateMx(["0 ."]).verdict).toBe("none");
-    expect(evaluateMx(["0 ."]).findings[0]!.text).toContain(
+    expect(evaluateMx(["0 ."]).findings[0].text).toContain(
       "does not receive mail"
     );
     expect(evaluateMx([]).verdict).toBe("warn");
@@ -353,23 +358,23 @@ describe("MX", () => {
 });
 
 describe("BIMI", () => {
-  const enforcing = { v: "DMARC1", p: "reject", rua: "mailto:d@example.com" };
+  const enforcing = { p: "reject", rua: "mailto:d@example.com", v: "DMARC1" };
   const assets: Record<string, string> = {
     "https://example.com/brand/logo.svg": fixtures.bimi_logo,
     "https://example.com/brand/vmc.pem": fixtures.bimi_cert,
   };
-  const fetcher = async (url: string) => {
+  const fetcher = (url: string) => {
     if (url === "https://example.com/missing.svg") {
-      return { ok: false, status: 404, body: "" };
+      return Promise.resolve({ body: "", ok: false, status: 404 });
     }
     if (url === "https://example.com/blocked.svg") {
-      return { ok: false, status: 0, body: "" };
+      return Promise.resolve({ body: "", ok: false, status: 0 });
     }
-    return {
+    return Promise.resolve({
+      body: assets[url] ?? "",
       ok: url in assets,
       status: url in assets ? 200 : 404,
-      body: assets[url] ?? "",
-    };
+    });
   };
   const bimiZone = (record: string) =>
     zone({ "default._bimi.example.com": [record] });
@@ -399,18 +404,16 @@ describe("BIMI", () => {
     );
     expect(r.verdict).toBe("ok");
     expect(r.logoUrl).toBe("https://example.com/brand/logo.svg");
-    expect(r.logo!.state).toBe("ok");
-    expect(r.certificate!.state).toBe("ok");
-    expect(r.certificate!.findings[0]!.text).toContain(
-      "Valid until 2126-08-08"
-    );
+    expect(r.logo?.state).toBe("ok");
+    expect(r.certificate?.state).toBe("ok");
+    expect(r.certificate?.findings[0].text).toContain("Valid until 2126-08-08");
   });
   test("DMARC gate", () => {
     expect(dmarcEnforces({ p: "none" }).ok).toBe(false);
     expect(dmarcEnforces({ p: "quarantine", pct: "50" }).ok).toBe(false);
     expect(dmarcEnforces({ p: "reject", sp: "none" }).ok).toBe(false);
     expect(
-      dmarcEnforces({ p: "reject", sp: "quarantine", pct: "100" }).ok
+      dmarcEnforces({ p: "reject", pct: "100", sp: "quarantine" }).ok
     ).toBe(true);
     expect(dmarcEnforces({}).ok).toBe(false);
   });
@@ -429,15 +432,14 @@ describe("BIMI", () => {
     ).toBe(true);
   });
   test("http logo, missing logo, unreachable logo", async () => {
+    const plainHttp = await checkBimi(
+      "example.com",
+      bimiZone("v=BIMI1; l=http://example.com/logo.svg"),
+      fetcher,
+      enforcing
+    );
     expect(
-      (
-        await checkBimi(
-          "example.com",
-          bimiZone("v=BIMI1; l=http://example.com/logo.svg"),
-          fetcher,
-          enforcing
-        )
-      ).findings.some((f) => f.text.includes("must be https"))
+      plainHttp.findings.some((f) => f.text.includes("must be https"))
     ).toBe(true);
     const missing = await checkBimi(
       "example.com",
@@ -445,15 +447,15 @@ describe("BIMI", () => {
       fetcher,
       enforcing
     );
-    expect(missing.logo!.state).toBe("fail");
-    expect(missing.logo!.findings[0]!.text).toContain("HTTP 404");
+    expect(missing.logo?.state).toBe("fail");
+    expect(missing.logo?.findings[0].text).toContain("HTTP 404");
     const blocked = await checkBimi(
       "example.com",
       bimiZone("v=BIMI1; l=https://example.com/blocked.svg"),
       fetcher,
       enforcing
     );
-    expect(blocked.logo!.state).toBe("unreachable");
+    expect(blocked.logo?.state).toBe("unreachable");
     expect(blocked.verdict).toBe("warn");
   });
   test("logo profile checks", () => {
@@ -474,19 +476,19 @@ describe("BIMI", () => {
     expect(judgeLogo("u", "<html></html>").state).toBe("fail");
   });
   test("certificate validity parses UTCTime and GeneralizedTime and judges dates", () => {
-    const v = certValidity(fixtures.bimi_cert)!;
-    expect(v.notBefore.toISOString().slice(0, 10)).toBe("2026-09-01");
-    expect(v.notAfter.toISOString().slice(0, 10)).toBe("2126-08-08");
+    const v = certValidity(fixtures.bimi_cert);
+    expect(v?.notBefore.toISOString().slice(0, 10)).toBe("2026-09-01");
+    expect(v?.notAfter.toISOString().slice(0, 10)).toBe("2126-08-08");
     expect(
       judgeCertificate("u", fixtures.bimi_cert, new Date("2126-07-20"))
-        .findings[0]!.level
+        .findings[0].level
     ).toBe("warn");
     expect(
       judgeCertificate("u", fixtures.bimi_cert, new Date("2127-01-01")).state
     ).toBe("fail");
     expect(
       judgeCertificate("u", fixtures.bimi_cert, new Date("2020-01-01"))
-        .findings[0]!.text
+        .findings[0].text
     ).toContain("not valid until");
     expect(judgeCertificate("u", "not a cert").state).toBe("fail");
     expect(
@@ -494,5 +496,136 @@ describe("BIMI", () => {
         "-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----"
       )
     ).toBeNull();
+  });
+});
+
+/**
+ * The key order of every object in `value`, by path (array items share
+ * their array's path plus `[]`), as JSON.stringify writes them: what the
+ * raw pane shows. Distinct orders at one path are all listed.
+ */
+const keyOrder = (
+  value: unknown,
+  path = "",
+  out: Record<string, string[]> = {}
+): Record<string, string[]> => {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      keyOrder(item, `${path}[]`, out);
+    }
+  } else if (value && typeof value === "object") {
+    const order = Object.keys(value).join(" ");
+    const seen = out[path] ?? [];
+    out[path] = seen.includes(order) ? seen : [...seen, order];
+    for (const [k, v] of Object.entries(value)) {
+      keyOrder(v, `${path}.${k}`, out);
+    }
+  }
+  return out;
+};
+
+const EXPECTED_FULL: Record<string, string[]> = {
+  "": ["bimi dkim dmarc mx spf"],
+  ".bimi": ["verdict record records tags logoUrl logo certificate findings"],
+  ".bimi.certificate": ["url state findings"],
+  ".bimi.certificate.findings[]": ["level text"],
+  ".bimi.findings[]": ["level text"],
+  ".bimi.logo": ["url state findings"],
+  ".bimi.logo.findings[]": ["level text"],
+  ".bimi.tags": ["v l a"],
+  ".dkim": ["verdict keys probed findings"],
+  ".dkim.findings[]": ["level text"],
+  ".dkim.keys[]": [
+    "selector selectors record tags keyType bits revoked findings verdict",
+  ],
+  ".dkim.keys[].findings[]": ["level text"],
+  ".dkim.keys[].tags": ["v k p"],
+  ".dmarc": ["verdict record records tags findings"],
+  ".dmarc.findings[]": ["level text"],
+  ".dmarc.tags": ["v p rua"],
+  ".mx": ["verdict hosts findings"],
+  ".mx.findings[]": ["level text"],
+  ".mx.hosts[]": ["priority host"],
+  ".spf": ["verdict record records lookups all findings"],
+  ".spf.findings[]": ["level text"],
+};
+
+const EXPECTED_EMPTY: Record<string, string[]> = {
+  "": ["bimi dkim dmarc mx spf"],
+  ".bimi": ["verdict record records tags logoUrl logo certificate findings"],
+  ".bimi.findings[]": ["level text"],
+  ".bimi.tags": [""],
+  ".dkim": ["verdict keys probed findings"],
+  ".dkim.findings[]": ["level text"],
+  ".dmarc": ["verdict record records tags findings"],
+  ".dmarc.findings[]": ["level text"],
+  ".dmarc.tags": [""],
+  ".mx": ["verdict hosts findings"],
+  ".mx.findings[]": ["level text"],
+  ".spf": ["verdict record records lookups all findings"],
+  ".spf.findings[]": ["level text"],
+};
+
+const EXPECTED_ASSET_FAIL: Record<string, string[]> = {
+  "": ["certificate logo"],
+  ".certificate": ["url state findings"],
+  ".certificate.findings[]": ["level text"],
+  ".logo": ["url state findings"],
+  ".logo.findings[]": ["level text"],
+};
+
+describe("raw pane field order", () => {
+  const assets: Record<string, string> = {
+    "https://example.com/brand/logo.svg": fixtures.bimi_logo,
+    "https://example.com/brand/vmc.pem": fixtures.bimi_cert,
+  };
+  const fetcher = (url: string) =>
+    Promise.resolve({
+      body: assets[url] ?? "",
+      ok: url in assets,
+      status: url in assets ? 200 : 404,
+    });
+  const dns = zone({
+    "_dmarc.example.com": ["v=DMARC1; p=reject; rua=mailto:d@example.com"],
+    "default._bimi.example.com": [
+      "v=BIMI1; l=https://example.com/brand/logo.svg; a=https://example.com/brand/vmc.pem",
+    ],
+    "example.com": ["v=spf1 mx -all"],
+    "google._domainkey.example.com": [`v=DKIM1; k=rsa; p=${keys.rsa2048}`],
+  });
+  const empty = zone({});
+
+  test("reports keep their fields in the order they are declared", async () => {
+    const dmarc = await checkDmarc("example.com", dns);
+    expect(
+      keyOrder({
+        bimi: await checkBimi("example.com", dns, fetcher, dmarc.tags),
+        dkim: await checkDkim("example.com", dns, serial, ["google"]),
+        dmarc,
+        mx: evaluateMx(["10 mail.example.com."]),
+        spf: await checkSpf("example.com", dns),
+      })
+    ).toEqual(EXPECTED_FULL);
+  });
+
+  test("so do the reports for a domain with nothing published", async () => {
+    expect(
+      keyOrder({
+        bimi: await checkBimi("example.com", empty, fetcher, {}),
+        dkim: await checkDkim("example.com", empty, serial, ["google"]),
+        dmarc: await checkDmarc("example.com", empty),
+        mx: evaluateMx([]),
+        spf: await checkSpf("example.com", empty),
+      })
+    ).toEqual(EXPECTED_EMPTY);
+  });
+
+  test("and the asset reports for logos and certificates that fail", () => {
+    expect(
+      keyOrder({
+        certificate: judgeCertificate("u", "not a cert"),
+        logo: judgeLogo("u", "<html></html>"),
+      })
+    ).toEqual(EXPECTED_ASSET_FAIL);
   });
 });

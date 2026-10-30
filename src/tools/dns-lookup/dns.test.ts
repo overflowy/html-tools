@@ -26,6 +26,14 @@ import {
 } from "./dns";
 import fixtures from "./fixtures.json";
 
+/** `value`, failing the test when it is missing. */
+const defined = <T>(value: T | undefined): T => {
+  if (value === undefined) {
+    throw new Error("Expected a value");
+  }
+  return value;
+};
+
 describe("normalizeName", () => {
   test("trims, lowercases, drops the trailing dot", () => {
     expect(normalizeName("  Example.COM. ")).toBe("example.com");
@@ -74,7 +82,7 @@ describe("record types", () => {
   test("every picker type has a number and round-trips its name", () => {
     for (const g of TYPE_GROUPS) {
       for (const t of g.types) {
-        expect(typeName(typeNumber(t)!)).toBe(t);
+        expect(typeName(defined(typeNumber(t)))).toBe(t);
       }
     }
     expect(typeName(1)).toBe("A");
@@ -114,12 +122,12 @@ describe("formatTtl", () => {
 describe("queryUrl", () => {
   test("cloudflare", () => {
     expect(
-      queryUrl(RESOLVERS[0]!, "example.com", "MX", { cd: false, do: false })
+      queryUrl(RESOLVERS[0], "example.com", "MX", { cd: false, do: false })
     ).toBe("https://cloudflare-dns.com/dns-query?name=example.com&type=15");
   });
   test("google with flags", () => {
     expect(
-      queryUrl(RESOLVERS[3]!, "example.com", "A", { cd: true, do: true })
+      queryUrl(RESOLVERS[3], "example.com", "A", { cd: true, do: true })
     ).toBe("https://dns.google/resolve?name=example.com&type=1&cd=1&do=1");
   });
   test("known types go on the wire as numbers, unknown ones as typed", () => {
@@ -130,7 +138,7 @@ describe("queryUrl", () => {
     expect(wireType("NOTATYPE")).toBe("NOTATYPE");
     for (const g of TYPE_GROUPS) {
       for (const t of g.types) {
-        expect(wireType(t)).toMatch(/^\d+$/);
+        expect(wireType(t)).toMatch(/^\d+$/u);
       }
     }
   });
@@ -140,13 +148,35 @@ describe("parseResponse", () => {
   test("cloudflare answer", () => {
     const r = parseResponse(fixtures.cloudflare_a);
     expect(r.Answer.length).toBe(2);
-    expect(r.Answer[0]!.data).toBe("104.20.23.154");
+    expect(r.Answer[0].data).toBe("104.20.23.154");
     expect(r.Comment).toEqual([]);
     expect(outcomeOf(r)).toBe("records");
   });
+  test("fields keep the Resolvers' order, as the raw pane shows them", () => {
+    const r = parseResponse(fixtures.cloudflare_a);
+    expect(Object.keys(r)).toEqual([
+      "Status",
+      "TC",
+      "RD",
+      "RA",
+      "AD",
+      "CD",
+      "Question",
+      "Answer",
+      "Authority",
+      "Additional",
+      "Comment",
+    ]);
+    expect(Object.keys(r.Answer[0] ?? {})).toEqual([
+      "name",
+      "type",
+      "TTL",
+      "data",
+    ]);
+  });
   test("google answer: trailing dots kept, string Comment wrapped", () => {
     const r = parseResponse(fixtures.google_a);
-    expect(r.Answer[0]!.name).toBe("example.com.");
+    expect(r.Answer[0].name).toBe("example.com.");
     expect(r.Comment).toEqual(["Response from 108.162.195.228."]);
     expect(r.AD).toBe(true);
   });
@@ -154,7 +184,7 @@ describe("parseResponse", () => {
     const r = parseResponse(fixtures.cloudflare_empty);
     expect(outcomeOf(r)).toBe("empty");
     expect(r.Authority.length).toBe(1);
-    expect(r.Authority[0]!.type).toBe(6);
+    expect(r.Authority[0].type).toBe(6);
   });
   test("NXDOMAIN", () =>
     expect(outcomeOf(parseResponse(fixtures.cloudflare_nxdomain))).toBe(
@@ -196,13 +226,16 @@ describe("subdomain sources", () => {
   test("hackertarget lines", () => {
     const hosts = parseHackerTarget(fixtures.hackertarget_text, "example.com");
     expect(hosts.length).toBe(5);
-    expect(hosts[1]).toEqual({ name: "blog.example.com", ip: "192.0.2.10" });
+    expect(hosts[1]).toEqual({ ip: "192.0.2.10", name: "blog.example.com" });
+    expect(Object.keys(hosts[1] ?? {})).toEqual(["name", "ip"]);
   });
   test("hackertarget: unknown host is an empty result, quota is an error", () => {
     expect(parseHackerTarget(fixtures.hackertarget_invalid, "x")).toEqual([]);
     expect(() => parseHackerTarget(fixtures.hackertarget_quota, "x")).toThrow(
-      /quota/i
+      /quota/iu
     );
+    // Case-insensitive means ASCII case: a long s is not an s.
+    expect(() => parseHackerTarget("error no recordſ", "x")).toThrow();
   });
   test("search name drops a leading www.", () => {
     expect(subdomainSearchName("www.example.com")).toBe("example.com");
@@ -210,28 +243,28 @@ describe("subdomain sources", () => {
   });
   test("merge unions, keeps the IP, lists sources, puts the searched name first", () => {
     const cs = {
+      fetch: () => Promise.resolve([]),
       id: "certspotter",
       label: "Cert Spotter",
-      fetch: async () => [],
     };
     const ht = {
+      fetch: () => Promise.resolve([]),
       id: "hackertarget",
       label: "HackerTarget",
-      fetch: async () => [],
     };
     const merged = mergeSubdomains("example.com", [
       {
-        source: cs,
         hosts: parseCertSpotter(fixtures.certspotter_page, "example.com").map(
-          (n) => ({ name: n, ip: "" })
+          (n) => ({ ip: "", name: n })
         ),
+        source: cs,
       },
       {
-        source: ht,
         hosts: parseHackerTarget(fixtures.hackertarget_text, "example.com"),
+        source: ht,
       },
     ]);
-    expect(merged[0]!.name).toBe("example.com");
+    expect(merged[0].name).toBe("example.com");
     expect(merged.map((m) => m.name).slice(1)).toEqual([
       "api.example.com",
       "blog.example.com",
@@ -241,12 +274,12 @@ describe("subdomain sources", () => {
       "staging.example.com",
       "www.example.com",
     ]);
-    const mail = merged.find((m) => m.name === "mail.example.com")!;
+    const mail = defined(merged.find((m) => m.name === "mail.example.com"));
     expect(mail.ip).toBe("203.0.113.25");
     expect(mail.sources).toEqual(["Cert Spotter", "HackerTarget"]);
-    expect(merged.find((m) => m.name === "docs.example.com")!.sources).toEqual([
-      "Cert Spotter",
-    ]);
+    expect(
+      defined(merged.find((m) => m.name === "docs.example.com")).sources
+    ).toEqual(["Cert Spotter"]);
   });
 });
 
@@ -257,7 +290,7 @@ describe("pool", () => {
     const out = await pool([5, 1, 4, 2, 3], 2, async (n) => {
       active += 1;
       peak = Math.max(peak, active);
-      await new Promise((r) => setTimeout(r, n));
+      await Bun.sleep(n);
       active -= 1;
       return n * 10;
     });

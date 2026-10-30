@@ -2,7 +2,7 @@
 // the registry that runs the TLD, and for IP addresses from the regional
 // registry, found through IANA's bootstrap files. Classic port-43 WHOIS is
 // not reachable from a browser; RDAP is its HTTPS/JSON replacement.
-import { ipv6Nibbles, isIPv4, LookupError } from "./dns";
+import { asciiFold, inOrder, ipv6Nibbles, isIPv4, LookupError } from "./dns";
 import type { Finding, Verdict } from "./email";
 
 /** IANA bootstrap file: each service is [keys, urls]. Keys are TLDs (dns.json) or CIDR prefixes (ipv4/ipv6.json). */
@@ -16,35 +16,47 @@ export const BOOTSTRAP_URLS = {
   ipv6: "https://data.iana.org/rdap/ipv6.json",
 };
 
-function httpsFirst(urls: string[]): string | null {
+const httpsFirst = (urls: string[]): string | null => {
   const u = urls.find((x) => x.startsWith("https://")) ?? urls[0];
-  return u ? (u.endsWith("/") ? u : `${u}/`) : null;
-}
+  if (!u) {
+    return null;
+  }
+  return u.endsWith("/") ? u : `${u}/`;
+};
+
+/** The last label of a name, as typed. */
+export const tldOf = (name: string): string =>
+  name.slice(name.lastIndexOf(".") + 1);
 
 /** The RDAP base URL for a domain's TLD, or null when the registry publishes no RDAP. */
-export function dnsService(bootstrap: Bootstrap, name: string): string | null {
-  const tld = name.split(".").pop()!.toLowerCase();
+export const dnsService = (
+  bootstrap: Bootstrap,
+  name: string
+): string | null => {
+  const tld = tldOf(name).toLowerCase();
   for (const [keys, urls] of bootstrap.services) {
     if (keys.some((k) => k.toLowerCase() === tld)) {
       return httpsFirst(urls);
     }
   }
   return null;
-}
+};
 
-function ipToBigInt(ip: string): { value: bigint; bits: number } | null {
+const ipToBigInt = (ip: string): { value: bigint; bits: number } | null => {
   if (isIPv4(ip)) {
-    return {
-      value: ip.split(".").reduce((acc, p) => (acc << 8n) | BigInt(p), 0n),
-      bits: 32,
-    };
+    // Each part is a byte, so the address is the parts as base-256 digits.
+    let value = 0n;
+    for (const p of ip.split(".")) {
+      value = value * 256n + BigInt(p);
+    }
+    return { bits: 32, value };
   }
   const nibbles = ipv6Nibbles(ip);
-  return nibbles ? { value: BigInt(`0x${nibbles}`), bits: 128 } : null;
-}
+  return nibbles ? { bits: 128, value: BigInt(`0x${nibbles}`) } : null;
+};
 
 /** Whether `ip` falls inside `cidr`, same address family only. */
-export function ipInCidr(ip: string, cidr: string): boolean {
+export const ipInCidr = (ip: string, cidr: string): boolean => {
   const [base, lenText] = cidr.split("/");
   const a = ipToBigInt(ip);
   const b = ipToBigInt(base ?? "");
@@ -55,12 +67,13 @@ export function ipInCidr(ip: string, cidr: string): boolean {
   if (!Number.isInteger(len) || len < 0 || len > a.bits) {
     return false;
   }
-  const shift = BigInt(a.bits - len);
-  return a.value >> shift === b.value >> shift;
-}
+  // The addresses agree on the first `len` bits when they do after dropping the rest.
+  const scale = 2n ** BigInt(a.bits - len);
+  return a.value / scale === b.value / scale;
+};
 
 /** The RDAP base URL of the regional registry holding an address (longest matching prefix). */
-export function ipService(bootstrap: Bootstrap, ip: string): string | null {
+export const ipService = (bootstrap: Bootstrap, ip: string): string | null => {
   let best: { len: number; url: string | null } | null = null;
   for (const [keys, urls] of bootstrap.services) {
     for (const cidr of keys) {
@@ -71,7 +84,7 @@ export function ipService(bootstrap: Bootstrap, ip: string): string | null {
     }
   }
   return best?.url ?? null;
-}
+};
 
 // ---- response parsing ----
 
@@ -85,7 +98,7 @@ interface Entity {
   entities?: Entity[];
 }
 
-function vcardField(e: Entity, field: string): string {
+const vcardField = (e: Entity, field: string): string => {
   const arr = e.vcardArray?.[1];
   if (!Array.isArray(arr)) {
     return "";
@@ -94,20 +107,23 @@ function vcardField(e: Entity, field: string): string {
   if (!hit) {
     return "";
   }
-  const value = hit[3];
+  const [, params, , value] = hit;
   if (typeof value === "string") {
     return value.trim();
   }
   if (Array.isArray(value)) {
     return value.filter((x) => typeof x === "string" && x).join(", ");
   }
-  if (typeof hit[1]?.label === "string") {
-    return hit[1].label;
+  if (typeof params?.label === "string") {
+    return params.label;
   }
   return "";
-}
+};
 
-function entitiesWithRole(list: Entity[] | undefined, role: string): Entity[] {
+const entitiesWithRole = (
+  list: Entity[] | undefined,
+  role: string
+): Entity[] => {
   const out: Entity[] = [];
   for (const e of list ?? []) {
     if (e.roles?.includes(role)) {
@@ -116,7 +132,7 @@ function entitiesWithRole(list: Entity[] | undefined, role: string): Entity[] {
     out.push(...entitiesWithRole(e.entities, role));
   }
   return out;
-}
+};
 
 export interface Contact {
   name: string;
@@ -124,24 +140,24 @@ export interface Contact {
   phone: string;
 }
 
-function contactOf(e: Entity | undefined): Contact | null {
+const contactOf = (e: Entity | undefined): Contact | null => {
   if (!e) {
     return null;
   }
   const c = {
-    name: vcardField(e, "fn") || vcardField(e, "org"),
     email: vcardField(e, "email"),
-    phone: vcardField(e, "tel").replace(/^tel:/, ""),
+    name: vcardField(e, "fn") || vcardField(e, "org"),
+    phone: vcardField(e, "tel").replace(/^tel:/u, ""),
   };
   return c.name || c.email || c.phone ? c : null;
-}
+};
 
 export interface RdapEvent {
   action: string;
   date: string;
 }
 
-function eventsOf(json: { events?: unknown }): RdapEvent[] {
+const eventsOf = (json: { events?: unknown }): RdapEvent[] => {
   if (!Array.isArray(json.events)) {
     return [];
   }
@@ -156,7 +172,7 @@ function eventsOf(json: { events?: unknown }): RdapEvent[] {
       action: String((e as { eventAction: string }).eventAction),
       date: String((e as { eventDate?: string }).eventDate ?? ""),
     }));
-}
+};
 
 export interface DomainInfo {
   name: string;
@@ -173,7 +189,7 @@ export interface DomainInfo {
   url: string;
 }
 
-export function parseDomain(json: unknown, url: string): DomainInfo {
+export const parseDomain = (json: unknown, url: string): DomainInfo => {
   const j = json as Record<string, unknown>;
   if (!j || typeof j !== "object" || j.objectClassName !== "domain") {
     throw new LookupError(
@@ -181,69 +197,69 @@ export function parseDomain(json: unknown, url: string): DomainInfo {
     );
   }
   const entities = Array.isArray(j.entities) ? (j.entities as Entity[]) : [];
-  const registrarEntity = entitiesWithRole(entities, "registrar")[0];
+  const registrarEntity = entitiesWithRole(entities, "registrar").at(0);
   const registrar = registrarEntity
     ? {
-        name: vcardField(registrarEntity, "fn"),
+        abuse: contactOf(entitiesWithRole([registrarEntity], "abuse").at(0)),
         ianaId:
           registrarEntity.publicIds?.find((p) =>
-            /IANA Registrar ID/i.test(p.type)
+            /IANA Registrar ID/iu.test(asciiFold(p.type))
           )?.identifier ??
           registrarEntity.handle ??
           "",
-        abuse: contactOf(entitiesWithRole([registrarEntity], "abuse")[0]),
+        name: vcardField(registrarEntity, "fn"),
       }
     : null;
   const secure = j.secureDNS as
     | { delegationSigned?: boolean; dsData?: unknown[] }
     | undefined;
   return {
-    name: String(j.ldhName ?? j.unicodeName ?? "").toLowerCase(),
-    handle: String(j.handle ?? ""),
-    status: Array.isArray(j.status) ? j.status.map(String) : [],
-    events: eventsOf(j),
-    registrar,
-    registrant: contactOf(
-      entitiesWithRole(entities, "registrant").find(
-        (e) => !e.roles?.includes("registrar")
-      )
-    ),
-    nameservers: Array.isArray(j.nameservers)
-      ? j.nameservers
-          .map((n) =>
-            String((n as { ldhName?: string }).ldhName ?? "")
-              .toLowerCase()
-              .replace(/\.$/, "")
-          )
-          .filter(Boolean)
-      : [],
     dnssec:
       typeof secure?.delegationSigned === "boolean"
         ? secure.delegationSigned
         : null,
     dsRecords: Array.isArray(secure?.dsData) ? secure.dsData.length : 0,
+    events: eventsOf(j),
+    handle: String(j.handle ?? ""),
+    name: String(j.ldhName ?? j.unicodeName ?? "").toLowerCase(),
+    nameservers: Array.isArray(j.nameservers)
+      ? j.nameservers
+          .map((n) =>
+            String((n as { ldhName?: string }).ldhName ?? "")
+              .toLowerCase()
+              .replace(/\.$/u, "")
+          )
+          .filter(Boolean)
+      : [],
+    registrant: contactOf(
+      entitiesWithRole(entities, "registrant").find(
+        (e) => !e.roles?.includes("registrar")
+      )
+    ),
+    registrar,
+    status: Array.isArray(j.status) ? j.status.map(String) : [],
     url,
   };
-}
+};
 
 /**
  * RIRs list several "registrant" entities for a network: the organisation,
  * and (at RIPE) the maintainer objects that guard it. Prefer the organisation.
  */
-function pickHolder(entities: Entity[]): Entity | undefined {
+const pickHolder = (entities: Entity[]): Entity | undefined => {
   const registrants = entitiesWithRole(entities, "registrant");
   const isMaintainer = (e: Entity) =>
-    /^MNT-|-MNT$/i.test(e.handle ?? "") ||
-    /^MNT-|-MNT$/i.test(vcardField(e, "fn"));
+    /^MNT-|-MNT$/iu.test(e.handle ?? "") ||
+    /^MNT-|-MNT$/iu.test(vcardField(e, "fn"));
   return (
     registrants.find(
-      (e) => /^ORG-/i.test(e.handle ?? "") || vcardField(e, "kind") === "org"
+      (e) => /^ORG-/iu.test(e.handle ?? "") || vcardField(e, "kind") === "org"
     ) ??
     registrants.find((e) => !isMaintainer(e)) ??
     registrants[0] ??
     entitiesWithRole(entities, "administrative")[0]
   );
-}
+};
 
 export interface IpInfo {
   handle: string;
@@ -261,7 +277,7 @@ export interface IpInfo {
   url: string;
 }
 
-export function parseIp(json: unknown, url: string): IpInfo {
+export const parseIp = (json: unknown, url: string): IpInfo => {
   const j = json as Record<string, unknown>;
   if (!j || typeof j !== "object" || j.objectClassName !== "ip network") {
     throw new LookupError(
@@ -281,44 +297,42 @@ export function parseIp(json: unknown, url: string): IpInfo {
         .filter((c) => !c.startsWith("/"))
     : [];
   return {
-    handle: String(j.handle ?? ""),
-    start: String(j.startAddress ?? ""),
-    end: String(j.endAddress ?? ""),
+    abuse: contactOf(entitiesWithRole(entities, "abuse").at(0)),
     cidrs,
-    version: String(j.ipVersion ?? ""),
-    name: String(j.name ?? ""),
-    type: String(j.type ?? ""),
     country: String(j.country ?? ""),
-    status: Array.isArray(j.status) ? j.status.map(String) : [],
+    end: String(j.endAddress ?? ""),
     events: eventsOf(j),
+    handle: String(j.handle ?? ""),
     holder: contactOf(pickHolder(entities)),
-    abuse: contactOf(entitiesWithRole(entities, "abuse")[0]),
+    name: String(j.name ?? ""),
+    start: String(j.startAddress ?? ""),
+    status: Array.isArray(j.status) ? j.status.map(String) : [],
+    type: String(j.type ?? ""),
     url,
+    version: String(j.ipVersion ?? ""),
   };
-}
+};
 
 // ---- judgement ----
 
 /** EPP status values as RDAP spells them (RFC 8056), with what each means for the domain's owner. */
 export const STATUS_MEANING: Record<string, string> = {
   active: "No restrictions.",
-  ok: "No restrictions.",
-  inactive: "No nameservers delegated: the domain does not resolve.",
-  "client transfer prohibited":
-    "Registrar lock against transfers. Normal protection.",
+  "add period": "Registered within the last few days.",
+  associated: "Associated with other objects.",
+  "auto renew period":
+    "Auto-renewed by the registry; the registrar can still reverse it.",
   "client delete prohibited":
     "Registrar lock against deletion. Normal protection.",
+  "client hold": "The registrar has suspended the domain: it does not resolve.",
+  "client renew prohibited": "The registrar blocks renewal.",
+  "client transfer prohibited":
+    "Registrar lock against transfers. Normal protection.",
   "client update prohibited":
     "Registrar lock against changes. Normal protection.",
-  "client renew prohibited": "The registrar blocks renewal.",
-  "client hold": "The registrar has suspended the domain: it does not resolve.",
-  "server transfer prohibited":
-    "Registry lock against transfers (often a paid registry lock).",
-  "server delete prohibited": "Registry lock against deletion.",
-  "server update prohibited": "Registry lock against changes.",
-  "server renew prohibited": "The registry blocks renewal.",
-  "server hold":
-    "The registry has suspended the domain: it does not resolve. Usually a dispute or compliance issue.",
+  inactive: "No nameservers delegated: the domain does not resolve.",
+  locked: "Locked by the registry.",
+  ok: "No restrictions.",
   "pending create": "Registration in progress.",
   "pending delete": "Being deleted; it will become available soon.",
   "pending renew": "Renewal in progress.",
@@ -327,50 +341,52 @@ export const STATUS_MEANING: Record<string, string> = {
   "pending update": "A change is being processed.",
   "redemption period":
     "Expired and deleted by the registrar; the owner can still restore it for a fee.",
-  "add period": "Registered within the last few days.",
-  "auto renew period":
-    "Auto-renewed by the registry; the registrar can still reverse it.",
   "renew period": "Renewed within the last few days.",
+  "server delete prohibited": "Registry lock against deletion.",
+  "server hold":
+    "The registry has suspended the domain: it does not resolve. Usually a dispute or compliance issue.",
+  "server renew prohibited": "The registry blocks renewal.",
+  "server transfer prohibited":
+    "Registry lock against transfers (often a paid registry lock).",
+  "server update prohibited": "Registry lock against changes.",
   "transfer period": "Transferred within the last few days.",
-  locked: "Locked by the registry.",
-  associated: "Associated with other objects.",
 };
 
 const STATUS_LEVEL: Record<string, Verdict> = {
-  inactive: "fail",
-  "client hold": "fail",
-  "server hold": "fail",
-  "pending delete": "fail",
-  "redemption period": "fail",
-  "pending transfer": "warn",
   "auto renew period": "warn",
+  "client hold": "fail",
+  inactive: "fail",
+  "pending delete": "fail",
+  "pending transfer": "warn",
+  "redemption period": "fail",
+  "server hold": "fail",
 };
 
-function eventDate(events: RdapEvent[], action: string): Date | null {
+const eventDate = (events: RdapEvent[], action: string): Date | null => {
   const e = events.find((x) => x.action === action);
   if (!e) {
     return null;
   }
   const d = new Date(e.date);
   return Number.isNaN(d.getTime()) ? null : d;
-}
+};
 
-function isoDay(d: Date): string {
-  return d.toISOString().slice(0, 10);
-}
+const isoDay = (d: Date): string => d.toISOString().slice(0, 10);
 
-export interface DomainReport {
-  verdict: Verdict;
-  info: DomainInfo;
-  findings: Finding[];
-}
+const RANK: Record<Verdict, number> = { fail: 3, none: 0, ok: 1, warn: 2 };
 
-/** Findings for a domain: expiry, status, DNSSEC, and how the registry delegation compares with the zone's own NS set. */
-export function judgeDomain(
-  info: DomainInfo,
-  zoneNameservers: string[] | null,
-  now = new Date()
-): DomainReport {
+const worstOf = (findings: Finding[]): Verdict => {
+  let verdict: Verdict = "none";
+  for (const f of findings) {
+    if (RANK[f.level] > RANK[verdict]) {
+      verdict = f.level;
+    }
+  }
+  return verdict;
+};
+
+/** Age at the registry, the expiry date and how near it is, and the last change. */
+const dateFindings = (info: DomainInfo, now: Date): Finding[] => {
   const findings: Finding[] = [];
   const day = 86_400_000;
   const registered = eventDate(info.events, "registration");
@@ -419,6 +435,22 @@ export function judgeDomain(
       text: `Last changed ${isoDay(changed)}.`,
     });
   }
+  return findings;
+};
+
+export interface DomainReport {
+  verdict: Verdict;
+  info: DomainInfo;
+  findings: Finding[];
+}
+
+/** Findings for a domain: expiry, status, DNSSEC, and how the registry delegation compares with the zone's own NS set. */
+export const judgeDomain = (
+  info: DomainInfo,
+  zoneNameservers: string[] | null,
+  now = new Date()
+): DomainReport => {
+  const findings = dateFindings(info, now);
   for (const s of info.status) {
     const key = s.toLowerCase();
     const level = STATUS_LEVEL[key] ?? "none";
@@ -447,7 +479,7 @@ export function judgeDomain(
   if (zoneNameservers && info.nameservers.length) {
     const reg = new Set(info.nameservers);
     const zone = new Set(
-      zoneNameservers.map((n) => n.toLowerCase().replace(/\.$/, ""))
+      zoneNameservers.map((n) => n.toLowerCase().replace(/\.$/u, ""))
     );
     const onlyRegistry = [...reg].filter((n) => !zone.has(n));
     const onlyZone = [...zone].filter((n) => !reg.has(n));
@@ -469,16 +501,8 @@ export function judgeDomain(
       });
     }
   }
-  return { verdict: worstOf(findings), info, findings };
-}
-
-function worstOf(findings: Finding[]): Verdict {
-  const rank: Record<Verdict, number> = { none: 0, ok: 1, warn: 2, fail: 3 };
-  return findings.reduce<Verdict>(
-    (v, f) => (rank[f.level] > rank[v] ? f.level : v),
-    "none"
-  );
-}
+  return { findings, info, verdict: worstOf(findings) };
+};
 
 // ---- fetching ----
 
@@ -487,10 +511,10 @@ export type RdapFetch = (
 ) => Promise<{ status: number; json: unknown }>;
 
 /** GET with the RDAP media type. Status 0 means the browser could not read the response (CORS or network). */
-export async function rdapFetch(
+export const rdapFetch = async (
   url: string,
   signal: AbortSignal
-): Promise<{ status: number; json: unknown }> {
+): Promise<{ status: number; json: unknown }> => {
   let res: Response;
   try {
     res = await fetch(url, {
@@ -501,7 +525,7 @@ export async function rdapFetch(
     if (signal.aborted) {
       throw error;
     }
-    return { status: 0, json: null };
+    return { json: null, status: 0 };
   }
   let json: unknown = null;
   try {
@@ -509,16 +533,16 @@ export async function rdapFetch(
   } catch {
     /* not JSON, status tells the story */
   }
-  return { status: res.status, json };
-}
+  return { json, status: res.status };
+};
 
 const bootstrapCache = new Map<string, Promise<Bootstrap>>();
 
 /** IANA bootstrap files change rarely; fetch each once per page load. */
-export function loadBootstrap(
+export const loadBootstrap = (
   url: string,
   fetcher: RdapFetch
-): Promise<Bootstrap> {
+): Promise<Bootstrap> => {
   let p = bootstrapCache.get(url);
   if (!p) {
     p = fetcher(url).then(({ status, json }) => {
@@ -534,9 +558,9 @@ export function loadBootstrap(
     bootstrapCache.set(url, p);
   }
   return p;
-}
+};
 
-export function explainStatus(status: number, what: string): string {
+export const explainStatus = (status: number, what: string): string => {
   if (status === 0) {
     return `The registry's RDAP server did not let the browser read the answer for ${
       what
@@ -546,15 +570,32 @@ export function explainStatus(status: number, what: string): string {
     return "The registry's RDAP server is rate limiting; try again in a minute.";
   }
   return `The registry's RDAP server answered HTTP ${status} for ${what}.`;
-}
+};
 
 /** IANA's page for a TLD, which names its WHOIS server when there is no RDAP. */
-export function ianaTldPage(name: string): string {
-  return `https://www.iana.org/domains/root/db/${name
-    .split(".")
-    .pop()!
-    .toLowerCase()}.html`;
-}
+export const ianaTldPage = (name: string): string =>
+  `https://www.iana.org/domains/root/db/${tldOf(name).toLowerCase()}.html`;
+
+/**
+ * Registries that run RDAP but are missing from IANA's bootstrap file, checked
+ * for CORS by hand. DENIC (.de) also runs one, without CORS, so it is not here.
+ */
+export const RDAP_SUPPLEMENT: Record<string, string> = {
+  ch: "https://rdap.nic.ch/",
+  io: "https://rdap.identitydigital.services/rdap/",
+  li: "https://rdap.nic.ch/",
+  pl: "https://rdap.dns.pl/",
+  us: "https://rdap.nic.us/",
+};
+
+/** IANA's bootstrap first, then the supplement. */
+export const dnsServiceWithSupplement = (
+  bootstrap: Bootstrap,
+  name: string
+): string | null =>
+  dnsService(bootstrap, name) ??
+  RDAP_SUPPLEMENT[tldOf(name).toLowerCase()] ??
+  null;
 
 export type DomainLookup =
   | { kind: "found"; info: DomainInfo; tried: string[] }
@@ -567,14 +608,14 @@ export type DomainLookup =
  * is retried as `example.co.uk` and so on until something answers or only
  * the TLD is left. That avoids bundling the public suffix list.
  */
-export async function lookupDomain(
+export const lookupDomain = async (
   name: string,
   bootstrap: Bootstrap,
   fetcher: RdapFetch
-): Promise<DomainLookup> {
+): Promise<DomainLookup> => {
   const base = dnsServiceWithSupplement(bootstrap, name);
   if (!base) {
-    return { kind: "no-rdap", tld: name.split(".").pop()! };
+    return { kind: "no-rdap", tld: tldOf(name) };
   }
   const labels = name.split(".");
   const tried: string[] = [];
@@ -584,7 +625,7 @@ export async function lookupDomain(
     const url = `${base}domain/${candidate}`;
     const { status, json } = await fetcher(url);
     if (status === 200) {
-      return { kind: "found", info: parseDomain(json, url), tried };
+      return { info: parseDomain(json, url), kind: "found", tried };
     }
     // 404 is "no such domain"; some registries (SWITCH) say 400 for a name with too many labels.
     if (status !== 404 && status !== 400) {
@@ -596,17 +637,17 @@ export async function lookupDomain(
     }
   }
   return { kind: "not-found", tried };
-}
+};
 
 export type IpLookup =
   | { kind: "found"; info: IpInfo }
   | { kind: "error"; message: string };
 
-export async function lookupIp(
+export const lookupIp = async (
   ip: string,
   bootstrap: Bootstrap,
   fetcher: RdapFetch
-): Promise<IpLookup> {
+): Promise<IpLookup> => {
   const base = ipService(bootstrap, ip);
   if (!base) {
     return {
@@ -619,34 +660,10 @@ export async function lookupIp(
   if (status !== 200) {
     return { kind: "error", message: explainStatus(status, ip) };
   }
-  return { kind: "found", info: parseIp(json, url) };
-}
-
-// ---- supplements and fallback ----
-
-/**
- * Registries that run RDAP but are missing from IANA's bootstrap file, checked
- * for CORS by hand. DENIC (.de) also runs one, without CORS, so it is not here.
- */
-export const RDAP_SUPPLEMENT: Record<string, string> = {
-  ch: "https://rdap.nic.ch/",
-  li: "https://rdap.nic.ch/",
-  pl: "https://rdap.dns.pl/",
-  us: "https://rdap.nic.us/",
-  io: "https://rdap.identitydigital.services/rdap/",
+  return { info: parseIp(json, url), kind: "found" };
 };
 
-/** IANA's bootstrap first, then the supplement. */
-export function dnsServiceWithSupplement(
-  bootstrap: Bootstrap,
-  name: string
-): string | null {
-  return (
-    dnsService(bootstrap, name) ??
-    RDAP_SUPPLEMENT[name.split(".").pop()!.toLowerCase()] ??
-    null
-  );
-}
+// ---- WHOIS fallback ----
 
 export type TextFetch = (
   url: string
@@ -666,47 +683,67 @@ export interface WhoisText {
   text: string;
 }
 
-function epochToIso(v: unknown): string | null {
-  const n =
-    typeof v === "number"
-      ? v
-      : typeof v === "string" && /^\d+$/.test(v)
-        ? Number(v)
-        : Number.NaN;
+/** The whois.vu proxy's fields, in the order the raw pane shows them, as declared above. */
+const whoisText = (w: WhoisText): WhoisText =>
+  inOrder(w, [
+    "domain",
+    "available",
+    "registrar",
+    "statuses",
+    "created",
+    "updated",
+    "expires",
+    "text",
+  ]);
+
+/** The proxy's "yes" / "no", or null when it said neither. */
+const availability = (v: unknown): boolean | null => {
+  if (v === "yes") {
+    return true;
+  }
+  return v === "no" ? false : null;
+};
+
+const epochToIso = (v: unknown): string | null => {
+  let n = Number.NaN;
+  if (typeof v === "number") {
+    n = v;
+  } else if (typeof v === "string" && /^\d+$/u.test(v)) {
+    n = Number(v);
+  }
   return Number.isFinite(n) && n > 0
     ? new Date(n * 1000).toISOString().slice(0, 10)
     : null;
-}
+};
 
 /** The whois.vu proxy's JSON: a few fields it parsed, and the registry's WHOIS output verbatim. */
-export function parseWhoisText(json: unknown): WhoisText {
+export const parseWhoisText = (json: unknown): WhoisText => {
   const j = json as Record<string, unknown>;
   if (!j || typeof j !== "object" || typeof j.whois !== "string") {
     throw new LookupError("The WHOIS proxy returned something unexpected.");
   }
-  return {
+  return whoisText({
+    available: availability(j.available),
+    created: epochToIso(j.created),
     domain: String(j.domain ?? j.ip ?? ""),
-    available:
-      j.available === "yes" ? true : j.available === "no" ? false : null,
+    expires: epochToIso(j.expires),
     registrar: typeof j.registrar === "string" ? j.registrar : "",
     statuses: Array.isArray(j.statuses)
       ? j.statuses.map(String).filter(Boolean)
       : [],
-    created: epochToIso(j.created),
-    updated: epochToIso(j.updated),
-    expires: epochToIso(j.expires),
     text: j.whois.replaceAll("\r\n", "\n").trim(),
-  };
-}
+    updated: epochToIso(j.updated),
+  });
+};
 
-export function judgeWhoisText(
+export const judgeWhoisText = (
   w: WhoisText,
   now = new Date()
-): { verdict: Verdict; findings: Finding[] } {
+): { verdict: Verdict; findings: Finding[] } => {
   const findings: Finding[] = [];
   if (w.available === true) {
     findings.push({ level: "none", text: "Not registered." });
-    return { verdict: "none", findings };
+    return { findings, verdict: "none" };
   }
   if (w.created) {
     findings.push({ level: "none", text: `Registered ${w.created}.` });
@@ -745,13 +782,13 @@ export function judgeWhoisText(
     level: "none",
     text: "Raw WHOIS via whois.vu, a third-party proxy; the registry's own output is shown below.",
   });
-  return { verdict: worstOf(findings), findings };
-}
+  return { findings, verdict: worstOf(findings) };
+};
 
-export async function lookupWhoisText(
+export const lookupWhoisText = async (
   name: string,
   fetcher: TextFetch
-): Promise<WhoisText> {
+): Promise<WhoisText> => {
   const { status, text } = await fetcher(
     WHOIS_FALLBACK_URL + encodeURIComponent(name)
   );
@@ -772,4 +809,4 @@ export async function lookupWhoisText(
     throw new LookupError("The WHOIS proxy (whois.vu) did not return JSON.");
   }
   return parseWhoisText(json);
-}
+};

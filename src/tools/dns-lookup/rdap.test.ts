@@ -25,23 +25,26 @@ const v4Boot = fixtures.rdap_bootstrap_ipv4 as unknown as Bootstrap;
 const v6Boot = fixtures.rdap_bootstrap_ipv6 as unknown as Bootstrap;
 
 /** A registry that answers 200 for the listed URLs, 404 otherwise, and records what was asked. */
-function registry(
+const registry = (
   answers: Record<string, unknown>,
   failWith?: number
-): RdapFetch & { calls: string[] } {
+): RdapFetch & { calls: string[] } => {
   const calls: string[] = [];
-  const fn = (async (url: string) => {
-    calls.push(url);
+  const answer = (url: string) => {
     if (failWith !== undefined) {
-      return { status: failWith, json: null };
+      return { json: null, status: failWith };
     }
     return url in answers
-      ? { status: 200, json: answers[url] }
-      : { status: 404, json: { errorCode: 404 } };
+      ? { json: answers[url], status: 200 }
+      : { json: { errorCode: 404 }, status: 404 };
+  };
+  const fn = ((url: string) => {
+    calls.push(url);
+    return Promise.resolve(answer(url));
   }) as RdapFetch & { calls: string[] };
   fn.calls = calls;
   return fn;
-}
+};
 
 describe("bootstrap", () => {
   test("TLD to registry, https preferred, trailing slash guaranteed", () => {
@@ -96,18 +99,18 @@ describe("parseDomain", () => {
     ]);
     expect(info.dnssec).toBe(true);
     expect(info.dsRecords).toBe(1);
-    expect(info.events.find((e) => e.action === "expiration")!.date).toBe(
+    expect(info.events.find((e) => e.action === "expiration")?.date).toBe(
       "2099-08-13T04:00:00Z"
     );
   });
   test("registrar and its abuse contact", () => {
-    expect(info.registrar!.name).toBe(
+    expect(info.registrar?.name).toBe(
       "RESERVED-Internet Assigned Numbers Authority"
     );
-    expect(info.registrar!.ianaId).toBe("376");
-    expect(info.registrar!.abuse).toEqual({
-      name: "Abuse Desk",
+    expect(info.registrar?.ianaId).toBe("376");
+    expect(info.registrar?.abuse).toEqual({
       email: "abuse@registrar.example",
+      name: "Abuse Desk",
       phone: "+1.5550100",
     });
     expect(info.registrant).toBeNull();
@@ -130,24 +133,21 @@ describe("parseIp", () => {
     expect(info.end).toBe("8.8.8.255");
     expect(info.name).toBe("GOGL");
     expect(info.type).toBe("DIRECT ALLOCATION");
-    expect(info.holder!.name).toBe("Google LLC");
-    expect(info.abuse!.email).toBe("network-abuse@google.com");
+    expect(info.holder?.name).toBe("Google LLC");
+    expect(info.abuse?.email).toBe("network-abuse@google.com");
   });
   test("prefers the organisation over RIPE maintainer objects", () => {
     const ripe = {
-      objectClassName: "ip network",
-      handle: "x",
-      startAddress: "2a00::",
       endAddress: "2a00::ff",
       entities: [
         {
-          roles: ["registrant"],
           handle: "MNT-EXAMPLE",
+          roles: ["registrant"],
           vcardArray: ["vcard", [["fn", {}, "text", "MNT-EXAMPLE"]]],
         },
         {
-          roles: ["registrant"],
           handle: "ORG-EX1-RIPE",
+          roles: ["registrant"],
           vcardArray: [
             "vcard",
             [
@@ -157,8 +157,11 @@ describe("parseIp", () => {
           ],
         },
       ],
+      handle: "x",
+      objectClassName: "ip network",
+      startAddress: "2a00::",
     };
-    expect(parseIp(ripe, "u").holder!.name).toBe("Example Org");
+    expect(parseIp(ripe, "u").holder?.name).toBe("Example Org");
   });
 });
 
@@ -207,12 +210,12 @@ describe("judgeDomain", () => {
     expect(r.verdict).toBe("fail");
     const mismatch = r.findings.find((f) =>
       f.text.startsWith("Nameservers at the registry differ")
-    )!;
-    expect(mismatch.level).toBe("warn");
-    expect(mismatch.text).toContain(
+    );
+    expect(mismatch?.level).toBe("warn");
+    expect(mismatch?.text).toContain(
       "only at the registry: elliott.ns.cloudflare.com, hera.ns.cloudflare.com"
     );
-    expect(mismatch.text).toContain("only in the zone: ns1.other.example");
+    expect(mismatch?.text).toContain("only in the zone: ns1.other.example");
     expect(
       r.findings.some(
         (f) => f.level === "fail" && f.text.startsWith("client hold")
@@ -226,7 +229,7 @@ describe("judgeDomain", () => {
   });
   test("unknown status and missing dates", () => {
     const r = judgeDomain(
-      { ...info, status: ["weird registry thing"], events: [], dnssec: null },
+      { ...info, dnssec: null, events: [], status: ["weird registry thing"] },
       null
     );
     expect(
@@ -256,10 +259,12 @@ describe("lookupDomain", () => {
     expect(reg.calls.length).toBe(3);
   });
   test("treats a 400 like a 404 while walking up", async () => {
-    const reg = (async (url: string) =>
-      url.endsWith("/domain/example.com")
-        ? { status: 200, json: fixtures.rdap_domain }
-        : { status: 400, json: null }) as RdapFetch;
+    const reg: RdapFetch = (url) =>
+      Promise.resolve(
+        url.endsWith("/domain/example.com")
+          ? { json: fixtures.rdap_domain, status: 200 }
+          : { json: null, status: 400 }
+      );
     const r = await lookupDomain("www.example.com", dnsBoot, reg);
     expect(r.kind).toBe("found");
   });
@@ -300,16 +305,28 @@ describe("lookupDomain", () => {
 
 describe("whois text fallback", () => {
   test("parses the proxy's fields and judges them", async () => {
-    const fetcher: TextFetch = async () => ({
-      status: 200,
-      text: JSON.stringify(fixtures.whois_text),
-    });
+    const fetcher: TextFetch = () =>
+      Promise.resolve({
+        status: 200,
+        text: JSON.stringify(fixtures.whois_text),
+      });
     const w = await lookupWhoisText("google.it", fetcher);
     expect(w.registrar).toBe("MarkMonitor International Limited");
     expect(w.created).toBe("1999-12-10");
     expect(w.expires).toBe("2099-04-21");
     expect(w.available).toBe(false);
     expect(w.text.startsWith("Domain:")).toBe(true);
+    // The raw pane shows the fields in this order.
+    expect(Object.keys(w)).toEqual([
+      "domain",
+      "available",
+      "registrar",
+      "statuses",
+      "created",
+      "updated",
+      "expires",
+      "text",
+    ]);
     const r = judgeWhoisText(w, new Date("2026-09-01"));
     expect(r.verdict).toBe("ok");
     expect(
@@ -319,18 +336,20 @@ describe("whois text fallback", () => {
   });
   test("unregistered and failures", async () => {
     const free = parseWhoisText({
-      domain: "x.de",
       available: "yes",
+      domain: "x.de",
       statuses: ["free"],
       whois: "Status: free",
     });
-    expect(judgeWhoisText(free).findings[0]!.text).toBe("Not registered.");
+    expect(judgeWhoisText(free).findings[0]?.text).toBe("Not registered.");
     await expect(
-      lookupWhoisText("x.de", async () => ({ status: 0, text: "" }))
-    ).rejects.toThrow(/could not be reached/);
+      lookupWhoisText("x.de", () => Promise.resolve({ status: 0, text: "" }))
+    ).rejects.toThrow(/could not be reached/u);
     await expect(
-      lookupWhoisText("x.de", async () => ({ status: 200, text: "<html>" }))
-    ).rejects.toThrow(/JSON/);
+      lookupWhoisText("x.de", () =>
+        Promise.resolve({ status: 200, text: "<html>" })
+      )
+    ).rejects.toThrow(/JSON/u);
     expect(() => parseWhoisText({ domain: "x" })).toThrow();
   });
 });
@@ -343,7 +362,7 @@ describe("lookupIp", () => {
     const r = await lookupIp("8.8.8.8", v4Boot, reg);
     expect(r.kind).toBe("found");
     if (r.kind === "found") {
-      expect(r.info.holder!.name).toBe("Google LLC");
+      expect(r.info.holder?.name).toBe("Google LLC");
     }
   });
   test("unclaimed space", async () => {

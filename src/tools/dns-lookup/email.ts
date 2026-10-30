@@ -2,6 +2,8 @@
 // the RFCs (7208, 7489, 6376, 8301) and the BIMI drafts. Network access is
 // injected so the checks are testable against a map of TXT records.
 
+import { asciiFold, inOrder } from "./dns";
+
 export type Verdict = "ok" | "warn" | "fail" | "none";
 
 export interface Finding {
@@ -17,7 +19,7 @@ export type TxtResolver = (name: string) => Promise<string[]>;
  * renders them quoted and chunked (`"abc" "def"`), Google unquoted and
  * already joined; either way the value is the concatenation.
  */
-export function unquoteTxt(data: string): string {
+export const unquoteTxt = (data: string): string => {
   const s = data.trim();
   if (!s.startsWith('"')) {
     return s;
@@ -33,8 +35,8 @@ export function unquoteTxt(data: string): string {
     while (i < s.length && s[i] !== '"') {
       if (s[i] === "\\") {
         const dec = s.slice(i + 1, i + 4);
-        if (/^\d{3}$/.test(dec)) {
-          out += String.fromCharCode(Number(dec));
+        if (/^\d{3}$/u.test(dec)) {
+          out += String.fromCodePoint(Number(dec));
           i += 4;
         } else {
           out += s[i + 1] ?? "";
@@ -48,15 +50,19 @@ export function unquoteTxt(data: string): string {
     i += 1;
   }
   return out;
-}
+};
 
-function worst(findings: Finding[], floor: Verdict = "ok"): Verdict {
-  const rank: Record<Verdict, number> = { none: 0, ok: 1, warn: 2, fail: 3 };
-  return findings.reduce(
-    (v, f) => (rank[f.level] > rank[v] ? f.level : v),
-    floor
-  );
-}
+const RANK: Record<Verdict, number> = { fail: 3, none: 0, ok: 1, warn: 2 };
+
+const worst = (findings: Finding[], floor: Verdict = "ok"): Verdict => {
+  let verdict = floor;
+  for (const f of findings) {
+    if (RANK[f.level] > RANK[verdict]) {
+      verdict = f.level;
+    }
+  }
+  return verdict;
+};
 
 // ---- SPF ----
 
@@ -71,6 +77,10 @@ export interface SpfReport {
   all: string | null;
   findings: Finding[];
 }
+
+// Each report's fields in the order the raw pane shows them, as declared above.
+const spfReport = (r: SpfReport): SpfReport =>
+  inOrder(r, ["verdict", "record", "records", "lookups", "all", "findings"]);
 
 /** Terms that cost a DNS lookup under RFC 7208 section 4.6.4. */
 const LOOKUP_MECHANISMS = new Set(["include", "a", "mx", "ptr", "exists"]);
@@ -89,9 +99,8 @@ const MODIFIERS = new Set(["redirect", "exp"]);
 /** Limit on the total number of records we chase through include/redirect; RFC caps lookups at 10 anyway. */
 export const SPF_MAX_FETCHES = 30;
 
-export function spfRecords(txts: string[]): string[] {
-  return txts.filter((t) => /^v=spf1(\s|$)/i.test(t));
-}
+export const spfRecords = (txts: string[]): string[] =>
+  txts.filter((t) => /^v=spf1(?:\s|$)/iu.test(asciiFold(t)));
 
 interface Term {
   qualifier: string;
@@ -101,37 +110,39 @@ interface Term {
   raw: string;
 }
 
-function parseTerms(record: string): Term[] {
-  return record
+const TERM =
+  /^(?<qualifier>[+\-~?]?)(?<name>[a-zA-Z0-9_-]+)(?:(?<sep>[:=/])(?<value>.*))?$/u;
+
+const parseTerms = (record: string): Term[] =>
+  record
     .trim()
-    .split(/\s+/)
+    .split(/\s+/u)
     .slice(1)
     .map((raw) => {
-      const m = raw.match(/^([+\-~?]?)([a-z0-9_-]+)(?:([:=/])(.*))?$/i);
-      if (!m) {
+      const groups = TERM.exec(raw)?.groups;
+      if (!groups) {
         return {
-          qualifier: "",
-          name: raw.toLowerCase(),
-          value: "",
           isModifier: false,
+          name: raw.toLowerCase(),
+          qualifier: "",
           raw,
+          value: "",
         };
       }
-      const isModifier = m[3] === "=";
+      const { qualifier, name, sep, value } = groups;
       return {
-        qualifier: m[1] || "+",
-        name: m[2]!.toLowerCase(),
-        value: m[4] ?? "",
-        isModifier,
+        isModifier: sep === "=",
+        name: name.toLowerCase(),
+        qualifier: qualifier || "+",
         raw,
+        value: value ?? "",
       };
     });
-}
 
-export async function checkSpf(
+export const checkSpf = async (
   domain: string,
   resolveTxt: TxtResolver
-): Promise<SpfReport> {
+): Promise<SpfReport> => {
   const findings: Finding[] = [];
   const records = spfRecords(await resolveTxt(domain));
   if (records.length === 0) {
@@ -139,14 +150,14 @@ export async function checkSpf(
       level: "fail",
       text: "No SPF record. Receivers cannot tell which servers may send mail for this domain.",
     });
-    return {
-      verdict: "fail",
-      record: null,
-      records,
-      lookups: 0,
+    return spfReport({
       all: null,
       findings,
-    };
+      lookups: 0,
+      record: null,
+      records,
+      verdict: "fail",
+    });
   }
   if (records.length > 1) {
     findings.push({
@@ -156,14 +167,63 @@ export async function checkSpf(
       } SPF records found; RFC 7208 requires exactly one, and receivers treat several as a permanent error.`,
     });
   }
-  const record = records[0]!;
-  const state = { lookups: 0, all: null as string | null };
+  const [record] = records;
+  const state = { all: null as string | null, lookups: 0 };
   // Records fetched so far: a domain included twice is counted twice (each
   // include is a lookup for the receiver) but only fetched once by us.
   const fetched = new Map<string, string[]>();
   const path = new Set<string>();
 
-  async function walk(rec: string, at: string, depth: number): Promise<void> {
+  /** The SPF record an include or redirect points at, or null (with a finding) when there is none to walk. */
+  const target = async (
+    to: string,
+    label: string
+  ): Promise<{ name: string; rec: string } | null> => {
+    const name = to.toLowerCase().replace(/\.$/u, "");
+    if (!name) {
+      findings.push({ level: "warn", text: `"${label}" has no domain.` });
+      return null;
+    }
+    if (path.has(name)) {
+      findings.push({
+        level: "warn",
+        text: `"${label}" loops back to a record already being evaluated.`,
+      });
+      return null;
+    }
+    let recs = fetched.get(name);
+    if (!recs) {
+      if (fetched.size >= SPF_MAX_FETCHES) {
+        return null;
+      }
+      recs = spfRecords(await resolveTxt(name));
+      fetched.set(name, recs);
+      if (recs.length === 0) {
+        findings.push({
+          level: "warn",
+          text: `"${
+            label
+          }" points at a domain with no SPF record, which receivers treat as a permanent error.`,
+        });
+      }
+    }
+    return recs.length === 0 ? null : { name, rec: recs[0] };
+  };
+
+  const walk = async (
+    rec: string,
+    at: string,
+    depth: number
+  ): Promise<void> => {
+    const follow = async (to: string, label: string) => {
+      const next = await target(to, label);
+      if (!next) {
+        return;
+      }
+      path.add(next.name);
+      await walk(next.rec, next.name, depth + 1);
+      path.delete(next.name);
+    };
     const terms = parseTerms(rec);
     let sawAll = false;
     for (const t of terms) {
@@ -183,7 +243,7 @@ export async function checkSpf(
         }
         if (t.name === "redirect") {
           state.lookups += 1;
-          await follow(t.value, `redirect=${t.value}`, depth);
+          await follow(t.value, `redirect=${t.value}`);
         }
         continue;
       }
@@ -213,51 +273,10 @@ export async function checkSpf(
         });
       }
       if (t.name === "include") {
-        await follow(t.value, `include:${t.value}`, depth);
+        await follow(t.value, `include:${t.value}`);
       }
     }
-  }
-
-  async function follow(
-    target: string,
-    label: string,
-    depth: number
-  ): Promise<void> {
-    const name = target.toLowerCase().replace(/\.$/, "");
-    if (!name) {
-      findings.push({ level: "warn", text: `"${label}" has no domain.` });
-      return;
-    }
-    if (path.has(name)) {
-      findings.push({
-        level: "warn",
-        text: `"${label}" loops back to a record already being evaluated.`,
-      });
-      return;
-    }
-    let recs = fetched.get(name);
-    if (!recs) {
-      if (fetched.size >= SPF_MAX_FETCHES) {
-        return;
-      }
-      recs = spfRecords(await resolveTxt(name));
-      fetched.set(name, recs);
-      if (recs.length === 0) {
-        findings.push({
-          level: "warn",
-          text: `"${
-            label
-          }" points at a domain with no SPF record, which receivers treat as a permanent error.`,
-        });
-      }
-    }
-    if (recs.length === 0) {
-      return;
-    }
-    path.add(name);
-    await walk(recs[0]!, name, depth + 1);
-    path.delete(name);
-  }
+  };
 
   path.add(domain);
   await walk(record, domain, 0);
@@ -306,8 +325,15 @@ export async function checkSpf(
       text: `${lookups} of the 10 allowed DNS lookups used.`,
     });
   }
-  return { verdict: worst(findings), record, records, lookups, all, findings };
-}
+  return spfReport({
+    all,
+    findings,
+    lookups,
+    record,
+    records,
+    verdict: worst(findings),
+  });
+};
 
 // ---- DMARC ----
 
@@ -319,11 +345,13 @@ export interface DmarcReport {
   findings: Finding[];
 }
 
-export function dmarcRecords(txts: string[]): string[] {
-  return txts.filter((t) => /^v=DMARC1(\s*;|\s|$)/i.test(t));
-}
+const dmarcReport = (r: DmarcReport): DmarcReport =>
+  inOrder(r, ["verdict", "record", "records", "tags", "findings"]);
 
-export function parseTags(record: string): Record<string, string> {
+export const dmarcRecords = (txts: string[]): string[] =>
+  txts.filter((t) => /^v=DMARC1(?:\s*;|\s|$)/iu.test(t));
+
+export const parseTags = (record: string): Record<string, string> => {
   const tags: Record<string, string> = {};
   for (const part of record.split(";")) {
     const eq = part.indexOf("=");
@@ -336,37 +364,11 @@ export function parseTags(record: string): Record<string, string> {
     }
   }
   return tags;
-}
+};
 
-export async function checkDmarc(
-  domain: string,
-  resolveTxt: TxtResolver
-): Promise<DmarcReport> {
+/** What a DMARC record's tags say: the policies, the pct, the reporting address, and the alignment modes. */
+const dmarcPolicyFindings = (tags: Record<string, string>): Finding[] => {
   const findings: Finding[] = [];
-  const records = dmarcRecords(await resolveTxt(`_dmarc.${domain}`));
-  if (records.length === 0) {
-    findings.push(
-      {
-        level: "fail",
-        text: `No DMARC record at _dmarc.${
-          domain
-        }. Without it SPF and DKIM results are not enforced and no reports are sent.`,
-      },
-      {
-        level: "none",
-        text: "If this is a subdomain, the parent domain's DMARC policy applies instead.",
-      }
-    );
-    return { verdict: "fail", record: null, records, tags: {}, findings };
-  }
-  if (records.length > 1) {
-    findings.push({
-      level: "fail",
-      text: `${records.length} DMARC records found; receivers ignore all of them.`,
-    });
-  }
-  const record = records[0]!;
-  const tags = parseTags(record);
   const p = (tags.p ?? "").toLowerCase();
   if (!p) {
     findings.push({
@@ -430,8 +432,53 @@ export async function checkDmarc(
     level: "none",
     text: `Alignment: DKIM ${adkim}, SPF ${aspf}.`,
   });
-  return { verdict: worst(findings), record, records, tags, findings };
-}
+  return findings;
+};
+
+export const checkDmarc = async (
+  domain: string,
+  resolveTxt: TxtResolver
+): Promise<DmarcReport> => {
+  const findings: Finding[] = [];
+  const records = dmarcRecords(await resolveTxt(`_dmarc.${domain}`));
+  if (records.length === 0) {
+    findings.push(
+      {
+        level: "fail",
+        text: `No DMARC record at _dmarc.${
+          domain
+        }. Without it SPF and DKIM results are not enforced and no reports are sent.`,
+      },
+      {
+        level: "none",
+        text: "If this is a subdomain, the parent domain's DMARC policy applies instead.",
+      }
+    );
+    return dmarcReport({
+      findings,
+      record: null,
+      records,
+      tags: {},
+      verdict: "fail",
+    });
+  }
+  if (records.length > 1) {
+    findings.push({
+      level: "fail",
+      text: `${records.length} DMARC records found; receivers ignore all of them.`,
+    });
+  }
+  const [record] = records;
+  const tags = parseTags(record);
+  findings.push(...dmarcPolicyFindings(tags));
+  return dmarcReport({
+    findings,
+    record,
+    records,
+    tags,
+    verdict: worst(findings),
+  });
+};
 
 // ---- DKIM ----
 
@@ -450,6 +497,19 @@ export interface DkimKey {
   verdict: Verdict;
 }
 
+const dkimKey = (k: DkimKey): DkimKey =>
+  inOrder(k, [
+    "selector",
+    "selectors",
+    "record",
+    "tags",
+    "keyType",
+    "bits",
+    "revoked",
+    "findings",
+    "verdict",
+  ]);
+
 export interface DkimReport {
   verdict: Verdict;
   keys: DkimKey[];
@@ -457,6 +517,9 @@ export interface DkimReport {
   probed: number;
   findings: Finding[];
 }
+
+const dkimReport = (r: DkimReport): DkimReport =>
+  inOrder(r, ["verdict", "keys", "probed", "findings"]);
 
 /** Selectors used by common mail providers and their documentation defaults; the user can probe any other. */
 export const DKIM_SELECTORS = [
@@ -513,35 +576,44 @@ export const DKIM_SELECTORS = [
   "dkimkey",
 ];
 
-function base64Bytes(b64: string): Uint8Array | null {
+const base64Bytes = (b64: string): Uint8Array | null => {
   try {
-    const clean = b64.replaceAll(/\s+/g, "");
-    if (!/^[A-Za-z0-9+/]*={0,2}$/.test(clean)) {
+    const clean = b64.replaceAll(/\s+/gu, "");
+    if (!/^[A-Za-z0-9+/]*={0,2}$/u.test(clean)) {
       return null;
     }
     const bin = atob(clean);
-    return Uint8Array.from(bin, (c) => c.charCodeAt(0));
+    // atob gives one character per byte, each below 256.
+    return Uint8Array.from(bin, (c) => c.codePointAt(0) ?? 0);
   } catch {
     return null;
   }
-}
+};
 
 /** Reads one DER TLV at `pos`: returns [tag, contents start, contents length]. */
-function der(bytes: Uint8Array, pos: number): [number, number, number] | null {
+const der = (
+  bytes: Uint8Array,
+  pos: number
+): [number, number, number] | null => {
   if (pos + 2 > bytes.length) {
     return null;
   }
-  const tag = bytes[pos]!;
-  let len = bytes[pos + 1]!;
+  const tag = bytes[pos];
+  let len = bytes[pos + 1];
   let start = pos + 2;
-  if (len & 0x80) {
-    const n = len & 0x7f;
+  // Long form: the length byte's high bit is set and its low seven bits count the big-endian length bytes after it.
+  if (len >= 0x80) {
+    const n = len - 0x80;
     if (n === 0 || n > 4 || start + n > bytes.length) {
       return null;
     }
     len = 0;
     for (let i = 0; i < n; i += 1) {
-      len = (len << 8) | bytes[start + i]!;
+      len = len * 256 + bytes[start + i];
+    }
+    // Four bytes at 0x80000000 and up read as a negative 32-bit number.
+    if (len >= 2 ** 31) {
+      len -= 2 ** 32;
     }
     start += n;
   }
@@ -549,13 +621,13 @@ function der(bytes: Uint8Array, pos: number): [number, number, number] | null {
     return null;
   }
   return [tag, start, len];
-}
+};
 
 /**
  * RSA modulus size from a SubjectPublicKeyInfo (what DKIM's `p=` holds):
  * SEQUENCE { SEQUENCE { OID, NULL }, BIT STRING { SEQUENCE { INTEGER modulus, INTEGER exponent } } }.
  */
-export function rsaBits(spki: Uint8Array): number | null {
+export const rsaBits = (spki: Uint8Array): number | null => {
   const outer = der(spki, 0);
   if (!outer || outer[0] !== 0x30) {
     return null;
@@ -577,8 +649,7 @@ export function rsaBits(spki: Uint8Array): number | null {
   if (!modulus || modulus[0] !== 0x02) {
     return null;
   }
-  let start = modulus[1];
-  let len = modulus[2];
+  let [, start, len] = modulus;
   while (len > 0 && spki[start] === 0) {
     start += 1;
     len -= 1;
@@ -586,22 +657,24 @@ export function rsaBits(spki: Uint8Array): number | null {
   if (len === 0) {
     return null;
   }
-  return (len - 1) * 8 + (32 - Math.clz32(spki[start]!));
-}
+  return (len - 1) * 8 + (32 - Math.clz32(spki[start]));
+};
 
-export function dkimRecords(txts: string[]): string[] {
-  // A key record must have p=; v=DKIM1 is optional but, when present, must come first.
-  return txts.filter((t) => {
+// A key record must have p=; v=DKIM1 is optional but, when present, must come first.
+export const dkimRecords = (txts: string[]): string[] =>
+  txts.filter((t) => {
     const tags = parseTags(t);
-    return "p" in tags && (!("v" in tags) || /^v=DKIM1\s*(;|$)/i.test(t));
+    return (
+      "p" in tags &&
+      (!("v" in tags) || /^v=DKIM1\s*(?:;|$)/iu.test(asciiFold(t)))
+    );
   });
-}
 
-export function evaluateDkimKey(selector: string, record: string): DkimKey {
+export const evaluateDkimKey = (selector: string, record: string): DkimKey => {
   const findings: Finding[] = [];
   const tags = parseTags(record);
   const keyType = (tags.k ?? "rsa").toLowerCase();
-  const p = (tags.p ?? "").replaceAll(/\s+/g, "");
+  const p = (tags.p ?? "").replaceAll(/\s+/gu, "");
   const revoked = p === "";
   let bits: number | null = null;
   if (revoked) {
@@ -675,31 +748,31 @@ export function evaluateDkimKey(selector: string, record: string): DkimKey {
       text: `Hash algorithms restricted to ${tags.h}.`,
     });
   }
-  return {
+  return dkimKey({
+    bits,
+    findings,
+    keyType,
+    record,
+    revoked,
     selector,
     selectors: [selector],
-    record,
     tags,
-    keyType,
-    bits,
-    revoked,
-    findings,
     verdict: worst(findings),
-  };
-}
+  });
+};
 
-export async function checkDkimSelector(
+export const checkDkimSelector = async (
   domain: string,
   selector: string,
   resolveTxt: TxtResolver
-): Promise<DkimKey | null> {
+): Promise<DkimKey | null> => {
   const recs = dkimRecords(
     await resolveTxt(`${selector}._domainkey.${domain}`)
   );
   if (recs.length === 0) {
     return null;
   }
-  const key = evaluateDkimKey(selector, recs[0]!);
+  const key = evaluateDkimKey(selector, recs[0]);
   if (recs.length > 1) {
     key.findings.unshift({
       level: "fail",
@@ -709,10 +782,10 @@ export async function checkDkimSelector(
     });
   }
   return key;
-}
+};
 
 /** Identical records at several selectors come from one wildcard `*._domainkey` record; show it once. */
-export function collapseWildcard(keys: DkimKey[]): DkimKey[] {
+export const collapseWildcard = (keys: DkimKey[]): DkimKey[] => {
   const byRecord = new Map<string, DkimKey>();
   for (const k of keys) {
     const seen = byRecord.get(k.record);
@@ -735,7 +808,7 @@ export function collapseWildcard(keys: DkimKey[]): DkimKey[] {
     });
   }
   return [...byRecord.values()];
-}
+};
 
 /** Runs `fn` over the selectors with at most `limit` in flight. Injected rather than imported so the caller controls concurrency. */
 export type Runner = <T, R>(
@@ -743,12 +816,12 @@ export type Runner = <T, R>(
   fn: (item: T) => Promise<R>
 ) => Promise<R[]>;
 
-export async function checkDkim(
+export const checkDkim = async (
   domain: string,
   resolveTxt: TxtResolver,
   run: Runner,
   selectors = DKIM_SELECTORS
-): Promise<DkimReport> {
+): Promise<DkimReport> => {
   const results = await run(selectors, (sel) =>
     checkDkimSelector(domain, sel, resolveTxt)
   );
@@ -763,7 +836,12 @@ export async function checkDkim(
         selectors.length
       } common selectors. DKIM may still be set up under a selector this check does not guess; look one up below.`,
     });
-    return { verdict: "none", keys, probed: selectors.length, findings };
+    return dkimReport({
+      findings,
+      keys,
+      probed: selectors.length,
+      verdict: "none",
+    });
   }
   const live = keys.filter((k) => !k.revoked);
   if (live.length === 0) {
@@ -776,13 +854,13 @@ export async function checkDkim(
       } found: ${live.map((k) => k.selector).join(", ")}.`,
     });
   }
-  return {
-    verdict: worst(findings, "ok"),
+  return dkimReport({
+    findings,
     keys,
     probed: selectors.length,
-    findings,
-  };
-}
+    verdict: worst(findings, "ok"),
+  });
+};
 
 // ---- MX ----
 
@@ -792,15 +870,24 @@ export interface MxReport {
   findings: Finding[];
 }
 
-export function parseMx(data: string[]): { priority: number; host: string }[] {
-  return data
-    .map((d) => d.trim().match(/^(\d+)\s+(\S+)$/))
-    .filter((m): m is RegExpMatchArray => m !== null)
-    .map((m) => ({ priority: Number(m[1]), host: m[2]!.replace(/\.$/, "") }))
-    .toSorted((a, b) => a.priority - b.priority || (a.host < b.host ? -1 : 1));
-}
+const mxReport = (r: MxReport): MxReport =>
+  inOrder(r, ["verdict", "hosts", "findings"]);
 
-export function evaluateMx(data: string[]): MxReport {
+const MX_DATA = /^(?<priority>\d+)\s+(?<host>\S+)$/u;
+
+export const parseMx = (data: string[]): { priority: number; host: string }[] =>
+  data
+    .map((d) => MX_DATA.exec(d.trim())?.groups)
+    .filter((g) => g !== undefined)
+    .map((g) =>
+      inOrder(
+        { host: g.host.replace(/\.$/u, ""), priority: Number(g.priority) },
+        ["priority", "host"]
+      )
+    )
+    .toSorted((a, b) => a.priority - b.priority || (a.host < b.host ? -1 : 1));
+
+export const evaluateMx = (data: string[]): MxReport => {
   const hosts = parseMx(data);
   const findings: Finding[] = [];
   if (hosts.length === 0) {
@@ -808,7 +895,7 @@ export function evaluateMx(data: string[]): MxReport {
       level: "warn",
       text: "No MX records: mail is delivered to the domain's A/AAAA address, if any.",
     });
-  } else if (hosts.length === 1 && hosts[0]!.host === "") {
+  } else if (hosts.length === 1 && hosts[0].host === "") {
     findings.push({
       level: "none",
       text: 'Null MX ("0 ."): this domain declares that it does not receive mail (RFC 7505).',
@@ -819,8 +906,8 @@ export function evaluateMx(data: string[]): MxReport {
       text: `${hosts.length} mail exchanger${hosts.length === 1 ? "" : "s"}.`,
     });
   }
-  return { verdict: worst(findings, "none"), hosts, findings };
-}
+  return mxReport({ findings, hosts, verdict: worst(findings, "none") });
+};
 
 // ---- BIMI ----
 
@@ -836,6 +923,9 @@ export interface AssetReport {
   findings: Finding[];
 }
 
+const assetReport = (r: AssetReport): AssetReport =>
+  inOrder(r, ["url", "state", "findings"]);
+
 export interface BimiReport {
   verdict: Verdict;
   record: string | null;
@@ -848,15 +938,28 @@ export interface BimiReport {
   findings: Finding[];
 }
 
-export function bimiRecords(txts: string[]): string[] {
-  return txts.filter((t) => /^v=BIMI1(\s*;|\s|$)/i.test(t));
-}
+const bimiReport = (r: BimiReport): BimiReport =>
+  inOrder(r, [
+    "verdict",
+    "record",
+    "records",
+    "tags",
+    "logoUrl",
+    "logo",
+    "certificate",
+    "findings",
+  ]);
+
+export const bimiRecords = (txts: string[]): string[] =>
+  txts.filter((t) => /^v=BIMI1(?:\s*;|\s|$)/iu.test(t));
 
 /** Whether a DMARC record meets BIMI's enforcement requirement: quarantine or reject, for the whole domain, all of the time. */
-export function dmarcEnforces(tags: Record<string, string>): {
+export const dmarcEnforces = (
+  tags: Record<string, string>
+): {
   ok: boolean;
   why: string;
-} {
+} => {
   const p = (tags.p ?? "").toLowerCase();
   const sp = (tags.sp ?? "").toLowerCase();
   if (p !== "quarantine" && p !== "reject") {
@@ -885,7 +988,7 @@ export function dmarcEnforces(tags: Record<string, string>): {
     ok: true,
     why: `DMARC enforces p=${p}${sp ? `, sp=${sp}` : ""}.`,
   };
-}
+};
 
 const SVG_FORBIDDEN = [
   "script",
@@ -901,64 +1004,67 @@ const SVG_FORBIDDEN = [
 ];
 
 /** Judges a fetched logo against the SVG Tiny Portable/Secure profile, as far as text inspection allows. */
-export function judgeLogo(url: string, body: string): AssetReport {
+export const judgeLogo = (url: string, body: string): AssetReport => {
   const findings: Finding[] = [];
-  const svgTag = body.match(/<svg\b[^>]*>/i);
+  // Tag and attribute names are matched regardless of ASCII case.
+  const markup = asciiFold(body);
+  const svgTag = /<svg\b[^>]*>/iu.exec(markup);
   if (!svgTag) {
     findings.push({ level: "fail", text: "The logo is not an SVG document." });
-    return { url, state: "fail", findings };
+    return assetReport({ findings, state: "fail", url });
   }
-  const attrs = svgTag[0];
-  if (!/baseProfile\s*=\s*["']tiny-ps["']/i.test(attrs)) {
+  const [attrs] = svgTag;
+  if (!/baseProfile\s*=\s*["']tiny-ps["']/iu.test(attrs)) {
     findings.push({
       level: "fail",
       text: 'Missing baseProfile="tiny-ps"; mail clients require the SVG Tiny Portable/Secure profile.',
     });
   }
-  if (!/version\s*=\s*["']1\.2["']/i.test(attrs)) {
+  if (!/version\s*=\s*["']1\.2["']/iu.test(attrs)) {
     findings.push({
       level: "warn",
       text: 'The profile expects version="1.2" on the svg element.',
     });
   }
-  if (!/<title\b[^>]*>[^<]+<\/title>/i.test(body)) {
+  if (!/<title\b[^>]*>[^<]+<\/title>/iu.test(markup)) {
     findings.push({
       level: "fail",
       text: "Missing <title>; the profile requires one.",
     });
   }
   for (const el of SVG_FORBIDDEN) {
-    if (new RegExp(`<${el}\\b`, "i").test(body)) {
+    if (new RegExp(`<${el}\\b`, "iu").test(markup)) {
       findings.push({
         level: "fail",
         text: `Contains <${el}>, which the profile forbids.`,
       });
     }
   }
-  if (/\b(?:xlink:)?href\s*=\s*["'](?!#)/i.test(body)) {
+  if (/\b(?:xlink:)?href\s*=\s*["'](?!#)/iu.test(markup)) {
     findings.push({
       level: "fail",
       text: "References an external resource; the profile forbids anything outside the file.",
     });
   }
-  if (/\bon[a-z]+\s*=/i.test(attrs) || /<[^>]+\bon[a-z]+\s*=/i.test(body)) {
+  if (/\bon[a-z]+\s*=/iu.test(attrs) || /<[^>]+\bon[a-z]+\s*=/iu.test(markup)) {
     findings.push({
       level: "fail",
       text: "Contains event handler attributes.",
     });
   }
-  const viewBox = attrs.match(
-    /viewBox\s*=\s*["']\s*[\d.-]+[\s,]+[\d.-]+[\s,]+([\d.]+)[\s,]+([\d.]+)\s*["']/i
-  );
+  const viewBox =
+    /viewBox\s*=\s*["']\s*[\d.-]+[\s,]+[\d.-]+[\s,]+(?<width>[\d.]+)[\s,]+(?<height>[\d.]+)\s*["']/iu.exec(
+      attrs
+    )?.groups;
   if (
     viewBox &&
-    Math.abs(Number(viewBox[1]) - Number(viewBox[2])) >
-      0.01 * Math.max(Number(viewBox[1]), Number(viewBox[2]))
+    Math.abs(Number(viewBox.width) - Number(viewBox.height)) >
+      0.01 * Math.max(Number(viewBox.width), Number(viewBox.height))
   ) {
     findings.push({
       level: "warn",
-      text: `The viewBox is not square (${viewBox[1]}×${
-        viewBox[2]
+      text: `The viewBox is not square (${viewBox.width}×${
+        viewBox.height
       }); clients expect a square logo.`,
     });
   }
@@ -977,51 +1083,53 @@ export function judgeLogo(url: string, body: string): AssetReport {
       text: `SVG Tiny Portable/Secure checks pass (${bytes} bytes).`,
     });
   }
-  return {
-    url,
-    state: findings.some((f) => f.level === "fail") ? "fail" : "ok",
+  return assetReport({
     findings,
-  };
-}
+    state: findings.some((f) => f.level === "fail") ? "fail" : "ok",
+    url,
+  });
+};
 
-function derTime(bytes: Uint8Array, pos: number): Date | null {
+const UTC_TIME =
+  /^(?<year>\d{2})(?<month>\d{2})(?<day>\d{2})(?<hour>\d{2})(?<minute>\d{2})(?<second>\d{2})Z$/u;
+const GENERALIZED_TIME =
+  /^(?<year>\d{4})(?<month>\d{2})(?<day>\d{2})(?<hour>\d{2})(?<minute>\d{2})(?<second>\d{2})(?:\.\d+)?Z$/u;
+
+const derTime = (bytes: Uint8Array, pos: number): Date | null => {
   const t = der(bytes, pos);
   if (!t || (t[0] !== 0x17 && t[0] !== 0x18)) {
     return null;
   }
-  const text = String.fromCharCode(...bytes.subarray(t[1], t[1] + t[2]));
+  const text = String.fromCodePoint(...bytes.subarray(t[1], t[1] + t[2]));
   // UTCTime YYMMDDHHMMSSZ (RFC 5280: years 50-99 are 19xx), GeneralizedTime YYYYMMDDHHMMSSZ.
-  const m =
-    t[0] === 0x17
-      ? text.match(/^(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})Z$/)
-      : text.match(/^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})(?:\.\d+)?Z$/);
+  const m = (t[0] === 0x17 ? UTC_TIME : GENERALIZED_TIME).exec(text)?.groups;
   if (!m) {
     return null;
   }
   const year =
     t[0] === 0x17
-      ? (Number(m[1]) >= 50 ? 1900 : 2000) + Number(m[1])
-      : Number(m[1]);
+      ? (Number(m.year) >= 50 ? 1900 : 2000) + Number(m.year)
+      : Number(m.year);
   return new Date(
     Date.UTC(
       year,
-      Number(m[2]) - 1,
-      Number(m[3]),
-      Number(m[4]),
-      Number(m[5]),
-      Number(m[6])
+      Number(m.month) - 1,
+      Number(m.day),
+      Number(m.hour),
+      Number(m.minute),
+      Number(m.second)
     )
   );
-}
+};
 
 /** notBefore/notAfter of the first certificate in a PEM or DER blob, or null if it does not parse. */
-export function certValidity(
+export const certValidity = (
   pem: string
-): { notBefore: Date; notAfter: Date } | null {
+): { notBefore: Date; notAfter: Date } | null => {
   const b64 =
-    pem.match(
-      /-----BEGIN CERTIFICATE-----([\s\S]*?)-----END CERTIFICATE-----/
-    )?.[1] ?? pem;
+    /-----BEGIN CERTIFICATE-----(?<body>[\s\S]*?)-----END CERTIFICATE-----/u.exec(
+      pem
+    )?.groups?.body ?? pem;
   const bytes = base64Bytes(b64);
   if (!bytes) {
     return null;
@@ -1034,7 +1142,7 @@ export function certValidity(
   if (!tbs || tbs[0] !== 0x30) {
     return null;
   }
-  let pos = tbs[1];
+  let [, pos] = tbs;
   // tbsCertificate: [0] version (optional), serial, signature algorithm, issuer, validity, ...
   const first = der(bytes, pos);
   if (!first) {
@@ -1058,28 +1166,29 @@ export function certValidity(
   if (!notBefore) {
     return null;
   }
-  const nb = der(bytes, validity[1])!;
-  const notAfter = derTime(bytes, nb[1] + nb[2]);
+  // Read again for its length: derTime above has already found it.
+  const nb = der(bytes, validity[1]);
+  const notAfter = nb && derTime(bytes, nb[1] + nb[2]);
   if (!notAfter) {
     return null;
   }
-  return { notBefore, notAfter };
-}
+  return { notAfter, notBefore };
+};
 
-export function judgeCertificate(
+export const judgeCertificate = (
   url: string,
   body: string,
   now = new Date()
-): AssetReport {
+): AssetReport => {
   const findings: Finding[] = [];
-  if (!/-----BEGIN CERTIFICATE-----/.test(body)) {
+  if (!body.includes("-----BEGIN CERTIFICATE-----")) {
     findings.push({ level: "fail", text: "Not a PEM certificate file." });
-    return { url, state: "fail", findings };
+    return assetReport({ findings, state: "fail", url });
   }
   const validity = certValidity(body);
   if (!validity) {
     findings.push({ level: "fail", text: "The certificate does not parse." });
-    return { url, state: "fail", findings };
+    return assetReport({ findings, state: "fail", url });
   }
   const day = 86_400_000;
   const daysLeft = Math.floor(
@@ -1110,37 +1219,35 @@ export function judgeCertificate(
     level: "none",
     text: "Whether it is a Verified or Common Mark Certificate from an authorized CA is not checked here.",
   });
-  return {
-    url,
-    state: findings.some((f) => f.level === "fail") ? "fail" : "ok",
+  return assetReport({
     findings,
-  };
-}
+    state: findings.some((f) => f.level === "fail") ? "fail" : "ok",
+    url,
+  });
+};
 
-function httpsUrl(value: string): boolean {
+const httpsUrl = (value: string): boolean => {
   try {
     return new URL(value).protocol === "https:";
   } catch {
     return false;
   }
-}
+};
 
-async function fetchAsset(
+const fetchAsset = async (
   url: string,
   fetcher: AssetFetcher,
   what: string,
   judge: (url: string, body: string) => AssetReport
-): Promise<AssetReport> {
+): Promise<AssetReport> => {
   let res: { ok: boolean; status: number; body: string };
   try {
     res = await fetcher(url);
   } catch {
-    res = { ok: false, status: 0, body: "" };
+    res = { body: "", ok: false, status: 0 };
   }
   if (res.status === 0) {
-    return {
-      url,
-      state: "unreachable",
+    return assetReport({
       findings: [
         {
           level: "none",
@@ -1149,42 +1256,44 @@ async function fetchAsset(
           } could not be fetched from the browser (the server does not allow cross-origin reads); open it by hand to inspect it.`,
         },
       ],
-    };
+      state: "unreachable",
+      url,
+    });
   }
   if (!res.ok) {
-    return {
-      url,
-      state: "fail",
+    return assetReport({
       findings: [
         {
           level: "fail",
           text: `The ${what} URL answered HTTP ${res.status}.`,
         },
       ],
-    };
+      state: "fail",
+      url,
+    });
   }
   return judge(url, res.body);
-}
+};
 
-export async function checkBimi(
+export const checkBimi = async (
   domain: string,
   resolveTxt: TxtResolver,
   fetcher: AssetFetcher,
   dmarcTags: Record<string, string>,
   now = new Date()
-): Promise<BimiReport> {
+): Promise<BimiReport> => {
   const findings: Finding[] = [];
   const records = bimiRecords(await resolveTxt(`default._bimi.${domain}`));
-  const none: BimiReport = {
-    verdict: "none",
+  const none = bimiReport({
+    certificate: null,
+    findings,
+    logo: null,
+    logoUrl: null,
     record: null,
     records,
     tags: {},
-    logoUrl: null,
-    logo: null,
-    certificate: null,
-    findings,
-  };
+    verdict: "none",
+  });
   if (records.length === 0) {
     findings.push({
       level: "none",
@@ -1200,7 +1309,7 @@ export async function checkBimi(
       text: `${records.length} BIMI records found; receivers ignore all of them.`,
     });
   }
-  const record = records[0]!;
+  const [record] = records;
   const tags = parseTags(record);
   const l = tags.l ?? "";
   const a = tags.a ?? "";
@@ -1242,14 +1351,14 @@ export async function checkBimi(
     ...(logo?.findings ?? []),
     ...(certificate?.findings ?? []),
   ];
-  return {
-    verdict: worst(all),
+  return bimiReport({
+    certificate,
+    findings,
+    logo,
+    logoUrl: l && httpsUrl(l) ? l : null,
     record,
     records,
     tags,
-    logoUrl: l && httpsUrl(l) ? l : null,
-    logo,
-    certificate,
-    findings,
-  };
-}
+    verdict: worst(all),
+  });
+};
