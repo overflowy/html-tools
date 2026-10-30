@@ -291,7 +291,6 @@ const tool: Tool = {
     const setToc = (on: boolean) => {
       tocOpen = on;
       el.classList.toggle("toc-open", on);
-      tocBtn.classList.toggle("toggled", on);
       tocBtn.setAttribute("aria-pressed", String(on));
     };
 
@@ -560,7 +559,6 @@ const tool: Tool = {
     const applyLight = (on: boolean) => {
       light = on;
       previewPane.classList.toggle("light", on);
-      lightBtn.classList.toggle("toggled", on);
       lightBtn.setAttribute("aria-pressed", String(on));
       lightBtn.title = on ? "Dark document" : "Light document";
       render();
@@ -1248,7 +1246,6 @@ const tool: Tool = {
     // A drawer opened on load would cover the page; start closed there.
     setToc(read(TOC_KEY) !== "0" && !isDrawer());
     previewPane.classList.toggle("light", light);
-    lightBtn.classList.toggle("toggled", light);
     lightBtn.setAttribute("aria-pressed", String(light));
     if (!loadDraft()) {
       editor.value = welcome(MOD);

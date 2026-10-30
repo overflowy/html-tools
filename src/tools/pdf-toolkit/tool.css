@@ -120,10 +120,26 @@
   margin-top: 6px;
   font-size: 12.5px;
 }
-.tool-pdf-toolkit.dragging .empty-hint,
+/* The empty hint is a dashed box already: the drop line takes the place of
+   its 1px border, centred on it, rather than running inside it. */
+.tool-pdf-toolkit.dragging .empty-hint {
+  border-color: transparent;
+  outline: var(--drop-line);
+  outline-offset: -1.25px;
+}
+/* Laid over the pane, not its outline: the pages' scroller is positioned
+   and would paint over an outline. */
 .tool-pdf-toolkit.dragging .viewer {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
+  border-color: transparent;
+}
+.tool-pdf-toolkit.dragging .viewer::after {
+  content: "";
+  position: absolute;
+  inset: 2px;
+  z-index: 5;
+  border: var(--drop-line);
+  border-radius: calc(var(--radius-lg) - 2px);
+  pointer-events: none;
 }
 
 /* ---- password, progress, notes, errors ---- */
@@ -515,7 +531,6 @@
   gap: 6px;
   padding: 8px 6px 6px;
   border-radius: var(--radius-md);
-  border: 0.5px solid transparent;
   cursor: pointer;
   user-select: none;
   outline: none;
@@ -547,12 +562,24 @@
     background: var(--surface-2);
   }
 }
+/* Picked: the hover face, and the page number on an accent pill, which is
+   what tells it from hover. Not a step above hover: the corner actions are
+   that colour. The pill's padding is there while unpicked too, so picking
+   moves nothing. */
+.tool-pdf-toolkit .thumb .num {
+  padding: 0 6px;
+  border-radius: 999px;
+}
 .tool-pdf-toolkit .thumb.selected {
-  background: var(--accent-soft);
-  border-color: var(--accent);
+  background: var(--surface-2);
 }
 .tool-pdf-toolkit .thumb.selected .cap {
   color: var(--text);
+}
+.tool-pdf-toolkit .thumb.selected .num {
+  background: var(--accent);
+  color: #fff;
+  font-weight: 500;
 }
 .tool-pdf-toolkit .thumb:focus-visible {
   outline: var(--ring-line);
@@ -742,9 +769,15 @@
 .tool-pdf-toolkit .note-writing::placeholder {
   color: rgb(0 0 0 / 0.45);
 }
+/* The theme's ring, its halo laid over the slip's own shadow. */
 .tool-pdf-toolkit .note-writing:focus-visible {
-  outline: 2px solid rgb(201 100 66 / 0.6);
-  outline-offset: 1px;
+  outline: var(--ring-line);
+  outline-offset: -1px;
+  border-color: transparent;
+  box-shadow:
+    var(--ring-halo),
+    0 1px 2px rgb(0 0 0 / 0.12),
+    0 6px 20px rgb(0 0 0 / 0.22);
 }
 .tool-pdf-toolkit .mark-written text {
   white-space: pre;
@@ -868,13 +901,6 @@
 }
 .tool-pdf-toolkit .marks-head h3 {
   margin: 0;
-}
-/* A mode button that is on (Redact's Preview): tinted with the accent, hovered or not. */
-.tool-pdf-toolkit button.pressed,
-.tool-pdf-toolkit button.pressed:hover {
-  background: var(--accent-soft);
-  border-color: rgb(201 100 66 / 0.6);
-  color: var(--text);
 }
 .tool-pdf-toolkit .panel-body h4 {
   margin: 4px 0 0;
@@ -1000,8 +1026,8 @@
   background: var(--text-muted);
 }
 .tool-pdf-toolkit .positions button.active {
-  background: var(--accent-soft);
-  border-color: var(--accent);
+  background: var(--surface-3);
+  border-color: var(--border-strong);
 }
 .tool-pdf-toolkit .positions button.active span {
   background: var(--accent);

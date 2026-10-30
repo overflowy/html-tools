@@ -302,12 +302,12 @@ const tool: Tool = {
           <section class="block">
             <h2>Mode</h2>
             <div class="chips modality-chips">
-              ${TOGGLES.map(([t, label, title]) => `<button type="button" class="chip" data-toggle="${t}" aria-pressed="false" title="${title}">${label}</button>`).join("")}
+              ${TOGGLES.map(([t, label, title]) => `<button type="button" class="chip toggle" data-toggle="${t}" aria-pressed="false" title="${title}">${label}</button>`).join("")}
             </div>
             <div class="chips variant-chips">
-              <button type="button" class="chip" data-variant="variable" aria-pressed="false" title="Each trial shows how far back to compare, from 1 to N">Variable</button>
-              <button type="button" class="chip" data-variant="crab" aria-pressed="false" title="Within each block of N trials, look back 1, 3, 5…: each block is matched against the one before, reversed">Crab</button>
-              <button type="button" class="chip" data-variant="selfPaced" aria-pressed="false" title="Each trial waits for Enter">Self-paced</button>
+              <button type="button" class="chip toggle" data-variant="variable" aria-pressed="false" title="Each trial shows how far back to compare, from 1 to N">Variable</button>
+              <button type="button" class="chip toggle" data-variant="crab" aria-pressed="false" title="Within each block of N trials, look back 1, 3, 5…: each block is matched against the one before, reversed">Crab</button>
+              <button type="button" class="chip toggle" data-variant="selfPaced" aria-pressed="false" title="Each trial waits for Enter">Self-paced</button>
             </div>
             <div class="row">
               <span class="row-label">Objects</span>

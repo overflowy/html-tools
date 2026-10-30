@@ -36,23 +36,15 @@
   gap: 6px;
 }
 
-/* A chip is a toggle: its pressed state is the accent, not a check mark. */
+/* A chip is a Toggle (see theme.css), quieter while off. */
 .tool-file-hashes .algo {
   font-weight: 500;
   color: var(--text-muted);
   border-color: var(--border);
 }
-.tool-file-hashes .algo.on {
-  color: var(--text);
-  background: var(--accent-soft);
-  border-color: var(--accent);
-}
 @media (hover: hover) {
   .tool-file-hashes .algo:hover {
     color: var(--text);
-  }
-  .tool-file-hashes .algo.on:hover {
-    background: var(--accent-soft);
   }
 }
 
@@ -123,10 +115,17 @@
   font-size: 12.5px;
 }
 
-.tool-file-hashes.dragging .empty-hint,
+/* The empty hint is a dashed box already: the drop line takes the place of
+   its 1px border, centred on it, rather than running inside it. */
+.tool-file-hashes.dragging .empty-hint {
+  border-color: transparent;
+  outline: var(--drop-line);
+  outline-offset: -1.25px;
+}
 .tool-file-hashes.dragging .results {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
+  outline: var(--drop-line);
+  outline-offset: -2px;
+  border-color: transparent;
 }
 
 .tool-file-hashes .text-input {

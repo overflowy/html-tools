@@ -28,10 +28,9 @@
 }
 
 .tool-base64-to-image.dragging .b64-input {
-  outline: var(--ring-line);
-  outline-offset: -1px;
+  outline: var(--drop-line);
+  outline-offset: -2px;
   border-color: transparent;
-  box-shadow: var(--ring-halo);
 }
 
 .tool-base64-to-image .output {

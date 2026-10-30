@@ -211,7 +211,7 @@ const mount = (el: HTMLElement, ctx: ToolContext) => {
     const a = algorithmById(id);
     const b = document.createElement("button");
     b.type = "button";
-    b.className = "algo";
+    b.className = "algo toggle";
     b.dataset.id = id;
     b.textContent = a?.label ?? id;
     b.title = a?.note ?? "";
@@ -225,7 +225,6 @@ const mount = (el: HTMLElement, ctx: ToolContext) => {
   const syncChips = () => {
     for (const b of el.querySelectorAll<HTMLButtonElement>(".algo")) {
       const on = algorithms.includes(b.dataset.id as AlgorithmId);
-      b.classList.toggle("on", on);
       b.setAttribute("aria-pressed", String(on));
     }
     // A rare Algorithm that is on keeps its row in view.

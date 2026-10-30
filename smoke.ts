@@ -3284,7 +3284,9 @@ await fhIdle();
 const fhAfterTurnOn = await fhDigests();
 check(
   "hashes: a hash of another length offers its Algorithm, which hashes the files",
-  (await page.locator(`${fh}.algo.on`, { hasText: "SHA-384" }).count()) === 1 &&
+  (await page
+    .locator(`${fh}.algo[aria-pressed="true"]`, { hasText: "SHA-384" })
+    .count()) === 1 &&
     fhAfterTurnOn["a.txt"]?.["SHA-384"] === digestOf("sha384", aBody)
 );
 await page.locator(`${fh}.expected`).fill("");
@@ -3349,7 +3351,9 @@ await page.waitForFunction(
 check(
   "hashes: the Deep Link restores the text and the Algorithms",
   (await page.locator(`${fh}.text-input`).inputValue()) === "hello" &&
-    (await page.locator(`${fh}.algo.on`, { hasText: "BLAKE2b" }).count()) === 1
+    (await page
+      .locator(`${fh}.algo[aria-pressed="true"]`, { hasText: "BLAKE2b" })
+      .count()) === 1
 );
 await page.evaluate(() =>
   localStorage.removeItem("html-tools:file-hashes:algorithms")

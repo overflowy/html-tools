@@ -161,7 +161,7 @@
   text-overflow: ellipsis;
 }
 .tool-python-ide .drop-target {
-  outline: 1.5px dashed var(--accent);
+  outline: var(--drop-line);
   outline-offset: -2px;
 }
 
@@ -888,6 +888,7 @@
   outline: var(--ring-line);
   outline-offset: -1px;
   border-color: transparent;
+  box-shadow: var(--ring-halo);
 }
 .tool-python-ide .quickopen-list {
   max-height: 300px;
@@ -1110,7 +1111,7 @@
 }
 .tool-python-ide .drop-overlay .card {
   padding: 24px 32px;
-  border: 1.5px dashed var(--accent);
+  border: var(--drop-line);
   border-radius: var(--radius-lg);
   background: var(--surface);
   font-size: 15px;

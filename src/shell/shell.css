@@ -161,10 +161,10 @@ body.sidebar-collapsed .collapse-btn {
     color: var(--text);
   }
 }
-/* One step above hover, so the selected tool still reads as selected while
-   the pointer is over a neighbour. */
+/* The selected tool: a soft accent tint, apart from hover's grey, so it
+   still reads as selected while the pointer is over a neighbour. */
 .tool-list button.selected {
-  background: var(--surface-3);
+  background: var(--accent-soft);
   color: var(--text);
 }
 .tool-list button.cursor {

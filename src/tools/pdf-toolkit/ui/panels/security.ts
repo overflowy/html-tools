@@ -270,6 +270,7 @@ const redact: PanelDef = {
         title: "Show the pages as redacted; press again to go back to marking",
         type: "button",
       },
+      class: "toggle",
       text: "Preview",
     });
     const apply = button(
@@ -293,7 +294,6 @@ const redact: PanelDef = {
       download
     );
     const syncFoot = () => {
-      preview.classList.toggle("pressed", previewing);
       preview.setAttribute("aria-pressed", String(previewing));
       preview.disabled = !previewing && marks.length === 0;
       apply.disabled = !shown;

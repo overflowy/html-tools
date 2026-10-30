@@ -435,21 +435,10 @@
   color: var(--text-muted);
   border-color: var(--border);
 }
-.tool-dual-n-back .chip[aria-pressed="true"] {
-  background: var(--accent-soft);
-  border-color: var(--accent);
-  color: var(--text);
-}
 @media (hover: hover) {
   .tool-dual-n-back .chip:hover {
     color: var(--text);
   }
-  .tool-dual-n-back .chip[aria-pressed="true"]:hover {
-    background: rgb(201 100 66 / 0.24);
-  }
-}
-.tool-dual-n-back .chip[aria-pressed="true"]:active {
-  background: rgb(201 100 66 / 0.3);
 }
 .tool-dual-n-back .variant-chips {
   padding-top: 9px;

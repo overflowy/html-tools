@@ -82,11 +82,26 @@
   font-size: 12.5px;
 }
 
-.tool-archive-manager.dragging .empty-hint,
-.tool-archive-manager.dragging .browser,
-.tool-archive-manager.dragging .staging {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
+/* The empty hint is a dashed box already: the drop line takes the place of
+   its 1px border, centred on it, rather than running inside it. */
+.tool-archive-manager.dragging .empty-hint {
+  border-color: transparent;
+  outline: var(--drop-line);
+  outline-offset: -1.25px;
+}
+/* Laid over the pane, not its outline: the sticky table head would paint
+   over an outline. */
+.tool-archive-manager.dragging :is(.browser, .staging) {
+  border-color: transparent;
+}
+.tool-archive-manager.dragging :is(.browser, .staging)::after {
+  content: "";
+  position: absolute;
+  inset: 2px;
+  z-index: 5;
+  border: var(--drop-line);
+  border-radius: calc(var(--radius-lg) - 2px);
+  pointer-events: none;
 }
 
 /* ---- progress, notes, errors ---- */
@@ -415,6 +430,7 @@
 .tool-archive-manager .browser,
 .tool-archive-manager .preview,
 .tool-archive-manager .staging {
+  position: relative;
   display: flex;
   flex-direction: column;
   min-height: 0;

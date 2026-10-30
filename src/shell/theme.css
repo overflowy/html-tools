@@ -22,6 +22,15 @@
      and outline-offset: -1px. */
   --ring-line: 1.5px solid var(--accent);
   --ring-halo: 0 0 0 3.5px var(--accent-soft);
+  /* Drop target: what files dragged over a pane are dropped on. A dashed
+     outline drawn 2px inside the pane's edge with outline-offset: -2px; or,
+     where positioned content inside the pane would paint over an outline,
+     the border of a ::after laid 2px inside it; or the border of a card
+     laid over the pane. The pane's own border goes transparent meanwhile,
+     so there is one line, not two; on a pane that is a dashed box already
+     (an empty hint), the line is centred on that border instead.
+     Dashed, so it never reads as focus. */
+  --drop-line: 1.5px dashed var(--accent);
   --danger-bg: #501313;
   --danger-text: #f7c1c1;
   --ok: #9fbf7f;
@@ -307,6 +316,37 @@ input[type="text"] {
 }
 .seg button:active {
   transform: none;
+}
+
+/* Toggle: a text button that stays on or off, opted in with .toggle and
+   carrying aria-pressed. A dot before its label is hollow while off and the
+   accent while on, and on, the button is raised like a picked .seg option.
+   The accent is a mark, never the edge: a 0.5px accent border comes out
+   ragged on the curve (see --ring-line). The dot is there while off too, so
+   turning a toggle on never changes its width. */
+button.toggle::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 7px;
+  border-radius: 50%;
+  vertical-align: 1px;
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+}
+button.toggle[aria-pressed="true"] {
+  background: var(--surface-3);
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+button.toggle[aria-pressed="true"]::before {
+  background: var(--accent);
+  box-shadow: none;
+}
+@media (hover: hover) {
+  button.toggle[aria-pressed="true"]:hover {
+    background: var(--surface-3);
+  }
 }
 
 /* Inline: a small action inside content. A Tool may restyle its colours. */

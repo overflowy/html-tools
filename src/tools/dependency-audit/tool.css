@@ -16,7 +16,7 @@
   align-items: center;
   justify-content: center;
   background: rgba(26, 26, 26, 0.85);
-  border: 2px dashed var(--accent);
+  border: var(--drop-line);
   border-radius: var(--radius-lg);
   color: var(--accent);
   font-size: 16px;
