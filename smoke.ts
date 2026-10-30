@@ -2,10 +2,11 @@
 // Uses the Playwright headless Chromium already present in ~/Library/Caches/ms-playwright.
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import path from "node:path";
 
 import jsQR from "jsqr";
 import { chromium } from "playwright-core";
+import type { Locator } from "playwright-core";
 
 import osvFixtures from "./src/tools/dependency-audit/fixtures/osv.json";
 import { DKIM_SELECTORS } from "./src/tools/dns-lookup/email";
@@ -21,17 +22,17 @@ const exe =
 // Speech to Text's fixtures: speech synthesized by macOS `say` as 16 kHz
 // 16-bit WAV, so no audio is committed. The English clip is also what the
 // fake microphone hears.
-const speechDir = mkdtempSync(join(tmpdir(), "html-tools-speech-"));
+const speechDir = mkdtempSync(path.join(tmpdir(), "html-tools-speech-"));
 const SPEECH: Record<string, [voice: string, rate: string, text: string]> = {
-  en: [
-    "Samantha",
-    "175",
-    "The quick brown fox jumps over the lazy dog. Please turn off the kitchen lights at nine thirty.",
-  ],
   de: [
     "Anna",
     "175",
     "Der Zug nach Berlin fährt heute um halb zehn vom zweiten Gleis ab.",
+  ],
+  en: [
+    "Samantha",
+    "175",
+    "The quick brown fox jumps over the lazy dog. Please turn off the kitchen lights at nine thirty.",
   ],
   long: [
     "Samantha",
@@ -40,7 +41,7 @@ const SPEECH: Record<string, [voice: string, rate: string, text: string]> = {
   ],
 };
 for (const [name, [voice, rate, text]] of Object.entries(SPEECH)) {
-  const aiff = join(speechDir, `${name}.aiff`);
+  const aiff = path.join(speechDir, `${name}.aiff`);
   for (const cmd of [
     ["say", "-v", voice, "-r", rate, "-o", aiff, text],
     [
@@ -52,7 +53,7 @@ for (const [name, [voice, rate, text]] of Object.entries(SPEECH)) {
       "-c",
       "1",
       aiff,
-      join(speechDir, `${name}.wav`),
+      path.join(speechDir, `${name}.wav`),
     ],
   ]) {
     const run = Bun.spawnSync(cmd);
@@ -63,12 +64,12 @@ for (const [name, [voice, rate, text]] of Object.entries(SPEECH)) {
 }
 
 const browser = await chromium.launch({
-  executablePath: exe,
   args: [
     "--use-fake-ui-for-media-stream",
     "--use-fake-device-for-media-stream",
-    `--use-file-for-fake-audio-capture=${join(speechDir, "en.wav")}%noloop`,
+    `--use-file-for-fake-audio-capture=${path.join(speechDir, "en.wav")}%noloop`,
   ],
+  executablePath: exe,
 });
 const page = await browser.newPage();
 const errors: string[] = [];
@@ -86,14 +87,46 @@ page.on("console", (m) => {
 
 const url = `file://${import.meta.dir}/dist/index.html`;
 let failed = false;
-function check(label: string, ok: boolean, detail = "") {
+const check = (label: string, ok: boolean, detail = "") => {
   console.log(
     `${ok ? "ok  " : "FAIL"}  ${label}${detail ? `  [${detail}]` : ""}`
   );
   if (!ok) {
     failed = true;
   }
-}
+};
+
+/**
+ * A locator's text content. Every element has one; only a document or a
+ * doctype has none, so null means the selector matched the wrong node.
+ */
+const textOf = async (locator: Locator): Promise<string> => {
+  const text = await locator.textContent();
+  if (text === null) {
+    throw new Error(`${String(locator)} has no text content`);
+  }
+  return text;
+};
+
+/** An attribute the element must have. */
+const attributeOf = async (locator: Locator, name: string): Promise<string> => {
+  const value = await locator.getAttribute(name);
+  if (value === null) {
+    throw new Error(`${String(locator)} has no ${name} attribute`);
+  }
+  return value;
+};
+
+// Elements a page callback acts on are handed to it with
+// `locator(...).first().evaluate`, the first match as querySelector picks.
+
+/** `v`, which the test cannot go on without. */
+const present = <T>(v: T | null | undefined, what: string): T => {
+  if (v === null || v === undefined) {
+    throw new Error(`Expected ${what}`);
+  }
+  return v;
+};
 
 await page.goto(url);
 const names = await page.locator(".tool-list button").allTextContents();
@@ -109,23 +142,19 @@ await page
 await page.waitForSelector(".tool-base64-to-image .output", {
   state: "visible",
 });
-check(
-  "base64 decodes",
-  (await page.locator(".tool-base64-to-image .meta").textContent())!.includes(
-    "image/png"
-  )
-);
+const b64Meta = await textOf(page.locator(".tool-base64-to-image .meta"));
+check("base64 decodes", b64Meta.includes("image/png"));
 
 // image paste -> base64 (encode direction), via a synthetic clipboard event
 await page.evaluate((b64: string) => {
-  const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+  const bytes = Uint8Array.from(atob(b64), (c) => c.codePointAt(0) ?? 0);
   const dt = new DataTransfer();
   dt.items.add(new File([bytes], "pixel.png", { type: "image/png" }));
   document.dispatchEvent(
     new ClipboardEvent("paste", {
-      clipboardData: dt,
       bubbles: true,
       cancelable: true,
+      clipboardData: dt,
     })
   );
 }, "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==");
@@ -143,18 +172,21 @@ check("pasted image encodes to base64", true);
 
 // image drop -> base64
 await page.locator(".b64-input").fill("");
-await page.evaluate((b64: string) => {
-  const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
-  const dt = new DataTransfer();
-  dt.items.add(new File([bytes], "pixel.png", { type: "image/png" }));
-  document.querySelector(".tool-base64-to-image")!.dispatchEvent(
-    new DragEvent("drop", {
-      dataTransfer: dt,
-      bubbles: true,
-      cancelable: true,
-    })
-  );
-}, "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==");
+await page
+  .locator(".tool-base64-to-image")
+  .first()
+  .evaluate((host, b64: string) => {
+    const bytes = Uint8Array.from(atob(b64), (c) => c.codePointAt(0) ?? 0);
+    const dt = new DataTransfer();
+    dt.items.add(new File([bytes], "pixel.png", { type: "image/png" }));
+    host.dispatchEvent(
+      new DragEvent("drop", {
+        bubbles: true,
+        cancelable: true,
+        dataTransfer: dt,
+      })
+    );
+  }, "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==");
 await page.waitForFunction(() =>
   (
     document.querySelector(
@@ -170,11 +202,12 @@ await page
   .locator(".tool-jsonc-sorter .src")
   .fill('{\n  // b first\n  "b": 1,\n  "a": 2\n}');
 await page.waitForSelector(".tool-jsonc-sorter .statusbar.ok");
+const jsoncStatus = await textOf(
+  page.locator(".tool-jsonc-sorter .status-text")
+);
 check(
   "jsonc sorts",
-  (await page
-    .locator(".tool-jsonc-sorter .status-text")
-    .textContent())!.includes("2 keys sorted · 1 comment preserved")
+  jsoncStatus.includes("2 keys sorted · 1 comment preserved")
 );
 
 // Plain JSON, with trailing commas at every depth, comes out as strict JSON.
@@ -183,12 +216,10 @@ await page
   .fill('{"b": [1, {"y": 2, "x": 3,},], "a": {"d": {"f": 1,}, "c": 2,},}');
 await page.waitForFunction(() =>
   document
-    .querySelector(".tool-jsonc-sorter .status-text")!
-    .textContent!.includes("7 keys")
+    .querySelector(".tool-jsonc-sorter .status-text")
+    ?.textContent?.includes("7 keys")
 );
-const jsonOut = (await page
-  .locator(".tool-jsonc-sorter .output")
-  .textContent())!;
+const jsonOut = await textOf(page.locator(".tool-jsonc-sorter .output"));
 let jsonOk = false;
 try {
   jsonOk =
@@ -200,7 +231,7 @@ try {
 check(
   "jsonc accepts plain JSON, drops nested trailing commas",
   jsonOk,
-  jsonOut.replaceAll(/\s+/g, " ")
+  jsonOut.replaceAll(/\s+/gu, " ")
 );
 check(
   "jsonc status omits comment count when there are none",
@@ -235,13 +266,13 @@ await page
   .locator(".tool-save-decoder .dec")
   .fill('{\n    resources: "unquoted key"\n}');
 await page.waitForSelector(".tool-save-decoder .dec-status.error");
-const decErr = await page
-  .locator(".tool-save-decoder .dec-status .status-text")
-  .textContent();
+const decErr = await textOf(
+  page.locator(".tool-save-decoder .dec-status .status-text")
+);
 check(
   "invalid JSON refuses to encode",
-  decErr!.includes("Not valid JSON"),
-  decErr!.slice(0, 60)
+  decErr.includes("Not valid JSON"),
+  decErr.slice(0, 60)
 );
 check(
   "encoded pane untouched on bad JSON",
@@ -256,81 +287,97 @@ check(
 // - webp: VP8X (EXIF flag) + VP8L stub + EXIF chunk
 // - tiff: 1x1 gray with Software/DateTime tags + GPS IFD
 // - heic: ftyp + meta (hdlr/pitm/iinf/iref/iprp/iloc) + mdat with Exif item
-const FIXTURES: Record<string, string> = {
-  jpeg: "/9j/4AAQSkZJRgABAQAASABIAAD/4QEaRXhpZgAASUkqAAgAAAAGAA8BAgAFAAAAVgAAABABAgAJAAAAXAAAABIBAwABAAAABgAAADIBAgAUAAAAZgAAAGmHBAABAAAAegAAACWIBAABAAAAoAAAAAAAAABBY21lAABDYW0gOTAwMAAAMjAyNDowNTowMSAxMjowMDowMAABAAOQAgAUAAAAjAAAAAAAAAAyMDI0OjA1OjAxIDEyOjAwOjAwAAUAAQACAAIAAABOAAAAAgAFAAMAAADiAAAAAwACAAIAAABFAAAABAAFAAMAAAD6AAAABQABAAEAAAAAAAAAAAAAADQAAAABAAAAHwAAAAEAAADg1QEAECcAAA0AAAABAAAAGAAAAAEAAACouAIAECcAAP/+ABJzaG90IG9uIGEgcG90YXRv/9sAQwABAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB/8AACwgAAQABAQERAP/EABQAAAEAAAAAAAAAAAAAAAAAAAD/xAAUEAABAAAAAAAAAAAAAAAAAAAA/9oACAEBAAA/AA//2VRSQUlMSU5HSlVOSw==",
-  png: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAAAAAA6fptVAAABEmVYSWZJSSoACAAAAAYADwECAAUAAABWAAAAEAECAAkAAABcAAAAEgEDAAEAAAABAAAAMgECABQAAABmAAAAaYcEAAEAAAB6AAAAJYgEAAEAAACgAAAAAAAAAEFjbWUAAENhbSA5MDAwAAAyMDI0OjA1OjAxIDEyOjAwOjAwAAEAA5ACABQAAACMAAAAAAAAADIwMjQ6MDU6MDEgMTI6MDA6MDAABQABAAIAAgAAAE4AAAACAAUAAwAAAOIAAAADAAIAAgAAAEUAAAAEAAUAAwAAAPoAAAAFAAEAAQAAAAAAAAAAAAAANAAAAAEAAAAfAAAAAQAAAODVAQAQJwAADQAAAAEAAAAYAAAAAQAAAKi4AgAQJwAAASqWTAAAABV0RVh0U29mdHdhcmUAbWFkZSBieSBoYW5kDW494gAAAAd0SU1FB+gFAQwAAE+FIj4AAAANSURBVHgBAQIA/f8AgACCAIHDbiXgAAAAAElFTkSuQmCC",
-  webp: "UklGRkABAABXRUJQVlA4WAoAAAAIAAAAAAAAAAAAVlA4TAgAAAAvAAAAAIiICEVYSUYSAQAASUkqAAgAAAAGAA8BAgAFAAAAVgAAABABAgAJAAAAXAAAABIBAwABAAAAAQAAADIBAgAUAAAAZgAAAGmHBAABAAAAegAAACWIBAABAAAAoAAAAAAAAABBY21lAABDYW0gOTAwMAAAMjAyNDowNTowMSAxMjowMDowMAABAAOQAgAUAAAAjAAAAAAAAAAyMDI0OjA1OjAxIDEyOjAwOjAwAAUAAQACAAIAAABOAAAAAgAFAAMAAADiAAAAAwACAAIAAABFAAAABAAFAAMAAAD6AAAABQABAAEAAAAAAAAAAAAAADQAAAABAAAAHwAAAAEAAADg1QEAECcAAA0AAAABAAAAGAAAAAEAAACouAIAECcAAA==",
-  tiff: "SUkqAAgAAAAKAAABAwABAAAAAQAAAAEBAwABAAAAAQAAAAIBAwABAAAACAAAAAMBAwABAAAAAQAAAAYBAwABAAAAAQAAABEBBAABAAAAhgAAABcBBAABAAAAAQAAADEBAgASAAAAiAAAADIBAgAUAAAAmgAAACWIBAABAAAArgAAAAAAAACAAGhhbmRtYWRlIGZpeHR1cmUAADIwMjQ6MDU6MDEgMTI6MDA6MDAABQABAAIAAgAAAE4AAAACAAUAAwAAAPAAAAADAAIAAgAAAEUAAAAEAAUAAwAAAAgBAAAFAAEAAQAAAAAAAAAAAAAANAAAAAEAAAAfAAAAAQAAAODVAQAQJwAADQAAAAEAAAAYAAAAAQAAAKi4AgAQJwAA",
-  heic: "AAAAGGZ0eXBoZWljAAAAAG1pZjFoZWljAAAA8W1ldGEAAAAAAAAAIWhkbHIAAAAAAAAAAHBpY3QAAAAAAAAAAAAAAAAAAAAADnBpdG0AAAAAAAEAAAA4aWluZgAAAAAAAgAAABVpbmZlAgAAAAABAABodmMxAAAAABVpbmZlAgAAAAACAABFeGlmAAAAABppcmVmAAAAAAAAAA5jZHNjAAIAAQABAAAAOGlwcnAAAAAcaXBjbwAAABRpc3BlAAAAAAAAAEAAAAAwAAAAFGlwbWEAAAAAAAAAAQABAYEAAAAsaWxvYwAAAABEAAACAAEAAAABAAABEQAAABAAAgAAAAEAAAEhAAABHAAAATRtZGF0RkFLRUhFVkNQQVlMT0FEIQAAAAZFeGlmAABJSSoACAAAAAYADwECAAUAAABWAAAAEAECAAkAAABcAAAAEgEDAAEAAAABAAAAMgECABQAAABmAAAAaYcEAAEAAAB6AAAAJYgEAAEAAACgAAAAAAAAAEFjbWUAAENhbSA5MDAwAAAyMDI0OjA1OjAxIDEyOjAwOjAwAAEAA5ACABQAAACMAAAAAAAAADIwMjQ6MDU6MDEgMTI6MDA6MDAABQABAAIAAgAAAE4AAAACAAUAAwAAAOIAAAADAAIAAgAAAEUAAAAEAAUAAwAAAPoAAAAFAAEAAQAAAAAAAAAAAAAANAAAAAEAAAAfAAAAAQAAAODVAQAQJwAADQAAAAEAAAAYAAAAAQAAAKi4AgAQJwAA",
-};
+const FIXTURES: [format: string, base64: string][] = [
+  [
+    "jpeg",
+    "/9j/4AAQSkZJRgABAQAASABIAAD/4QEaRXhpZgAASUkqAAgAAAAGAA8BAgAFAAAAVgAAABABAgAJAAAAXAAAABIBAwABAAAABgAAADIBAgAUAAAAZgAAAGmHBAABAAAAegAAACWIBAABAAAAoAAAAAAAAABBY21lAABDYW0gOTAwMAAAMjAyNDowNTowMSAxMjowMDowMAABAAOQAgAUAAAAjAAAAAAAAAAyMDI0OjA1OjAxIDEyOjAwOjAwAAUAAQACAAIAAABOAAAAAgAFAAMAAADiAAAAAwACAAIAAABFAAAABAAFAAMAAAD6AAAABQABAAEAAAAAAAAAAAAAADQAAAABAAAAHwAAAAEAAADg1QEAECcAAA0AAAABAAAAGAAAAAEAAACouAIAECcAAP/+ABJzaG90IG9uIGEgcG90YXRv/9sAQwABAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB/8AACwgAAQABAQERAP/EABQAAAEAAAAAAAAAAAAAAAAAAAD/xAAUEAABAAAAAAAAAAAAAAAAAAAA/9oACAEBAAA/AA//2VRSQUlMSU5HSlVOSw==",
+  ],
+  [
+    "png",
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAAAAAA6fptVAAABEmVYSWZJSSoACAAAAAYADwECAAUAAABWAAAAEAECAAkAAABcAAAAEgEDAAEAAAABAAAAMgECABQAAABmAAAAaYcEAAEAAAB6AAAAJYgEAAEAAACgAAAAAAAAAEFjbWUAAENhbSA5MDAwAAAyMDI0OjA1OjAxIDEyOjAwOjAwAAEAA5ACABQAAACMAAAAAAAAADIwMjQ6MDU6MDEgMTI6MDA6MDAABQABAAIAAgAAAE4AAAACAAUAAwAAAOIAAAADAAIAAgAAAEUAAAAEAAUAAwAAAPoAAAAFAAEAAQAAAAAAAAAAAAAANAAAAAEAAAAfAAAAAQAAAODVAQAQJwAADQAAAAEAAAAYAAAAAQAAAKi4AgAQJwAAASqWTAAAABV0RVh0U29mdHdhcmUAbWFkZSBieSBoYW5kDW494gAAAAd0SU1FB+gFAQwAAE+FIj4AAAANSURBVHgBAQIA/f8AgACCAIHDbiXgAAAAAElFTkSuQmCC",
+  ],
+  [
+    "webp",
+    "UklGRkABAABXRUJQVlA4WAoAAAAIAAAAAAAAAAAAVlA4TAgAAAAvAAAAAIiICEVYSUYSAQAASUkqAAgAAAAGAA8BAgAFAAAAVgAAABABAgAJAAAAXAAAABIBAwABAAAAAQAAADIBAgAUAAAAZgAAAGmHBAABAAAAegAAACWIBAABAAAAoAAAAAAAAABBY21lAABDYW0gOTAwMAAAMjAyNDowNTowMSAxMjowMDowMAABAAOQAgAUAAAAjAAAAAAAAAAyMDI0OjA1OjAxIDEyOjAwOjAwAAUAAQACAAIAAABOAAAAAgAFAAMAAADiAAAAAwACAAIAAABFAAAABAAFAAMAAAD6AAAABQABAAEAAAAAAAAAAAAAADQAAAABAAAAHwAAAAEAAADg1QEAECcAAA0AAAABAAAAGAAAAAEAAACouAIAECcAAA==",
+  ],
+  [
+    "tiff",
+    "SUkqAAgAAAAKAAABAwABAAAAAQAAAAEBAwABAAAAAQAAAAIBAwABAAAACAAAAAMBAwABAAAAAQAAAAYBAwABAAAAAQAAABEBBAABAAAAhgAAABcBBAABAAAAAQAAADEBAgASAAAAiAAAADIBAgAUAAAAmgAAACWIBAABAAAArgAAAAAAAACAAGhhbmRtYWRlIGZpeHR1cmUAADIwMjQ6MDU6MDEgMTI6MDA6MDAABQABAAIAAgAAAE4AAAACAAUAAwAAAPAAAAADAAIAAgAAAEUAAAAEAAUAAwAAAAgBAAAFAAEAAQAAAAAAAAAAAAAANAAAAAEAAAAfAAAAAQAAAODVAQAQJwAADQAAAAEAAAAYAAAAAQAAAKi4AgAQJwAA",
+  ],
+  [
+    "heic",
+    "AAAAGGZ0eXBoZWljAAAAAG1pZjFoZWljAAAA8W1ldGEAAAAAAAAAIWhkbHIAAAAAAAAAAHBpY3QAAAAAAAAAAAAAAAAAAAAADnBpdG0AAAAAAAEAAAA4aWluZgAAAAAAAgAAABVpbmZlAgAAAAABAABodmMxAAAAABVpbmZlAgAAAAACAABFeGlmAAAAABppcmVmAAAAAAAAAA5jZHNjAAIAAQABAAAAOGlwcnAAAAAcaXBjbwAAABRpc3BlAAAAAAAAAEAAAAAwAAAAFGlwbWEAAAAAAAAAAQABAYEAAAAsaWxvYwAAAABEAAACAAEAAAABAAABEQAAABAAAgAAAAEAAAEhAAABHAAAATRtZGF0RkFLRUhFVkNQQVlMT0FEIQAAAAZFeGlmAABJSSoACAAAAAYADwECAAUAAABWAAAAEAECAAkAAABcAAAAEgEDAAEAAAABAAAAMgECABQAAABmAAAAaYcEAAEAAAB6AAAAJYgEAAEAAACgAAAAAAAAAEFjbWUAAENhbSA5MDAwAAAyMDI0OjA1OjAxIDEyOjAwOjAwAAEAA5ACABQAAACMAAAAAAAAADIwMjQ6MDU6MDEgMTI6MDA6MDAABQABAAIAAgAAAE4AAAACAAUAAwAAAOIAAAADAAIAAgAAAEUAAAAEAAUAAwAAAPoAAAAFAAEAAQAAAAAAAAAAAAAANAAAAAEAAAAfAAAAAQAAAODVAQAQJwAADQAAAAEAAAAYAAAAAQAAAKi4AgAQJwAA",
+  ],
+];
 
 await page.goto(`${url}#image-metadata`);
-for (const [fmt, b64] of Object.entries(FIXTURES)) {
-  await page.evaluate(
-    ([n, s]) => {
-      const bytes = Uint8Array.from(atob(s!), (c) => c.charCodeAt(0));
-      const dt = new DataTransfer();
-      dt.items.add(
-        new File([bytes], `fixture.${n}`, { type: "application/octet-stream" })
-      );
-      document.querySelector(".tool-image-metadata")!.dispatchEvent(
-        new DragEvent("drop", {
-          dataTransfer: dt,
-          bubbles: true,
-          cancelable: true,
-        })
-      );
-    },
-    [fmt, b64]
-  );
+for (const [fmt, b64] of FIXTURES) {
+  await page
+    .locator(".tool-image-metadata")
+    .first()
+    .evaluate(
+      (host, [n, s]) => {
+        const bytes = Uint8Array.from(atob(s), (c) => c.codePointAt(0) ?? 0);
+        const dt = new DataTransfer();
+        dt.items.add(
+          new File([bytes], `fixture.${n}`, {
+            type: "application/octet-stream",
+          })
+        );
+        host.dispatchEvent(
+          new DragEvent("drop", {
+            bubbles: true,
+            cancelable: true,
+            dataTransfer: dt,
+          })
+        );
+      },
+      [fmt, b64]
+    );
   await page.waitForFunction(
     (n) =>
       document.querySelector(".tool-image-metadata .status")?.textContent ===
       `fixture.${n}`,
     fmt
   );
-  const gpsText = await page
-    .locator(".tool-image-metadata .hl.gps .hl-val")
-    .textContent();
+  const gpsText = await textOf(
+    page.locator(".tool-image-metadata .hl.gps .hl-val")
+  );
   check(
     `${fmt} shows GPS coordinates`,
-    gpsText!.includes("52.520008") && gpsText!.includes("13.404954"),
-    gpsText!.trim().slice(0, 40)
+    gpsText.includes("52.520008") && gpsText.includes("13.404954"),
+    gpsText.trim().slice(0, 40)
   );
-  const hlText = await page
-    .locator(".tool-image-metadata .highlights")
-    .textContent();
+  const hlText = await textOf(page.locator(".tool-image-metadata .highlights"));
   check(
     `${fmt} shows dashed date`,
-    hlText!.includes("2024-05-01 12:00:00"),
-    hlText!.trim().slice(0, 60)
+    hlText.includes("2024-05-01 12:00:00"),
+    hlText.trim().slice(0, 60)
   );
   await page.locator(".tool-image-metadata .strip-btn").click();
   await page.waitForSelector(".tool-image-metadata .strip-ok");
-  const verdict = await page
-    .locator(".tool-image-metadata .strip-ok")
-    .textContent();
+  const verdict = await textOf(page.locator(".tool-image-metadata .strip-ok"));
   check(
     `${fmt} strips clean`,
-    verdict!.startsWith("Re-parsed the stripped copy"),
-    verdict!.slice(0, 70)
+    verdict.startsWith("Re-parsed the stripped copy"),
+    verdict.slice(0, 70)
   );
   if (fmt === "jpeg") {
     // The JPEG fixture has Orientation 6: the strip must keep it and say so.
     check(
       "jpeg keeps orientation",
-      verdict!.includes("orientation (6)"),
-      verdict!.slice(0, 90)
+      verdict.includes("orientation (6)"),
+      verdict.slice(0, 90)
     );
   }
 }
 
 // qr generator: render codes for every payload type and error correction level,
 // then prove they scan by decoding the canvas pixels with jsQR.
-async function decodeQrCanvas(): Promise<{
+const decodeQrCanvas = async (): Promise<{
   text: string;
   bytes: Uint8Array;
-} | null> {
+} | null> => {
   const img = await page.evaluate(() => {
     const c = document.querySelector(
       ".tool-qr-generator .qr-canvas"
@@ -338,18 +385,26 @@ async function decodeQrCanvas(): Promise<{
     if (!c || c.hidden) {
       return null;
     }
-    const d = c.getContext("2d")!.getImageData(0, 0, c.width, c.height);
-    return { data: [...d.data], width: d.width, height: d.height };
+    const ctx = c.getContext("2d");
+    if (!ctx) {
+      throw new Error("The QR canvas has no 2D context");
+    }
+    const d = ctx.getImageData(0, 0, c.width, c.height);
+    return { data: [...d.data], height: d.height, width: d.width };
   });
   if (!img) {
     return null;
   }
   const res = jsQR(new Uint8ClampedArray(img.data), img.width, img.height);
-  return res ? { text: res.data, bytes: new Uint8Array(res.binaryData) } : null;
-}
+  return res ? { bytes: new Uint8Array(res.binaryData), text: res.data } : null;
+};
 
 /** Poll until the rendered code decodes to `expected` (the tool debounces regeneration). */
-async function checkQrDecodes(label: string, expected: string, utf8 = false) {
+const checkQrDecodes = async (
+  label: string,
+  expected: string,
+  utf8 = false
+) => {
   const deadline = Date.now() + 5000;
   let got = "";
   for (;;) {
@@ -360,10 +415,10 @@ async function checkQrDecodes(label: string, expected: string, utf8 = false) {
     if (got === expected || Date.now() > deadline) {
       break;
     }
-    await new Promise((r) => setTimeout(r, 100));
+    await Bun.sleep(100);
   }
   check(label, got === expected, got.slice(0, 50) || "(no decode)");
-}
+};
 
 await page.goto(`${url}#qr-generator`);
 await page.locator(".tool-qr-generator .opt-size").fill("192");
@@ -432,11 +487,12 @@ await checkQrDecodes("qr geo payload scans back", "geo:52.520008,13.404954");
 await page.locator('.tool-qr-generator [data-type="text"]').click();
 await page.locator(".tool-qr-generator .f-text").fill("x".repeat(3200));
 await page.waitForSelector(".tool-qr-generator .statusbar.error");
+const qrTooLongStatus = await textOf(
+  page.locator(".tool-qr-generator .status-text")
+);
 check(
   "qr too-long payload reports error",
-  (await page
-    .locator(".tool-qr-generator .status-text")
-    .textContent())!.includes("too long")
+  qrTooLongStatus.includes("too long")
 );
 
 // inverted colors get a warning
@@ -453,12 +509,10 @@ await page.evaluate(() => {
   fg.dispatchEvent(new Event("input", { bubbles: true }));
 });
 await page.waitForSelector(".tool-qr-generator .statusbar.warn");
-check(
-  "qr inverted colors warn",
-  (await page
-    .locator(".tool-qr-generator .status-text")
-    .textContent())!.includes("inverted")
+const qrInvertedStatus = await textOf(
+  page.locator(".tool-qr-generator .status-text")
 );
+check("qr inverted colors warn", qrInvertedStatus.includes("inverted"));
 
 // Deep links: a tool's state lives in the URL hash and a fresh load restores it.
 await page.goto(`${url}#jsonc-sorter`);
@@ -479,13 +533,11 @@ check(
   "jsonc deep link restores options",
   (await page.locator(".tool-jsonc-sorter .opt-order").inputValue()) === "desc"
 );
-const sortedOut = await page
-  .locator(".tool-jsonc-sorter .output")
-  .textContent();
+const sortedOut = await textOf(page.locator(".tool-jsonc-sorter .output"));
 check(
   "jsonc deep link sorts on load",
-  sortedOut!.includes('"z"') &&
-    sortedOut!.indexOf('"z"') < sortedOut!.indexOf('"a"')
+  sortedOut.includes('"z"') &&
+    sortedOut.indexOf('"z"') < sortedOut.indexOf('"a"')
 );
 
 // Switching tools via the sidebar keeps each tool's state in its deep link.
@@ -555,20 +607,21 @@ await checkQrDecodes(
 const dnsHits: string[] = [];
 const cors = { "access-control-allow-origin": "*" };
 await page.route(
-  /^https:\/\/(cloudflare-dns\.com|security\.cloudflare-dns\.com|family\.cloudflare-dns\.com|dns\.google)\//,
+  /^https:\/\/(?:cloudflare-dns\.com|security\.cloudflare-dns\.com|family\.cloudflare-dns\.com|dns\.google)\//u,
   (route) => {
     const u = new URL(route.request().url());
     const name = u.searchParams.get("name");
     // Known types travel as numbers; map the ones this test dispatches on back to names.
-    const wire = u.searchParams.get("type")!;
+    // The tool always sends a type; without one, nothing below matches.
+    const wire = u.searchParams.get("type") ?? "";
     const type =
       (
         {
           "1": "A",
-          "2": "NS",
           "12": "PTR",
           "15": "MX",
           "16": "TXT",
+          "2": "NS",
           "33": "SRV",
         } as Record<string, string>
       )[wire] ?? wire;
@@ -591,11 +644,11 @@ await page.route(
       // Matches the delegation in the RDAP fixture, so the whois card can report agreement.
       body = {
         ...dnsFixtures.cloudflare_empty,
-        Question: [{ name, type: 2 }],
-        Authority: [],
         Answer: ["elliott.ns.cloudflare.com.", "hera.ns.cloudflare.com."].map(
-          (data) => ({ name, type: 2, TTL: 300, data })
+          (data) => ({ TTL: 300, data, name, type: 2 })
         ),
+        Authority: [],
+        Question: [{ name, type: 2 }],
       };
     } else if (type === "TXT") {
       // TXT is served per name so the email check sees SPF, DMARC, and DKIM where they belong and nothing elsewhere.
@@ -605,9 +658,9 @@ await page.route(
       body = strings
         ? {
             ...dnsFixtures.cloudflare_empty,
-            Question: [{ name, type: 16 }],
+            Answer: strings.map((data) => ({ TTL: 300, data, name, type: 16 })),
             Authority: [],
-            Answer: strings.map((data) => ({ name, type: 16, TTL: 300, data })),
+            Question: [{ name, type: 16 }],
           }
         : dnsFixtures.cloudflare_empty;
     } else if (type === "NOTIMPTYPE") {
@@ -616,14 +669,14 @@ await page.route(
       body = dnsFixtures.cloudflare_empty;
     }
     return route.fulfill({
-      status: 200,
+      body: JSON.stringify(body),
       contentType: "application/dns-json",
       headers: cors,
-      body: JSON.stringify(body),
+      status: 200,
     });
   }
 );
-await page.route(/^https:\/\/api\.certspotter\.com\//, (route) => {
+await page.route(/^https:\/\/api\.certspotter\.com\//u, (route) => {
   const u = new URL(route.request().url());
   dnsHits.push(
     `certspotter ${u.searchParams.get(
@@ -632,35 +685,35 @@ await page.route(/^https:\/\/api\.certspotter\.com\//, (route) => {
   );
   const body = u.searchParams.get("after") ? [] : dnsFixtures.certspotter_page;
   return route.fulfill({
-    status: 200,
+    body: JSON.stringify(body),
     contentType: "application/json",
     headers: cors,
-    body: JSON.stringify(body),
+    status: 200,
   });
 });
-await page.route(/^https:\/\/example\.com\/brand\//, (route) => {
-  const path = new URL(route.request().url()).pathname;
-  dnsHits.push(`asset ${path}`);
-  if (path.endsWith("logo.svg")) {
+await page.route(/^https:\/\/example\.com\/brand\//u, (route) => {
+  const { pathname } = new URL(route.request().url());
+  dnsHits.push(`asset ${pathname}`);
+  if (pathname.endsWith("logo.svg")) {
     return route.fulfill({
-      status: 200,
+      body: dnsFixtures.bimi_logo,
       contentType: "image/svg+xml",
       headers: cors,
-      body: dnsFixtures.bimi_logo,
+      status: 200,
     });
   }
-  if (path.endsWith("vmc.pem")) {
+  if (pathname.endsWith("vmc.pem")) {
     return route.fulfill({
-      status: 200,
+      body: dnsFixtures.bimi_cert,
       contentType: "application/x-pem-file",
       headers: cors,
-      body: dnsFixtures.bimi_cert,
+      status: 200,
     });
   }
-  return route.fulfill({ status: 404, headers: cors, body: "" });
+  return route.fulfill({ body: "", headers: cors, status: 404 });
 });
 await page.route(
-  /^https:\/\/(data\.iana\.org|rdap\.verisign\.com|rdap\.arin\.net)\//,
+  /^https:\/\/(?:data\.iana\.org|rdap\.verisign\.com|rdap\.arin\.net)\//u,
   (route) => {
     const u = new URL(route.request().url());
     dnsHits.push(`rdap ${u.host}${u.pathname}`);
@@ -668,41 +721,41 @@ await page.route(
       "data.iana.org/rdap/dns.json": dnsFixtures.rdap_bootstrap_dns,
       "data.iana.org/rdap/ipv4.json": dnsFixtures.rdap_bootstrap_ipv4,
       "data.iana.org/rdap/ipv6.json": dnsFixtures.rdap_bootstrap_ipv6,
-      "rdap.verisign.com/com/v1/domain/example.com": dnsFixtures.rdap_domain,
       "rdap.arin.net/registry/ip/8.8.8.8": dnsFixtures.rdap_ip,
+      "rdap.verisign.com/com/v1/domain/example.com": dnsFixtures.rdap_domain,
     };
     const body = bodies[u.host + u.pathname];
     // Unknown names get an RDAP-shaped 404 body, but a 200 status: Chromium logs a console error for
     // any 404 and this harness treats console errors as failures. The tool keys off the status alone,
     // so the walk-up path is covered in the unit tests instead.
     return route.fulfill({
-      status: 200,
+      body: JSON.stringify(body ?? { errorCode: 404 }),
       contentType: "application/rdap+json",
       headers: cors,
-      body: JSON.stringify(body ?? { errorCode: 404 }),
+      status: 200,
     });
   }
 );
-await page.route(/^https:\/\/api\.whois\.vu\//, (route) => {
+await page.route(/^https:\/\/api\.whois\.vu\//u, (route) => {
   dnsHits.push(
     `whois.vu ${new URL(route.request().url()).searchParams.get("q")}`
   );
   return route.fulfill({
-    status: 200,
+    body: JSON.stringify(dnsFixtures.whois_text),
     contentType: "text/plain",
     headers: cors,
-    body: JSON.stringify(dnsFixtures.whois_text),
+    status: 200,
   });
 });
-await page.route(/^https:\/\/api\.hackertarget\.com\//, (route) => {
+await page.route(/^https:\/\/api\.hackertarget\.com\//u, (route) => {
   dnsHits.push(
     `hackertarget ${new URL(route.request().url()).searchParams.get("q")}`
   );
   return route.fulfill({
-    status: 200,
+    body: dnsFixtures.hackertarget_text,
     contentType: "text/plain",
     headers: cors,
-    body: dnsFixtures.hackertarget_text,
+    status: 200,
   });
 });
 
@@ -726,29 +779,20 @@ check(
   "dns renders the answer rows",
   (await page.locator(".tool-dns-lookup .records tbody tr").count()) === 3
 );
-check(
-  "dns shows the status flags",
-  (await page.locator(".tool-dns-lookup .flags").textContent())!.startsWith(
-    "NOERROR"
-  )
-);
-check(
-  "dns status counts records",
-  (await page
-    .locator(".tool-dns-lookup .status-text")
-    .textContent())!.startsWith("3 records")
-);
+const dnsFlags = await textOf(page.locator(".tool-dns-lookup .flags"));
+check("dns shows the status flags", dnsFlags.startsWith("NOERROR"));
+const dnsMxStatus = await textOf(page.locator(".tool-dns-lookup .status-text"));
+check("dns status counts records", dnsMxStatus.startsWith("3 records"));
 check(
   "dns writes the query into the deep link",
   await page.evaluate(
     () => location.hash === "#dns-lookup/cf.00.lookup.MX.example.com"
   )
 );
+const dnsMxRaw = await textOf(page.locator(".tool-dns-lookup .raw"));
 check(
   "dns raw pane holds the response",
-  (await page.locator(".tool-dns-lookup .raw").textContent())!.includes(
-    '"data": "10 mail.example.com."'
-  )
+  dnsMxRaw.includes('"data": "10 mail.example.com."')
 );
 
 // No records of that type is reported distinctly from NXDOMAIN, with the SOA shown.
@@ -759,11 +803,12 @@ await page.waitForFunction(() =>
     .querySelector(".tool-dns-lookup .status-text")
     ?.textContent?.startsWith("no records")
 );
+const dnsSrvNote = await textOf(
+  page.locator(".tool-dns-lookup .results .note")
+);
 check(
   "dns empty answer says so",
-  (await page
-    .locator(".tool-dns-lookup .results .note")
-    .textContent())!.includes("No SRV records for example.com")
+  dnsSrvNote.includes("No SRV records for example.com")
 );
 check(
   "dns empty answer still shows the authority SOA",
@@ -783,11 +828,12 @@ await page.waitForFunction(() =>
     .querySelector(".tool-dns-lookup .status-text")
     ?.textContent?.startsWith("NXDOMAIN")
 );
+const dnsNxdomainNote = await textOf(
+  page.locator(".tool-dns-lookup .results .note")
+);
 check(
   "dns NXDOMAIN is its own outcome",
-  (await page
-    .locator(".tool-dns-lookup .results .note")
-    .textContent())!.includes("does not exist (NXDOMAIN)")
+  dnsNxdomainNote.includes("does not exist (NXDOMAIN)")
 );
 check(
   "dns NXDOMAIN flags show the rcode",
@@ -828,11 +874,12 @@ await page.locator(".tool-dns-lookup .custom-type").fill("not a type");
 await page.locator(".tool-dns-lookup .btn-lookup").click();
 await page.waitForSelector(".tool-dns-lookup .statusbar.error");
 const hitsBefore = dnsHits.length;
+const dnsCustomTypeStatus = await textOf(
+  page.locator(".tool-dns-lookup .status-text")
+);
 check(
   "dns rejects a malformed custom type before querying",
-  (await page.locator(".tool-dns-lookup .status-text").textContent())!.includes(
-    "record type name or number"
-  )
+  dnsCustomTypeStatus.includes("record type name or number")
 );
 await page.locator(".tool-dns-lookup .custom-type").fill("notimptype");
 await page.locator(".tool-dns-lookup .custom-type").press("Enter");
@@ -845,11 +892,12 @@ check(
     dnsHits.at(-1) === "cloudflare-dns.com example.com NOTIMPTYPE",
   dnsHits.at(-1)
 );
+const dnsNotimpError = await textOf(
+  page.locator(".tool-dns-lookup .results .error-box")
+);
 check(
   "dns resolver failure shows the rcode and EDE",
-  (await page
-    .locator(".tool-dns-lookup .results .error-box")
-    .textContent())!.includes("NOTIMP: EDE(21): Not Supported")
+  dnsNotimpError.includes("NOTIMP: EDE(21): Not Supported")
 );
 
 // Google with DNSSEC OK: the flag reaches the wire and the string Comment is displayed.
@@ -903,11 +951,12 @@ check(
       .locator('.tool-dns-lookup .group[data-type="SRV"]')
       .evaluate((d) => (d as HTMLDetailsElement).open))
 );
+const dnsAllTypesStatus = await textOf(
+  page.locator(".tool-dns-lookup .status-text")
+);
 check(
   "dns all types summarises",
-  (await page
-    .locator(".tool-dns-lookup .status-text")
-    .textContent())!.startsWith("14 types · 9 records")
+  dnsAllTypesStatus.startsWith("14 types · 9 records")
 );
 check(
   "dns all types deep link",
@@ -939,11 +988,12 @@ check(
   (await page.locator(".tool-dns-lookup .subs .link").first().textContent()) ===
     "example.com"
 );
+const dnsSubdomainsStatus = await textOf(
+  page.locator(".tool-dns-lookup .status-text")
+);
 check(
   "dns subdomains status per source",
-  (await page.locator(".tool-dns-lookup .status-text").textContent())!.includes(
-    "8 subdomains · Cert Spotter 5 · HackerTarget 5"
-  )
+  dnsSubdomainsStatus.includes("8 subdomains · Cert Spotter 5 · HackerTarget 5")
 );
 await page
   .locator(".tool-dns-lookup .subs .link", { hasText: "blog.example.com" })
@@ -966,9 +1016,7 @@ await page.waitForFunction(() =>
     .querySelector(".tool-dns-lookup .status-text")
     ?.textContent?.startsWith("SPF")
 );
-const emailStatus = (await page
-  .locator(".tool-dns-lookup .status-text")
-  .textContent())!;
+const emailStatus = await textOf(page.locator(".tool-dns-lookup .status-text"));
 check(
   "dns email verdicts",
   emailStatus.startsWith("SPF ok · DMARC ok · DKIM ok · BIMI ok"),
@@ -993,38 +1041,39 @@ check(
     .locator('.tool-dns-lookup .card[data-check="mx"] .mx-list li')
     .count()) === 3
 );
+const spfCardText = await textOf(
+  page.locator('.tool-dns-lookup .card[data-check="spf"]')
+);
 check(
   "dns email SPF counts lookups through the include",
-  (await page
-    .locator('.tool-dns-lookup .card[data-check="spf"]')
-    .textContent())!.includes("2 of the 10 allowed DNS lookups")
+  spfCardText.includes("2 of the 10 allowed DNS lookups")
+);
+const dmarcCardText = await textOf(
+  page.locator('.tool-dns-lookup .card[data-check="dmarc"]')
 );
 check(
   "dns email DMARC reads the policy",
-  (await page
-    .locator('.tool-dns-lookup .card[data-check="dmarc"]')
-    .textContent())!.includes("p=quarantine: failing mail goes to spam")
+  dmarcCardText.includes("p=quarantine: failing mail goes to spam")
+);
+const dkimCardText = await textOf(
+  page.locator('.tool-dns-lookup .card[data-check="dkim"]')
 );
 check(
   "dns email DKIM finds the live key and the revoked one",
   (await page
     .locator('.tool-dns-lookup .card[data-check="dkim"] .dkim-key')
     .count()) === 2 &&
-    (await page
-      .locator('.tool-dns-lookup .card[data-check="dkim"]')
-      .textContent())!.includes("2048-bit RSA key") &&
-    (await page
-      .locator('.tool-dns-lookup .card[data-check="dkim"]')
-      .textContent())!.includes("this key is revoked")
+    dkimCardText.includes("2048-bit RSA key") &&
+    dkimCardText.includes("this key is revoked")
 );
 check(
   "dns email BIMI fetches both assets",
   dnsHits.includes("asset /brand/logo.svg") &&
     dnsHits.includes("asset /brand/vmc.pem")
 );
-const bimiText = (await page
-  .locator('.tool-dns-lookup .card[data-check="bimi"]')
-  .textContent())!;
+const bimiText = await textOf(
+  page.locator('.tool-dns-lookup .card[data-check="bimi"]')
+);
 check(
   "dns email BIMI judges the logo and certificate",
   bimiText.includes("DMARC enforces p=quarantine") &&
@@ -1056,11 +1105,12 @@ await page.waitForFunction(() =>
     .querySelector(".tool-dns-lookup .status-text")
     ?.textContent?.startsWith("No key at selector selector1")
 );
+const dkimExtraNote = await textOf(
+  page.locator(".tool-dns-lookup .dkim-extra .note")
+);
 check(
   "dns email DKIM probe reports a missing selector",
-  (await page
-    .locator(".tool-dns-lookup .dkim-extra .note")
-    .textContent())!.includes("selector1._domainkey.example.com")
+  dkimExtraNote.includes("selector1._domainkey.example.com")
 );
 await page.locator(".tool-dns-lookup .dkim-selector").fill("google");
 await page.locator(".tool-dns-lookup .dkim-selector").press("Enter");
@@ -1082,9 +1132,9 @@ await page.waitForFunction(() =>
     .querySelector(".tool-dns-lookup .status-text")
     ?.textContent?.startsWith("registrar ")
 );
-const whoisText = (await page
-  .locator('.tool-dns-lookup .card[data-check="whois"]')
-  .textContent())!;
+const whoisText = await textOf(
+  page.locator('.tool-dns-lookup .card[data-check="whois"]')
+);
 check(
   "dns whois loads the bootstrap and asks the registry",
   dnsHits.includes("rdap data.iana.org/rdap/dns.json") &&
@@ -1117,11 +1167,10 @@ check(
     () => location.hash === "#dns-lookup/cf.00.whois.A.example.com"
   )
 );
+const whoisRaw = await textOf(page.locator(".tool-dns-lookup .raw"));
 check(
   "dns whois raw pane skips the bootstrap",
-  !(await page.locator(".tool-dns-lookup .raw").textContent())!.includes(
-    "data.iana.org"
-  )
+  !whoisRaw.includes("data.iana.org")
 );
 
 await page.locator(".tool-dns-lookup .name").fill("8.8.8.8");
@@ -1131,9 +1180,9 @@ await page.waitForFunction(() =>
     .querySelector(".tool-dns-lookup .status-text")
     ?.textContent?.startsWith("Google LLC")
 );
-const ipText = (await page
-  .locator('.tool-dns-lookup .card[data-check="whois"]')
-  .textContent())!;
+const ipText = await textOf(
+  page.locator('.tool-dns-lookup .card[data-check="whois"]')
+);
 check(
   "dns whois IP goes to the RIR from the ipv4 bootstrap",
   dnsHits.includes("rdap rdap.arin.net/registry/ip/8.8.8.8")
@@ -1153,9 +1202,9 @@ await page.waitForFunction(() =>
     .querySelector(".tool-dns-lookup .status-text")
     ?.textContent?.includes("raw WHOIS via whois.vu")
 );
-const rawWhois = (await page
-  .locator('.tool-dns-lookup .card[data-check="whois"]')
-  .textContent())!;
+const rawWhois = await textOf(
+  page.locator('.tool-dns-lookup .card[data-check="whois"]')
+);
 check(
   "dns whois falls back to the proxy for a TLD without RDAP",
   dnsHits.includes("whois.vu google.it") &&
@@ -1199,7 +1248,7 @@ const auditFixture = (name: string) =>
 const npmLock = await auditFixture("npm-v3.lock.json");
 const uvLock = await auditFixture("uv-v1.lock");
 const osvHits: string[] = [];
-await page.route(/^https:\/\/api\.osv\.dev\//, (route) => {
+await page.route(/^https:\/\/api\.osv\.dev\//u, (route) => {
   const u = new URL(route.request().url());
   if (u.pathname === "/v1/querybatch") {
     const queries = JSON.parse(route.request().postData() ?? "{}").queries as {
@@ -1214,37 +1263,38 @@ await page.route(/^https:\/\/api\.osv\.dev\//, (route) => {
       ).map((id) => ({ id })),
     }));
     return route.fulfill({
-      status: 200,
+      body: JSON.stringify({ results }),
       contentType: "application/json",
       headers: cors,
-      body: JSON.stringify({ results }),
+      status: 200,
     });
   }
-  const id = decodeURIComponent(u.pathname.split("/").pop()!);
+  const id = decodeURIComponent(
+    u.pathname.slice(u.pathname.lastIndexOf("/") + 1)
+  );
   osvHits.push(`vulns ${id}`);
   const rec = (osvFixtures.records as Record<string, unknown>)[id];
   return route.fulfill({
-    status: rec ? 200 : 404,
+    body: JSON.stringify(rec ?? { message: "Bug not found." }),
     contentType: "application/json",
     headers: cors,
-    body: JSON.stringify(rec ?? { message: "Bug not found." }),
+    status: rec ? 200 : 404,
   });
 });
 const rawHits: string[] = [];
-await page.route(/^https:\/\/raw\.githubusercontent\.com\//, (route) => {
-  const path = new URL(route.request().url()).pathname;
-  rawHits.push(path);
+await page.route(/^https:\/\/raw\.githubusercontent\.com\//u, (route) => {
+  const { pathname } = new URL(route.request().url());
+  rawHits.push(pathname);
   const body =
-    path === "/acme/demo/HEAD/package-lock.json"
-      ? npmLock
-      : path === "/acme/demo/HEAD/uv.lock"
-        ? uvLock
-        : null;
+    new Map([
+      ["/acme/demo/HEAD/package-lock.json", npmLock],
+      ["/acme/demo/HEAD/uv.lock", uvLock],
+    ]).get(pathname) ?? null;
   return route.fulfill({
-    status: body ? 200 : 404,
+    body: body ?? "404: Not Found",
     contentType: "text/plain",
     headers: cors,
-    body: body ?? "404: Not Found",
+    status: body ? 200 : 404,
   });
 });
 
@@ -1280,31 +1330,32 @@ check(
       .first()
       .textContent()) === "critical 9.8"
 );
+const lodashCardText = await textOf(
+  page.locator(".tool-dependency-audit .card", { hasText: "lodash@4.17.20" })
+);
+const minimistCardText = await textOf(
+  page.locator(".tool-dependency-audit .card", { hasText: "minimist@1.2.0" })
+);
+const minimist125Tags = await page
+  .locator(".tool-dependency-audit .card", { hasText: "minimist@1.2.5" })
+  .locator(".tag")
+  .allTextContents();
 check(
   "audit tags direct and dev, names the fix",
   (await page
     .locator('.tool-dependency-audit .card[data-scope="direct"]')
     .count()) === 2 &&
-    (
-      await page
-        .locator(".tool-dependency-audit .card", { hasText: "minimist@1.2.5" })
-        .locator(".tag")
-        .allTextContents()
-    ).join(",") === "direct,dev" &&
-    (await page
-      .locator(".tool-dependency-audit .card", { hasText: "lodash@4.17.20" })
-      .textContent())!.includes("Fixed in 4.17.21.") &&
-    (await page
-      .locator(".tool-dependency-audit .card", { hasText: "minimist@1.2.0" })
-      .textContent())!.includes("Fixed in 1.2.6, affected since 1.0.0.")
+    minimist125Tags.join(",") === "direct,dev" &&
+    lodashCardText.includes("Fixed in 4.17.21.") &&
+    minimistCardText.includes("Fixed in 1.2.6, affected since 1.0.0.")
+);
+const auditSkippedList = await textOf(
+  page.locator(".tool-dependency-audit .skipped-list")
 );
 check(
   "audit lists what was not checked, with reasons",
   (await page.locator(".tool-dependency-audit .skipped-list li").count()) ===
-    3 &&
-    (await page
-      .locator(".tool-dependency-audit .skipped-list")
-      .textContent())!.includes("git dependency")
+    3 && auditSkippedList.includes("git dependency")
 );
 check(
   "audit deep link holds filters and the compressed input",
@@ -1355,11 +1406,12 @@ await page.waitForFunction(
 );
 await page.locator(".tool-dependency-audit .btn-audit").click();
 await page.waitForSelector(".tool-dependency-audit .statusbar.error");
+const auditPackageJsonStatus = await textOf(
+  page.locator(".tool-dependency-audit .status-text")
+);
 check(
   "audit refuses package.json by name",
-  (await page
-    .locator(".tool-dependency-audit .status-text")
-    .textContent())!.includes("package.json")
+  auditPackageJsonStatus.includes("package.json")
 );
 
 // Repository Fetch: the five names tried at the root, the two present audited together.
@@ -1378,33 +1430,33 @@ check(
     rawHits.every((p) => p.startsWith("/acme/demo/HEAD/")),
   rawHits.join(" ")
 );
+const auditChips = await page
+  .locator(".tool-dependency-audit .chip")
+  .allTextContents();
 check(
   "audit fetch normalizes the repo box and shows the files as chips",
   (await page.locator(".tool-dependency-audit .repo").inputValue()) ===
     "acme/demo" &&
-    (await page.locator(".tool-dependency-audit .chip").allTextContents())
-      .join("|")
-      .replaceAll("×", "") === "package-lock.json|uv.lock"
+    auditChips.join("|").replaceAll("×", "") === "package-lock.json|uv.lock"
 );
+const lockfileBadges = await page
+  .locator(".tool-dependency-audit .lockfile .type-badge")
+  .allTextContents();
 check(
   "audit groups results by lockfile",
   (await page.locator(".tool-dependency-audit .lockfile").count()) === 2 &&
-    (
-      await page
-        .locator(".tool-dependency-audit .lockfile .type-badge")
-        .allTextContents()
-    ).join(",") === "npm,PyPI" &&
+    lockfileBadges.join(",") === "npm,PyPI" &&
     (await page.locator(".tool-dependency-audit .f-file-wrap").isVisible())
+);
+const requestsCardText = await textOf(
+  page.locator(".tool-dependency-audit .card", { hasText: "requests@2.30.0" })
 );
 check(
   "audit merges records that alias each other",
   (await page
     .locator(".tool-dependency-audit .card", { hasText: "requests@2.30.0" })
     .locator(".advisory")
-    .count()) === 2 &&
-    (await page
-      .locator(".tool-dependency-audit .card", { hasText: "requests@2.30.0" })
-      .textContent())!.includes("PYSEC-2023-74")
+    .count()) === 2 && requestsCardText.includes("PYSEC-2023-74")
 );
 check(
   "audit fetch deep link names the repository",
@@ -1453,7 +1505,10 @@ const shot = await page.evaluate(() => {
   const c = document.createElement("canvas");
   c.width = 1200;
   c.height = 400;
-  const ctx = c.getContext("2d")!;
+  const ctx = c.getContext("2d");
+  if (!ctx) {
+    throw new Error("A new canvas has no 2D context");
+  }
   ctx.fillStyle = "#fff";
   ctx.fillRect(0, 0, c.width, c.height);
   ctx.fillStyle = "#000";
@@ -1464,7 +1519,10 @@ const shot = await page.evaluate(() => {
   const f = document.createElement("canvas");
   f.width = 1200;
   f.height = 900;
-  const fx = f.getContext("2d")!;
+  const fx = f.getContext("2d");
+  if (!fx) {
+    throw new Error("A new canvas has no 2D context");
+  }
   fx.fillStyle = "#fff";
   fx.fillRect(0, 0, f.width, f.height);
   let seed = 7;
@@ -1490,29 +1548,39 @@ const shot = await page.evaluate(() => {
     }
     fx.stroke();
   }
+  // The base64 after the data: URL's one comma.
+  const payload = (dataUrl: string) => dataUrl.slice(dataUrl.indexOf(",") + 1);
   return {
-    jpeg: c.toDataURL("image/jpeg", 0.92).split(",")[1]!,
-    png: c.toDataURL("image/png").split(",")[1]!,
-    w: c.width,
+    figure: payload(f.toDataURL("image/jpeg", 0.92)),
     h: c.height,
-    figure: f.toDataURL("image/jpeg", 0.92).split(",")[1]!,
+    jpeg: payload(c.toDataURL("image/jpeg", 0.92)),
+    png: payload(c.toDataURL("image/png")),
+    w: c.width,
   };
 });
 const scanJpeg = {
-  bytes: Uint8Array.from(atob(shot.jpeg), (ch) => ch.charCodeAt(0)),
-  width: shot.w,
+  bytes: Uint8Array.from(atob(shot.jpeg), (ch) => ch.codePointAt(0) ?? 0),
   height: shot.h,
+  width: shot.w,
 };
 const figureJpeg = {
-  bytes: Uint8Array.from(atob(shot.figure), (ch) => ch.charCodeAt(0)),
-  width: 1200,
+  bytes: Uint8Array.from(atob(shot.figure), (ch) => ch.codePointAt(0) ?? 0),
   height: 900,
+  width: 1200,
 };
 const docFixtures: Record<string, Uint8Array> = {
-  "text.pdf": buildPdf([
-    { text: ["Hello from a text PDF.", "Second line here.", "Third line."] },
+  "bad.txt": new TextEncoder().encode("hello"),
+  "figure.pdf": buildPdf([
+    {
+      text: [
+        "Page one has text.",
+        "It goes on for a few lines,",
+        "enough to look like a page.",
+      ],
+    },
+    { jpeg: scanJpeg },
+    { jpeg: figureJpeg },
   ]),
-  "scan.pdf": buildPdf([{ jpeg: scanJpeg }]),
   "mixed.pdf": buildPdf([
     {
       text: [
@@ -1530,6 +1598,11 @@ const docFixtures: Record<string, Uint8Array> = {
       ],
     },
   ]),
+  "note.docx": buildDocx("A heading", [
+    "First paragraph.",
+    "Second paragraph.",
+  ]),
+  "photo.png": Uint8Array.from(atob(shot.png), (ch) => ch.codePointAt(0) ?? 0),
   "refused.pdf": buildPdf([
     {
       text: [
@@ -1541,48 +1614,43 @@ const docFixtures: Record<string, Uint8Array> = {
     { jpeg: scanJpeg },
     { jpeg: scanJpeg },
   ]),
-  "figure.pdf": buildPdf([
-    {
-      text: [
-        "Page one has text.",
-        "It goes on for a few lines,",
-        "enough to look like a page.",
-      ],
-    },
-    { jpeg: scanJpeg },
-    { jpeg: figureJpeg },
-  ]),
+  "scan.pdf": buildPdf([{ jpeg: scanJpeg }]),
   "six.pdf": buildPdf(Array.from({ length: 6 }, () => ({ jpeg: scanJpeg }))),
-  "photo.png": Uint8Array.from(atob(shot.png), (ch) => ch.charCodeAt(0)),
-  "note.docx": buildDocx("A heading", [
-    "First paragraph.",
-    "Second paragraph.",
+  "text.pdf": buildPdf([
+    { text: ["Hello from a text PDF.", "Second line here.", "Third line."] },
   ]),
-  "bad.txt": new TextEncoder().encode("hello"),
 };
-async function dropDoc(name: string) {
-  await page.evaluate(
-    ([n, s]) => {
-      const b = Uint8Array.from(atob(s!), (c) => c.charCodeAt(0));
-      const dt = new DataTransfer();
-      dt.items.add(new File([b], n!, { type: "application/octet-stream" }));
-      document.querySelector(".tool-doc-to-markdown")!.dispatchEvent(
-        new DragEvent("drop", {
-          dataTransfer: dt,
-          bubbles: true,
-          cancelable: true,
-        })
-      );
-    },
-    [name, Buffer.from(docFixtures[name]!).toString("base64")]
-  );
-}
+const dropDoc = async (name: string) => {
+  await page
+    .locator(".tool-doc-to-markdown")
+    .first()
+    .evaluate(
+      (host, [n, s]) => {
+        const b = Uint8Array.from(atob(s), (c) => c.codePointAt(0) ?? 0);
+        const dt = new DataTransfer();
+        dt.items.add(new File([b], n, { type: "application/octet-stream" }));
+        host.dispatchEvent(
+          new DragEvent("drop", {
+            bubbles: true,
+            cancelable: true,
+            dataTransfer: dt,
+          })
+        );
+      },
+      [
+        name,
+        Buffer.from(present(docFixtures[name], `fixture ${name}`)).toString(
+          "base64"
+        ),
+      ]
+    );
+};
 const docDone = () =>
   page.waitForFunction(
     () =>
-      !document
-        .querySelector(".tool-doc-to-markdown .progress")!
-        .classList.contains("on"),
+      document
+        .querySelector(".tool-doc-to-markdown .progress")
+        ?.classList.contains("on") === false,
     null,
     { timeout: 180_000 }
   );
@@ -1593,48 +1661,54 @@ const docMeta = async () =>
 const docError = () =>
   page
     .locator(".tool-doc-to-markdown .error-box")
-    .evaluate((e) => (e.classList.contains("on") ? e.textContent! : ""));
+    .evaluate((e) => (e.classList.contains("on") ? (e.textContent ?? "") : ""));
 const docPhases: string[] = [];
 await page.exposeFunction("docPhase", (t: string) => docPhases.push(t));
 const watchPhases = () =>
   page.evaluate(() => {
-    const el = document.querySelector(".tool-doc-to-markdown .phase")!;
+    const el = document.querySelector(".tool-doc-to-markdown .phase");
+    if (!el) {
+      throw new Error("Doc to Markdown has no phase line");
+    }
     new MutationObserver(() =>
       (window as unknown as { docPhase: (t: string) => void }).docPhase(
         el.textContent ?? ""
       )
-    ).observe(el, { childList: true, characterData: true, subtree: true });
+    ).observe(el, { characterData: true, childList: true, subtree: true });
   });
 await watchPhases();
 
 await dropDoc("note.docx");
 await docDone();
+const docxOutput = await docOutput();
 check(
   "docx converts through anydoc",
   (await docOutput()) ===
     "# A heading\n\nFirst paragraph.\n\nSecond paragraph.\n" &&
     (await docMeta()) === "Word",
-  (await docOutput()).replaceAll("\n", "⏎")
+  docxOutput.replaceAll("\n", "⏎")
 );
 
 await dropDoc("text.pdf");
 await docDone();
+const textPdfOutput = await docOutput();
 check(
   "text PDF converts without OCR, page marked",
-  (await docOutput()).startsWith("<!-- page 1 -->\n\nHello from a text PDF.") &&
+  textPdfOutput.startsWith("<!-- page 1 -->\n\nHello from a text PDF.") &&
     (await docMeta()) === "PDF · 1 page" &&
-    !(await docOutput()).includes("OCR"),
-  `${await docMeta()} ${(await docOutput()).slice(0, 60)}`
+    !textPdfOutput.includes("OCR"),
+  `${await docMeta()} ${textPdfOutput.slice(0, 60)}`
 );
 
 await dropDoc("scan.pdf");
 await docDone();
+const scannedPdfOutput = await docOutput();
 check(
   "scanned PDF goes through OCR and is marked",
-  (await docOutput()).startsWith("<!-- page 1, OCR -->\n\n") &&
-    /quick brown fox/.test(await docOutput()) &&
+  scannedPdfOutput.startsWith("<!-- page 1, OCR -->\n\n") &&
+    /quick brown fox/u.test(await docOutput()) &&
     (await docMeta()) === "PDF · 1 page · 1 via OCR (eng)",
-  `${await docMeta()} ${(await docOutput()).slice(0, 80)}`
+  `${await docMeta()} ${scannedPdfOutput.slice(0, 80)}`
 );
 
 // A text document with a picture-only page in the middle: the converter
@@ -1650,7 +1724,7 @@ const mixedOrder = [
 ];
 check(
   "mid picture page in a text PDF: converter's verdict stands, no OCR, every page marked",
-  mixedOrder.every((i, k) => i >= 0 && (k === 0 || i > mixedOrder[k - 1]!)) &&
+  mixedOrder.every((i, k) => i >= 0 && (k === 0 || i > mixedOrder[k - 1])) &&
     !mixedOut.includes("OCR") &&
     (await docMeta()) === "PDF · 3 pages" &&
     !docPhases.some(
@@ -1674,7 +1748,7 @@ const refusedOrder = [
 check(
   "refused PDF: text page converted, listed pages OCR'd, spliced in page order",
   refusedOrder.every(
-    (i, k) => i >= 0 && (k === 0 || i > refusedOrder[k - 1]!)
+    (i, k) => i >= 0 && (k === 0 || i > refusedOrder[k - 1])
   ) && (await docMeta()) === "PDF · 3 pages · 2 via OCR (eng)",
   `${refusedOrder.join(",")} ${await docMeta()}`
 );
@@ -1688,7 +1762,7 @@ check(
   "page markers off: no comments at all, state in the Deep Link",
   !bareOut.includes("<!--") &&
     bareOut.startsWith("Page one has text.") &&
-    /quick brown fox/.test(bareOut) &&
+    /quick brown fox/u.test(bareOut) &&
     (await page.evaluate(() => location.hash)) === "#doc-to-markdown/eng.p0" &&
     (await page.evaluate(() =>
       localStorage.getItem("html-tools:doc-to-markdown:markers")
@@ -1709,7 +1783,7 @@ await docDone();
 const figureOut = await docOutput();
 check(
   "a figure page OCR'd comes out as no text, not gibberish",
-  /quick brown fox/.test(figureOut) &&
+  /quick brown fox/u.test(figureOut) &&
     figureOut.includes("<!-- page 2, OCR -->") &&
     figureOut.trimEnd().endsWith("<!-- page 3, OCR: no text found -->") &&
     (await docMeta()) === "PDF · 3 pages · 2 via OCR (eng)",
@@ -1718,19 +1792,21 @@ check(
 
 await dropDoc("photo.png");
 await docDone();
+const imageOcrOutput = await docOutput();
 check(
   "image goes straight to OCR",
-  (await docOutput()).startsWith("<!-- image, OCR -->") &&
-    /quick brown fox/.test(await docOutput()) &&
+  imageOcrOutput.startsWith("<!-- image, OCR -->") &&
+    /quick brown fox/u.test(await docOutput()) &&
     (await docMeta()) === "png · OCR eng",
   await docMeta()
 );
 
 await dropDoc("bad.txt");
 await docDone();
+const unsupportedFileError = await docError();
 check(
   "unsupported file refused by name",
-  (await docError()).startsWith(".txt is not a supported format") &&
+  unsupportedFileError.startsWith(".txt is not a supported format") &&
     !(await page
       .locator(".tool-doc-to-markdown .result")
       .evaluate((e) => e.classList.contains("on"))),
@@ -1742,7 +1818,7 @@ await dropDoc("six.pdf");
 await page.waitForFunction(
   () =>
     (
-      document.querySelector(".tool-doc-to-markdown .phase")!.textContent ?? ""
+      document.querySelector(".tool-doc-to-markdown .phase")?.textContent ?? ""
     ).startsWith("OCR page 2"),
   null,
   { timeout: 60_000 }
@@ -1764,7 +1840,7 @@ await docDone();
 check(
   "conversion works again after cancel",
   (await docMeta()) === "PDF · 1 page · 1 via OCR (eng)" &&
-    /quick brown fox/.test(await docOutput())
+    /quick brown fox/u.test(await docOutput())
 );
 
 // Languages: picked in the picker, carried in the Deep Link and localStorage, model fetched on next OCR.
@@ -1797,7 +1873,7 @@ await docDone();
 check(
   "OCR runs with both models, fetching only the new one",
   (await docMeta()) === "png · OCR eng+deu" &&
-    /quick brown fox/.test(await docOutput()) &&
+    /quick brown fox/u.test(await docOutput()) &&
     docPhases.some((p) => p.startsWith("Downloading tesseract deu")) &&
     !docPhases.some((p) => p.startsWith("Downloading tesseract eng")),
   docPhases
@@ -1816,8 +1892,8 @@ await page.goto("about:blank");
 await page.goto(`${url}#doc-to-markdown/eng+ron.p0`);
 await page.waitForFunction(() =>
   (
-    document.querySelector(".tool-doc-to-markdown .engines-text")!
-      .textContent ?? ""
+    document.querySelector(".tool-doc-to-markdown .engines-text")
+      ?.textContent ?? ""
   ).startsWith("Engines cached")
 );
 check(
@@ -1844,25 +1920,26 @@ check(
     !docPhases.some((p) => p.startsWith("Downloading")),
   docPhases.join(" | ").slice(0, 200)
 );
-const cachedText = await page
-  .locator(".tool-doc-to-markdown .engines-text")
-  .textContent();
-const cachedTitle = await page
-  .locator(".tool-doc-to-markdown .engines-text")
-  .getAttribute("title");
+const cachedText = await textOf(
+  page.locator(".tool-doc-to-markdown .engines-text")
+);
+const cachedTitle = await attributeOf(
+  page.locator(".tool-doc-to-markdown .engines-text"),
+  "title"
+);
 check(
   "engines footer shows the cached total, breakdown by family on hover",
-  /^Engines cached: [\d.]+ MB$/.test(cachedText!) &&
-    /^anydoc \d/m.test(cachedTitle!) &&
-    /^tesseract \d/m.test(cachedTitle!) &&
-    !cachedTitle!.includes("tesseract eng"),
-  `${cachedText!} | ${cachedTitle!.slice(0, 60)}`
+  /^Engines cached: [\d.]+ MB$/u.test(cachedText) &&
+    /^anydoc \d/mu.test(cachedTitle) &&
+    /^tesseract \d/mu.test(cachedTitle) &&
+    !cachedTitle.includes("tesseract eng"),
+  `${cachedText} | ${cachedTitle.slice(0, 60)}`
 );
 await page.locator(".tool-doc-to-markdown .engines-clear").click();
 await page.waitForFunction(() =>
   (
-    document.querySelector(".tool-doc-to-markdown .engines-text")!
-      .textContent ?? ""
+    document.querySelector(".tool-doc-to-markdown .engines-text")
+      ?.textContent ?? ""
   ).startsWith("No engines cached")
 );
 check("clear cached engines empties the store", true);
@@ -1884,7 +1961,7 @@ const traceBody = (ip: string, loc: string) =>
 let traceMode: "both" | "v4only" | "split" = "both";
 const traceHits: string[] = [];
 await page.route(
-  /^https:\/\/(1\.0\.0\.1|\[2606:4700:4700::1001\])\/cdn-cgi\/trace/,
+  /^https:\/\/(?:1\.0\.0\.1|\[2606:4700:4700::1001\])\/cdn-cgi\/trace/u,
   (route) => {
     const v6 = route.request().url().includes("[2606");
     traceHits.push(v6 ? "ipv6" : "ipv4");
@@ -1895,15 +1972,15 @@ await page.route(
       ? traceBody("2001:db8::1", traceMode === "split" ? "DE" : "IT")
       : traceBody("203.0.113.9", "IT");
     return route.fulfill({
-      status: 200,
+      body,
       contentType: "text/plain",
       headers: cors,
-      body,
+      status: 200,
     });
   }
 );
 const whoamiValue = (row: string) =>
-  page.locator(`.tool-whoami [data-row="${row}"] .value`).textContent();
+  textOf(page.locator(`.tool-whoami [data-row="${row}"] .value`));
 await page.goto(`${url}#whoami`);
 await page.waitForSelector(".tool-whoami .value");
 await page.waitForFunction(
@@ -1931,22 +2008,23 @@ check(
   "whoami copy all lists the four rows",
   await page.evaluate(() => {
     let out = "";
-    navigator.clipboard.writeText = async (t: string) => {
+    navigator.clipboard.writeText = (t: string) => {
       out = t;
+      return Promise.resolve();
     };
     (
       document.querySelector(".tool-whoami .btn-copy-all") as HTMLButtonElement
     ).click();
-    return new Promise<boolean>((resolve) =>
-      setTimeout(
-        () =>
-          resolve(
-            out ===
-              "IPv4: 203.0.113.9\nIPv6: 2001:db8::1\nCountry: IT · Italy\nUser agent: Mozilla/5.0 (smoke)"
-          ),
-        50
-      )
+    const { promise, resolve } = Promise.withResolvers<boolean>();
+    setTimeout(
+      () =>
+        resolve(
+          out ===
+            "IPv4: 203.0.113.9\nIPv6: 2001:db8::1\nCountry: IT · Italy\nUser agent: Mozilla/5.0 (smoke)"
+        ),
+      50
     );
+    return promise;
   })
 );
 
@@ -1956,15 +2034,16 @@ await page.locator(".tool-whoami .btn-refresh").click();
 await page.waitForFunction(
   () => !document.querySelector(".tool-whoami .value.pending")
 );
+const whoamiIpv6Text = await whoamiValue("ipv6");
 check(
   "whoami reports an unreachable protocol without claiming no address",
-  (await whoamiValue("ipv6"))!.startsWith("Not reachable over IPv6") &&
+  whoamiIpv6Text.startsWith("Not reachable over IPv6") &&
     (await page
       .locator('.tool-whoami [data-row="ipv6"] .btn-copy')
       .isDisabled()) &&
     (await whoamiValue("ipv4")) === "203.0.113.9" &&
     (await whoamiValue("country")) === "IT · Italy",
-  (await whoamiValue("ipv6")) ?? ""
+  await whoamiValue("ipv6")
 );
 
 // The two traces disagreeing on the country shows both, labeled.
@@ -1973,12 +2052,11 @@ await page.locator(".tool-whoami .btn-refresh").click();
 await page.waitForFunction(
   () => !document.querySelector(".tool-whoami .value.pending")
 );
+const whoamiCountryText = await whoamiValue("country");
 check(
   "whoami shows both countries when the traces disagree",
-  (await whoamiValue("country"))!.startsWith(
-    "IT · Italy via IPv4, DE · Germany via IPv6"
-  ),
-  (await whoamiValue("country")) ?? ""
+  whoamiCountryText.startsWith("IT · Italy via IPv4, DE · Germany via IPv6"),
+  await whoamiValue("country")
 );
 
 // Speech to Text: real transcriptions over the real CDN, from file://. What
@@ -1990,17 +2068,16 @@ check(
 // visit fetches nothing.
 const stt = ".tool-speech-to-text ";
 const sttProgress = () =>
-  page.evaluate(() =>
-    document
-      .querySelector(".tool-speech-to-text .progress")!
-      .classList.contains("on")
-  );
+  page
+    .locator(".tool-speech-to-text .progress")
+    .first()
+    .evaluate((bar) => bar.classList.contains("on"));
 const sttDone = () =>
   page.waitForFunction(
     () =>
-      !document
-        .querySelector(".tool-speech-to-text .progress")!
-        .classList.contains("on"),
+      document
+        .querySelector(".tool-speech-to-text .progress")
+        ?.classList.contains("on") === false,
     null,
     { timeout: 180_000 }
   );
@@ -2010,41 +2087,44 @@ const sttText = () =>
       .map((p) => p.textContent)
       .join(" ")
   );
-const sttMeta = () => page.locator(`${stt}.meta`).textContent();
+const sttMeta = () => textOf(page.locator(`${stt}.meta`));
 const sttError = () =>
   page.evaluate(
     () =>
       document.querySelector(".tool-speech-to-text .error-box.on")
         ?.textContent ?? ""
   );
-async function dropSpeech(name: string) {
+const dropSpeech = async (name: string) => {
   const b64 = Buffer.from(
-    await Bun.file(join(speechDir, `${name}.wav`)).arrayBuffer()
+    await Bun.file(path.join(speechDir, `${name}.wav`)).arrayBuffer()
   ).toString("base64");
-  await page.evaluate(
-    ([n, s]) => {
-      const b = Uint8Array.from(atob(s!), (c) => c.charCodeAt(0));
-      const dt = new DataTransfer();
-      dt.items.add(new File([b], n!, { type: "audio/wav" }));
-      document.querySelector(".tool-speech-to-text")!.dispatchEvent(
-        new DragEvent("drop", {
-          dataTransfer: dt,
-          bubbles: true,
-          cancelable: true,
-        })
-      );
-    },
-    [`${name}.wav`, b64]
-  );
+  await page
+    .locator(".tool-speech-to-text")
+    .first()
+    .evaluate(
+      (host, [n, s]) => {
+        const b = Uint8Array.from(atob(s), (c) => c.codePointAt(0) ?? 0);
+        const dt = new DataTransfer();
+        dt.items.add(new File([b], n, { type: "audio/wav" }));
+        host.dispatchEvent(
+          new DragEvent("drop", {
+            bubbles: true,
+            cancelable: true,
+            dataTransfer: dt,
+          })
+        );
+      },
+      [`${name}.wav`, b64]
+    );
   await page.waitForFunction(() =>
     document
-      .querySelector(".tool-speech-to-text .progress")!
-      .classList.contains("on")
+      .querySelector(".tool-speech-to-text .progress")
+      ?.classList.contains("on")
   );
-}
-async function sttDownload(
+};
+const sttDownload = async (
   format: string
-): Promise<{ name: string; text: string }> {
+): Promise<{ name: string; text: string }> => {
   const [dl] = await Promise.all([
     page.waitForEvent("download"),
     page.locator(`${stt}.dl[data-format=${format}]`).click(),
@@ -2055,7 +2135,7 @@ async function sttDownload(
       (await dl.createReadStream()) as unknown as ReadableStream
     ).text(),
   };
-}
+};
 
 await page.goto("about:blank");
 await page.goto(`${url}#speech-to-text`);
@@ -2063,24 +2143,28 @@ await page.waitForSelector(`${stt}.empty-hint`);
 const sttPhases: string[] = [];
 await page.exposeFunction("sttPhase", (t: string) => sttPhases.push(t));
 const watchSttPhases = () =>
-  page.evaluate(() => {
-    new MutationObserver(() =>
-      (window as unknown as { sttPhase: (t: string) => void }).sttPhase(
-        document.querySelector(".tool-speech-to-text .phase")!.textContent ?? ""
-      )
-    ).observe(document.querySelector(".tool-speech-to-text .phase")!, {
-      childList: true,
-      characterData: true,
-      subtree: true,
+  page
+    .locator(".tool-speech-to-text .phase")
+    .first()
+    .evaluate((phase) => {
+      new MutationObserver(() =>
+        (window as unknown as { sttPhase: (t: string) => void }).sttPhase(
+          phase.textContent ?? ""
+        )
+      ).observe(phase, {
+        characterData: true,
+        childList: true,
+        subtree: true,
+      });
     });
-  });
 await watchSttPhases();
 await dropSpeech("en");
 await sttDone();
+const sttEnglishMeta = await sttMeta();
 check(
   "speech: English is detected and transcribed",
-  /quick brown fox jumps over the lazy dog\./i.test(await sttText()) &&
-    (await sttMeta())!.startsWith("English (detected) · 0:0") &&
+  /quick brown fox jumps over the lazy dog\./iu.test(await sttText()) &&
+    sttEnglishMeta.startsWith("English (detected) · 0:0") &&
     !(await sttError()),
   `${await sttMeta()} | ${await sttText()}${await sttError()}`
 );
@@ -2099,7 +2183,7 @@ const srt = await sttDownload("srt");
 check(
   "speech: SRT export",
   srt.name === "en.srt" &&
-    /^1\n00:00:00,\d{3} --> 00:00:0\d,\d{3}\nThe quick brown fox/.test(
+    /^1\n00:00:00,\d{3} --> 00:00:0\d,\d{3}\nThe quick brown fox/u.test(
       srt.text
     ) &&
     srt.text.includes("\n2\n"),
@@ -2111,26 +2195,30 @@ check(
   vtt.name === "en.vtt" && vtt.text.startsWith("WEBVTT\n\n00:00:00."),
   vtt.text.slice(0, 40)
 );
-const json = JSON.parse((await sttDownload("json")).text);
+const jsonDownload = await sttDownload("json");
+const json = JSON.parse(jsonDownload.text);
 check(
   "speech: JSON export has every Word with its times",
   json.language === "en" &&
     json.words.length >= 15 &&
     json.words.every(
       (w: { start: number; end: number }, i: number, a: { start: number }[]) =>
-        w.end >= w.start && (i === 0 || w.start >= a[i - 1]!.start)
+        w.end >= w.start && (i === 0 || w.start >= a[i - 1].start)
     ),
   JSON.stringify(json).slice(0, 120)
 );
 const sttCopied = await page.evaluate(() => {
   let out = "";
-  navigator.clipboard.writeText = async (t: string) => {
+  navigator.clipboard.writeText = (t: string) => {
     out = t;
+    return Promise.resolve();
   };
   (
     document.querySelector(".tool-speech-to-text .copy-btn") as HTMLElement
   ).click();
-  return new Promise<string>((resolve) => setTimeout(() => resolve(out), 50));
+  const { promise, resolve } = Promise.withResolvers<string>();
+  setTimeout(() => resolve(out), 50);
+  return promise;
 });
 check(
   "speech: Copy puts the text on the clipboard",
@@ -2140,7 +2228,7 @@ check(
 
 // Clicking a Word puts the player at that Word.
 const fox = json.words.find((w: { word: string }) => w.word === "fox");
-await page.locator(`${stt}.w`, { hasText: /^fox$/ }).click();
+await page.locator(`${stt}.w`, { hasText: /^fox$/u }).click();
 await page.waitForFunction(
   (t: number) =>
     Math.abs(
@@ -2156,10 +2244,11 @@ check("speech: clicking a Word seeks the player to it", true);
 
 await dropSpeech("de");
 await sttDone();
+const sttGermanMeta = await sttMeta();
 check(
   "speech: German is detected and transcribed",
-  (await sttMeta())!.startsWith("German (detected)") &&
-    /Berlin/.test(await sttText()),
+  sttGermanMeta.startsWith("German (detected)") &&
+    /Berlin/u.test(await sttText()),
   `${await sttMeta()} | ${await sttText()}`
 );
 
@@ -2167,7 +2256,8 @@ check(
 await dropSpeech("long");
 await sttDone();
 const sttLong = await sttText();
-const longJson = JSON.parse((await sttDownload("json")).text);
+const longDownload = await sttDownload("json");
+const longJson = JSON.parse(longDownload.text);
 const longStarts: number[] = longJson.words.map(
   (w: { start: number }) => w.start
 );
@@ -2175,10 +2265,10 @@ check(
   "speech: audio past one Window is stitched with nothing lost or doubled",
   sttLong.startsWith("Welcome to the weekly planning meeting.") &&
     sttLong.endsWith("park on the street that day.") &&
-    (sttLong.match(/quarterly report/g) ?? []).length === 1 &&
-    (sttLong.match(/public holiday/g) ?? []).length === 1 &&
-    longStarts.at(-1)! > 40 &&
-    longStarts.every((s, i) => i === 0 || s >= longStarts[i - 1]!),
+    (sttLong.match(/quarterly report/gu) ?? []).length === 1 &&
+    (sttLong.match(/public holiday/gu) ?? []).length === 1 &&
+    (longStarts.at(-1) ?? 0) > 40 &&
+    longStarts.every((s, i) => i === 0 || s >= longStarts[i - 1]),
   `${sttLong.slice(0, 60)} … ${sttLong.slice(-60)}`
 );
 
@@ -2186,13 +2276,14 @@ check(
 await page.locator(`${stt}.lang-select`).selectOption("en");
 await page.waitForFunction(() =>
   document
-    .querySelector(".tool-speech-to-text .progress")!
-    .classList.contains("on")
+    .querySelector(".tool-speech-to-text .progress")
+    ?.classList.contains("on")
 );
 await sttDone();
+const sttPickedMeta = await sttMeta();
 check(
   "speech: picking a language transcribes again in it",
-  (await sttMeta())!.startsWith("English · 0:4") &&
+  sttPickedMeta.startsWith("English · 0:4") &&
     (await page.evaluate(() => location.hash)) === "#speech-to-text/en",
   `${await sttMeta()} ${await page.evaluate(() => location.hash)}`
 );
@@ -2200,8 +2291,8 @@ await page.locator(`${stt}.keywords`).fill("Kubernetes, Nowak");
 await page.locator(`${stt}.keywords`).press("Enter");
 await page.waitForFunction(() =>
   document
-    .querySelector(".tool-speech-to-text .progress")!
-    .classList.contains("on")
+    .querySelector(".tool-speech-to-text .progress")
+    ?.classList.contains("on")
 );
 await sttDone();
 check(
@@ -2213,19 +2304,23 @@ check(
 
 // Cancel mid-way: the words so far stay, with a note saying where it stopped.
 // Clicked the moment the first Window lands, since the whole clip takes about two seconds.
-await page.evaluate(() => {
-  const phase = document.querySelector(".tool-speech-to-text .phase")!;
-  const obs = new MutationObserver(() => {
-    if (!/Transcribing \(0:[1-9]/.test(phase.textContent ?? "")) {
-      return;
-    }
-    obs.disconnect();
-    (
-      document.querySelector(".tool-speech-to-text .cancel-btn") as HTMLElement
-    ).click();
+await page
+  .locator(".tool-speech-to-text .phase")
+  .first()
+  .evaluate((phase) => {
+    const obs = new MutationObserver(() => {
+      if (!/Transcribing \(0:[1-9]/u.test(phase.textContent ?? "")) {
+        return;
+      }
+      obs.disconnect();
+      (
+        document.querySelector(
+          ".tool-speech-to-text .cancel-btn"
+        ) as HTMLElement
+      ).click();
+    });
+    obs.observe(phase, { characterData: true, childList: true, subtree: true });
   });
-  obs.observe(phase, { childList: true, characterData: true, subtree: true });
-});
 await page.locator(`${stt}.lang-select`).selectOption("");
 await page.waitForFunction(
   () => document.querySelector(".tool-speech-to-text .note.on"),
@@ -2235,18 +2330,18 @@ await page.waitForFunction(
 check(
   "speech: cancel keeps the words so far and says where it stopped",
   !(await sttProgress()) &&
-    /^Stopped at 0:\d\d of 0:46/.test(
-      (await page.locator(`${stt}.note`).textContent())!
+    /^Stopped at 0:\d\d of 0:46/u.test(
+      await textOf(page.locator(`${stt}.note`))
     ) &&
     (await page.locator(`${stt}.cue`).count()) > 0,
-  (await page.locator(`${stt}.note`).textContent())!
+  await textOf(page.locator(`${stt}.note`))
 );
 
 // The microphone: Chromium's fake device plays the English clip once.
 await page.locator(`${stt}.record-btn`).click();
 await page.waitForFunction(
   () =>
-    /quick brown fox/i.test(
+    /quick brown fox/iu.test(
       [
         ...document.querySelectorAll(
           ".tool-speech-to-text .cue p, .tool-speech-to-text .pending"
@@ -2261,15 +2356,13 @@ await page.waitForFunction(
 check(
   "speech: the microphone is transcribed while it records",
   (await page.locator(`${stt}.record-btn`).textContent()) === "Stop" &&
-    /^Recording 0:\d\d$/.test(
-      (await page.locator(`${stt}.phase`).textContent())!
-    )
+    /^Recording 0:\d\d$/u.test(await textOf(page.locator(`${stt}.phase`)))
 );
 // Past the clip's end (5 s), so the speaker has finished when Stop is pressed.
 await page.waitForFunction(
   () =>
-    /^Recording 0:0[7-9]$/.test(
-      document.querySelector(".tool-speech-to-text .phase")!.textContent ?? ""
+    /^Recording 0:0[7-9]$/u.test(
+      document.querySelector(".tool-speech-to-text .phase")?.textContent ?? ""
     ),
   null,
   { timeout: 30_000 }
@@ -2277,9 +2370,10 @@ await page.waitForFunction(
 await page.locator(`${stt}.record-btn`).click();
 await sttDone();
 const recordedText = await sttText();
+const sttRecordingSrt = await sttDownload("srt");
 check(
   "speech: stopping finishes the Recording and makes it playable",
-  /quick brown fox jumps over the lazy dog\. Please turn off the kitchen lights/i.test(
+  /quick brown fox jumps over the lazy dog\. Please turn off the kitchen lights/iu.test(
     recordedText
   ) &&
     (await page.locator(`${stt}.status`).textContent()) ===
@@ -2291,9 +2385,7 @@ check(
         ) as HTMLAudioElement
       ).src.startsWith("blob:")
     )) &&
-    /^recording-\d{4}-\d\d-\d\d-\d{4}\.srt$/.test(
-      (await sttDownload("srt")).name
-    ),
+    /^recording-\d{4}-\d\d-\d\d-\d{4}\.srt$/u.test(sttRecordingSrt.name),
   recordedText
 );
 
@@ -2302,7 +2394,7 @@ await page.goto("about:blank");
 await page.goto(`${url}#speech-to-text/de.Berlin`);
 await page.waitForFunction(() =>
   (
-    document.querySelector(".tool-speech-to-text .engines-text")!.textContent ??
+    document.querySelector(".tool-speech-to-text .engines-text")?.textContent ??
     ""
   ).startsWith("Engines cached")
 );
@@ -2321,11 +2413,12 @@ page.on("request", hfSpy);
 await dropSpeech("de");
 await sttDone();
 page.off("request", hfSpy);
+const sttCachedMeta = await sttMeta();
 check(
   "speech: second visit transcribes from the cached engine with no download",
   hfRequests.length === 0 &&
-    /Berlin/.test(await sttText()) &&
-    (await sttMeta())!.startsWith("German · "),
+    /Berlin/u.test(await sttText()) &&
+    sttCachedMeta.startsWith("German · "),
   `${hfRequests.join(" ")} ${await sttMeta()}`
 );
 await page.evaluate(() => {
@@ -2336,7 +2429,9 @@ await page.evaluate(() => {
 // Big Text: the Message fitted as large as it goes, Slides, the Countdown,
 // and Present, from the button and from a Present Link.
 const bt = ".tool-big-text ";
-const btLink = (params: Record<string, string>) =>
+// Pairs rather than an object where the order of the parameters is the
+// order the link should have.
+const btLink = (params: Record<string, string> | string[][]) =>
   `${url}#big-text/${new URLSearchParams(params).toString()}`;
 /** Whether the Slide on screen fits its area, and would not at 4% larger. */
 const btFit = () =>
@@ -2345,7 +2440,11 @@ const btFit = () =>
       ".tool-big-text .slide"
     ) as HTMLElement;
     const text = slide.querySelector(".text") as HTMLElement;
-    const size = Number.parseFloat(text.style.fontSize);
+    // The tool sets the size as `<n>px`; anything else reads as NaN.
+    const { fontSize } = text.style;
+    const size = fontSize.endsWith("px")
+      ? Number(fontSize.slice(0, -2))
+      : Number.NaN;
     const fits = () =>
       text.scrollHeight <= slide.clientHeight &&
       text.scrollWidth <= text.clientWidth;
@@ -2355,14 +2454,13 @@ const btFit = () =>
     const bigger = fits();
     text.style.fontSize = `${size}px`;
     text.style.overflow = "";
-    return { size, now, bigger };
+    return { bigger, now, size };
   });
-const btText = () =>
-  page.evaluate(() =>
-    (
-      document.querySelector(".tool-big-text .slide .text") as HTMLElement
-    ).innerText.trim()
-  );
+/** The Slide's text as rendered, line breaks included; the first Slide while two cross-fade. */
+const btText = async () => {
+  const [text] = await page.locator(`${bt}.slide .text`).allInnerTexts();
+  return present(text, "a Slide on the Big Text stage").trim();
+};
 
 await page.goto(`${url}#big-text`);
 await page.waitForSelector(`${bt}.stage`);
@@ -2383,14 +2481,17 @@ check(
 check(
   "big text: markdown subset renders",
   await page.evaluate(() => {
-    const t = document.querySelector(".tool-big-text .slide .text")!;
+    const t = document.querySelector(".tool-big-text .slide .text");
+    if (!t) {
+      throw new Error("No Slide on the Big Text stage");
+    }
     return (
       t.querySelector(".h1")?.textContent === "Welcome" &&
       t.querySelector("strong")?.textContent === "Big" &&
       t.querySelector("em")?.textContent === "words" &&
       t.querySelector("del")?.textContent === "small" &&
       t.querySelector("code")?.textContent === "x*y*" &&
-      t.textContent!.includes("snake_case")
+      (t.textContent ?? "").includes("snake_case")
     );
   })
 );
@@ -2411,10 +2512,12 @@ check(
       const t = document.querySelector(
         ".tool-big-text .slide .text"
       ) as HTMLElement;
-      return (
-        t.getClientRects().length === 1 &&
-        t.offsetHeight < Number.parseFloat(t.style.fontSize) * 1.5
-      );
+      // The tool sets the size as `<n>px`; anything else reads as NaN.
+      const { fontSize } = t.style;
+      const size = fontSize.endsWith("px")
+        ? Number(fontSize.slice(0, -2))
+        : Number.NaN;
+      return t.getClientRects().length === 1 && t.offsetHeight < size * 1.5;
     })),
   JSON.stringify(btWord)
 );
@@ -2423,7 +2526,7 @@ check(
 await page.goto(btLink({ m: "One || Two || Three", secs: "0.5" }));
 await page.waitForFunction(
   () =>
-    document.querySelector(".tool-big-text .slide-pos")!.textContent === "2 / 3"
+    document.querySelector(".tool-big-text .slide-pos")?.textContent === "2 / 3"
 );
 check(
   "big text: slides rotate",
@@ -2435,7 +2538,7 @@ await page.locator(`${bt}.o-message`).click();
 await page.keyboard.press("End");
 await page.waitForFunction(
   () =>
-    document.querySelector(".tool-big-text .slide-pos")!.textContent === "3 / 3"
+    document.querySelector(".tool-big-text .slide-pos")?.textContent === "3 / 3"
 );
 check(
   "big text: the preview shows the slide under the caret",
@@ -2458,40 +2561,42 @@ await page.waitForFunction(
   { timeout: 3000 }
 );
 check("big text: presenting starts the timer", true);
-const btCover = await page.evaluate(() => {
-  const r = document
-    .querySelector(".tool-big-text .stage")!
-    .getBoundingClientRect();
-  return (
-    r.x === 0 &&
-    r.y === 0 &&
-    r.width === innerWidth &&
-    r.height === innerHeight &&
-    location.hash.endsWith("&show=1")
-  );
-});
+const btCover = await page
+  .locator(`${bt}.stage`)
+  .first()
+  .evaluate((stage) => {
+    const r = stage.getBoundingClientRect();
+    return (
+      r.x === 0 &&
+      r.y === 0 &&
+      r.width === innerWidth &&
+      r.height === innerHeight &&
+      location.hash.endsWith("&show=1")
+    );
+  });
 check("big text: present covers the window and is in the link", btCover);
 await page.keyboard.press("Escape");
 await page.waitForFunction(
   () =>
-    !document
-      .querySelector(".tool-big-text .stage")!
-      .classList.contains("presenting")
+    document
+      .querySelector(".tool-big-text .stage")
+      ?.classList.contains("presenting") === false
 );
+const btHashAfterEscape = await page.evaluate(() => location.hash);
 check(
   "big text: escape ends it, and the timer waits again",
   (await page.locator(`${bt}.cd`).textContent()) === "10m\u00A00s" &&
-    !(await page.evaluate(() => location.hash)).includes("show=1")
+    !btHashAfterEscape.includes("show=1")
 );
 
 // At zero: Until in the past swaps the Slides with the Countdown for the end text.
 await page.goto(
-  btLink({
-    m: "Sale ends in {countdown} || Visit us",
-    until: "2020-01-01T00:00:00Z",
-    end: "text",
-    endtext: "**Sold out**",
-  })
+  btLink([
+    ["m", "Sale ends in {countdown} || Visit us"],
+    ["until", "2020-01-01T00:00:00Z"],
+    ["end", "text"],
+    ["endtext", "**Sold out**"],
+  ])
 );
 await page.waitForSelector(`${bt}.slide strong`);
 check(
@@ -2501,9 +2606,10 @@ check(
 );
 await page.goto(btLink({ m: "Big news", timer: "5m" }));
 await page.waitForSelector(`${bt}.slide`);
+const btNote = await textOf(page.locator(`${bt}.note`));
 check(
   "big text: a message without {countdown} says where it goes",
-  (await page.locator(`${bt}.note`).textContent())!.includes("{countdown}")
+  btNote.includes("{countdown}")
 );
 
 // Copy link: a Present Link, without the Shell's query string.
@@ -2515,11 +2621,14 @@ await page.goto(
 await page.waitForSelector(`${bt}.slide`);
 const btCopied = await page.evaluate(() => {
   let out = "";
-  navigator.clipboard.writeText = async (t: string) => {
+  navigator.clipboard.writeText = (t: string) => {
     out = t;
+    return Promise.resolve();
   };
   (document.querySelector(".tool-big-text .btn-link") as HTMLElement).click();
-  return new Promise<string>((resolve) => setTimeout(() => resolve(out), 50));
+  const { promise, resolve } = Promise.withResolvers<string>();
+  setTimeout(() => resolve(out), 50);
+  return promise;
 });
 check(
   "big text: copy link makes a present link",
@@ -2546,7 +2655,7 @@ check(
 await page.keyboard.press("ArrowRight");
 await page.waitForFunction(
   () =>
-    document.querySelector(".tool-big-text .slide-pos")!.textContent === "2 / 2"
+    document.querySelector(".tool-big-text .slide-pos")?.textContent === "2 / 2"
 );
 await page.keyboard.press("/");
 check(
@@ -2558,7 +2667,7 @@ await page.waitForFunction(() => !!document.fullscreenElement);
 await page.mouse.click(300, 300);
 await page.waitForFunction(
   () =>
-    document.querySelector(".tool-big-text .slide-pos")!.textContent === "1 / 2"
+    document.querySelector(".tool-big-text .slide-pos")?.textContent === "1 / 2"
 );
 check(
   "big text: F goes full screen, and a click moves to the next slide",
@@ -2571,10 +2680,11 @@ await page.waitForFunction(
     !document.fullscreenElement &&
     !document.querySelector(".tool-big-text .stage.presenting")
 );
+const btHashAfterPresentEscape = await page.evaluate(() => location.hash);
 check(
   "big text: escape ends it",
   !(await page.locator(`${bt}.stage.presenting`).count()) &&
-    !(await page.evaluate(() => location.hash)).includes("show=1")
+    !btHashAfterPresentEscape.includes("show=1")
 );
 await page.goto(btLink({ m: "A", show: "1" }));
 await page.waitForSelector(`${bt}.stage.presenting`);
@@ -2599,7 +2709,7 @@ check("big text: switching tools ends the presentation", true);
 const uuidValue = () =>
   page.locator(".tool-uuid-generator .value").textContent();
 const V4 =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 await page.goto(`${url}#uuid-generator`);
 await page.waitForSelector(".tool-uuid-generator .value");
 const firstUuid = (await uuidValue()) ?? "";
@@ -2622,11 +2732,14 @@ check(
 const copiedVia = (selector: string) =>
   page.evaluate((sel: string) => {
     let out = "";
-    navigator.clipboard.writeText = async (t: string) => {
+    navigator.clipboard.writeText = (t: string) => {
       out = t;
+      return Promise.resolve();
     };
     (document.querySelector(sel) as HTMLElement).click();
-    return new Promise<string>((resolve) => setTimeout(() => resolve(out), 50));
+    const { promise, resolve } = Promise.withResolvers<string>();
+    setTimeout(() => resolve(out), 50);
+    return promise;
   }, selector);
 check(
   "uuid copy button copies it",
@@ -2644,7 +2757,7 @@ check(
 check("uuid value says so", (await uuidValue()) === "Copied");
 await page.waitForFunction(
   (u: string) =>
-    document.querySelector(".tool-uuid-generator .value")!.textContent === u,
+    document.querySelector(".tool-uuid-generator .value")?.textContent === u,
   secondUuid
 );
 check("uuid value comes back after the flash", true);
@@ -2666,106 +2779,123 @@ check(
 );
 type DnbStyle = "perfect" | "silent";
 const dnbPlay = (style: DnbStyle) =>
-  page.evaluate(
-    ([how, ops]) => {
-      const w = window as unknown as {
-        dnbHeard: number[];
-        dnbPlayer?: MutationObserver;
-        dnbTapped?: boolean;
-      };
-      w.dnbHeard = [];
-      w.dnbPlayer?.disconnect();
-      if (!w.dnbTapped) {
-        w.dnbTapped = true;
-        type Tagged = AudioBuffer & { dnbLen?: number };
-        const decode = BaseAudioContext.prototype.decodeAudioData;
-        BaseAudioContext.prototype.decodeAudioData = function decodeAudioData(
-          this: BaseAudioContext,
-          data: ArrayBuffer
-        ) {
-          const len = data.byteLength;
-          return decode
-            .call(this, data)
-            .then((buf: Tagged) => ((buf.dnbLen = len), buf));
-        } as typeof decode;
-        const { start } = AudioBufferSourceNode.prototype;
-        AudioBufferSourceNode.prototype.start = function (
-          this: AudioBufferSourceNode,
-          ...args: Parameters<typeof start>
-        ) {
-          w.dnbHeard.push((this.buffer as Tagged | null)?.dnbLen ?? 0);
-          return start.apply(this, args);
+  page
+    .locator(".tool-dual-n-back")
+    .first()
+    .evaluate(
+      (host, [how, ops]) => {
+        const w = window as unknown as {
+          dnbHeard: number[];
+          dnbPlayer?: MutationObserver;
+          dnbTapped?: boolean;
         };
-      }
-      const host = document.querySelector(".tool-dual-n-back")!;
-      const n = Number(
-        /(\d+)-Back/.exec(host.querySelector(".stage-title")!.textContent!)![1]
-      );
-      const arithmetic = host.querySelector(".answer:not([hidden])") !== null;
-      const cells: number[] = [];
-      const sounds: number[] = [];
-      const numbers: number[] = [];
-      let heard = 0;
-      const key = (k: string) =>
-        document.dispatchEvent(
-          new KeyboardEvent("keydown", { key: k, bubbles: true })
-        );
-      const apply: Record<string, (a: number, b: number) => number> = {
-        add: (a, b) => a + b,
-        subtract: (a, b) => a - b,
-        multiply: (a, b) => a * b,
-        divide: (a, b) => a / b,
-      };
-      // A sound starts a moment after its trial is drawn, once its buffer is in hand; the player answers after both.
-      const answer = (cell: number, text: string) => {
-        const t = cells.length;
-        cells.push(cell);
-        const played = w.dnbHeard.slice(heard);
-        heard = w.dnbHeard.length;
-        if (arithmetic) {
-          numbers.push(Number(text));
-          if (how === "perfect" && t >= n) {
-            for (const c of String(
-              apply[ops[played[0]!]!]!(numbers[t - n]!, numbers[t]!)
-            )) {
-              key(c);
+        w.dnbHeard = [];
+        w.dnbPlayer?.disconnect();
+        if (!w.dnbTapped) {
+          w.dnbTapped = true;
+          type Tagged = AudioBuffer & { dnbLen?: number };
+          const decode = BaseAudioContext.prototype.decodeAudioData;
+          BaseAudioContext.prototype.decodeAudioData = function decodeAudioData(
+            this: BaseAudioContext,
+            data: ArrayBuffer
+          ) {
+            const len = data.byteLength;
+            return decode.call(this, data).then((buf: Tagged) => {
+              buf.dnbLen = len;
+              return buf;
+            });
+          } as typeof decode;
+          const { start: nativeStart } = AudioBufferSourceNode.prototype;
+          AudioBufferSourceNode.prototype.start = function start(
+            this: AudioBufferSourceNode,
+            ...args: Parameters<typeof nativeStart>
+          ) {
+            w.dnbHeard.push((this.buffer as Tagged | null)?.dnbLen ?? 0);
+            return nativeStart.apply(this, args);
+          };
+        }
+        const title = host.querySelector(".stage-title")?.textContent ?? "";
+        const level = /(?<n>\d+)-Back/u.exec(title)?.groups?.n;
+        if (level === undefined) {
+          throw new Error(`No N in the stage title "${title}"`);
+        }
+        const n = Number(level);
+        const arithmetic = host.querySelector(".answer:not([hidden])") !== null;
+        const cells: number[] = [];
+        const sounds: number[] = [];
+        const numbers: number[] = [];
+        let heard = 0;
+        const key = (k: string) =>
+          document.dispatchEvent(
+            new KeyboardEvent("keydown", { bubbles: true, key: k })
+          );
+        const apply: Record<string, (a: number, b: number) => number> = {
+          add: (a, b) => a + b,
+          divide: (a, b) => a / b,
+          multiply: (a, b) => a * b,
+          subtract: (a, b) => a - b,
+        };
+        // A sound starts a moment after its trial is drawn, once its buffer is in hand; the player answers after both.
+        const answer = (cell: number, text: string) => {
+          const t = cells.length;
+          cells.push(cell);
+          const played = w.dnbHeard.slice(heard);
+          heard = w.dnbHeard.length;
+          if (arithmetic) {
+            numbers.push(Number(text));
+            if (how === "perfect" && t >= n) {
+              const op = apply[ops[played[0] ?? 0] ?? ""];
+              if (!op) {
+                throw new Error(`No operation recognised for trial ${t}`);
+              }
+              for (const c of String(op(numbers[t - n], numbers[t]))) {
+                key(c);
+              }
             }
+            return;
           }
-          return;
-        }
-        sounds.push(played[0] ?? 0);
-        if (how !== "perfect" || t < n) {
-          return;
-        }
-        if (cells[t] === cells[t - n]) {
-          key("a");
-        }
-        if (sounds[t] === sounds[t - n]) {
-          key("l");
-        }
-      };
-      w.dnbPlayer = new MutationObserver((records) => {
-        const stim = records
-          .flatMap((r) => [...r.addedNodes])
-          .find(
-            (x) => x instanceof HTMLElement && x.classList.contains("stim")
-          ) as HTMLElement | undefined;
-        if (stim) {
+          sounds.push(played[0] ?? 0);
+          if (how !== "perfect" || t < n) {
+            return;
+          }
+          if (cells[t] === cells[t - n]) {
+            key("a");
+          }
+          if (sounds[t] === sounds[t - n]) {
+            key("l");
+          }
+        };
+        w.dnbPlayer = new MutationObserver((records) => {
+          const stim = records
+            .flatMap((r) => [...r.addedNodes])
+            .find(
+              (x) => x instanceof HTMLElement && x.classList.contains("stim")
+            ) as HTMLElement | undefined;
+          if (!stim) {
+            return;
+          }
+          const { parentElement } = stim;
+          if (!parentElement) {
+            throw new Error("A stimulus outside the board");
+          }
           setTimeout(
             answer,
             50,
-            Number(stim.parentElement!.dataset.cell),
+            Number(parentElement.dataset.cell),
             stim.textContent ?? ""
           );
+        });
+        const board = host.querySelector(".board");
+        if (!board) {
+          throw new Error("Dual N-Back has no board");
         }
-      });
-      w.dnbPlayer.observe(host.querySelector(".board")!, {
-        childList: true,
-        subtree: true,
-      });
-    },
-    [style, dnbOps] as [DnbStyle, Record<number, string>]
-  );
+        w.dnbPlayer.observe(board, {
+          childList: true,
+          subtree: true,
+        });
+      },
+      [style, dnbOps] as [DnbStyle, Record<number, string>]
+    );
 const dnbResult = async () => {
   await page.waitForSelector(`${dnb}.overlay.result`, { timeout: 60_000 });
   await page.evaluate(() =>
@@ -2778,12 +2908,11 @@ const dnbResult = async () => {
 
 await page.goto(`${url}#dual-n-back/trials=5&secs=1`);
 await page.waitForSelector(`${dnb}.overlay.idle`);
+const dnbStartMeta = await textOf(page.locator(`${dnb}.stage-meta`));
 check(
   "dual n-back starts at Dual 2-back with 9 trials",
   (await page.locator(`${dnb}.stage-title`).textContent()) === "Dual 2-Back" &&
-    (await page.locator(`${dnb}.stage-meta`).textContent())!.startsWith(
-      "9 trials"
-    ),
+    dnbStartMeta.startsWith("9 trials"),
   `${await page.locator(`${dnb}.stage-title`).textContent()} | ${await page
     .locator(`${dnb}.stage-meta`)
     .textContent()}`
@@ -2791,7 +2920,7 @@ check(
 await dnbPlay("perfect");
 await page.keyboard.press("Space");
 await page.waitForFunction(() =>
-  document.querySelector(".tool-dual-n-back")!.classList.contains("running")
+  document.querySelector(".tool-dual-n-back")?.classList.contains("running")
 );
 check(
   "dual n-back: Space starts, and the setup is out of reach while it runs",
@@ -2816,7 +2945,7 @@ check(
   "dual n-back: a perfect session scores 100% and raises N",
   perfect.includes("100%") &&
     perfect.includes("N-Back raised to 3") &&
-    /Position\d+–0/.test(perfect),
+    /Position\d+–0/u.test(perfect),
   perfect
 );
 check(
@@ -2849,7 +2978,7 @@ check(
 await page.goto(`${url}#dual-n-back/manual=1&n=1&trials=5&secs=1`);
 await page.waitForFunction(
   () =>
-    document.querySelector(".tool-dual-n-back .stage-title")!.textContent ===
+    document.querySelector(".tool-dual-n-back .stage-title")?.textContent ===
     "Dual 1-Back · Manual"
 );
 await dnbPlay("silent");
@@ -2874,7 +3003,7 @@ await page.goto(
 );
 await page.waitForFunction(
   () =>
-    document.querySelector(".tool-dual-n-back .stage-title")!.textContent ===
+    document.querySelector(".tool-dual-n-back .stage-title")?.textContent ===
     "Arithmetic 1-Back · Manual"
 );
 await dnbPlay("perfect");
@@ -2890,7 +3019,7 @@ check(
 await page.goto(`${url}#dual-n-back/mode=pa-t&manual=1&n=1&trials=5`);
 await page.waitForFunction(
   () =>
-    document.querySelector(".tool-dual-n-back .stage-title")!.textContent ===
+    document.querySelector(".tool-dual-n-back .stage-title")?.textContent ===
     "Self-paced Dual 1-Back · Manual"
 );
 await page.keyboard.press("Space");
@@ -2900,7 +3029,7 @@ const waited = await page.locator(`${dnb}.stage-meta`).textContent();
 await page.keyboard.press("Enter");
 await page.waitForFunction(
   () =>
-    document.querySelector(".tool-dual-n-back .stage-meta")!.textContent ===
+    document.querySelector(".tool-dual-n-back .stage-meta")?.textContent ===
     "5 left"
 );
 check(
@@ -2914,25 +3043,28 @@ check(
   "dual n-back: Stop discards the session",
   await page.evaluate(
     () =>
-      JSON.parse(localStorage.getItem("html-tools:dual-n-back:history")!)
-        .length === 3
+      JSON.parse(
+        localStorage.getItem("html-tools:dual-n-back:history") ?? "null"
+      ).length === 3
   )
 );
 
 // The mode toggles settle on a playable Mode and reach the Deep Link.
 await page.goto(`${url}#dual-n-back/trials=5&secs=1`);
 await page.locator(`${dnb}.chip`, { hasText: "Arithmetic" }).click();
+const dnbArithmeticHash = await page.evaluate(() => location.hash);
 check(
   "dual n-back: Arithmetic turns Sound off",
   (await page
     .locator(`${dnb}.chip[data-toggle="sound"]`)
     .getAttribute("aria-pressed")) === "false" &&
-    (await page.evaluate(() => location.hash)).includes("mode=pm")
+    dnbArithmeticHash.includes("mode=pm")
 );
 await page.locator(`${dnb}.multi-seg button`, { hasText: "3" }).click();
+const dnbThreeBackHash = await page.evaluate(() => location.hash);
 check(
   "dual n-back: three objects turn Arithmetic off and add a button per object",
-  (await page.evaluate(() => location.hash)).includes("mode=p-3") &&
+  dnbThreeBackHash.includes("mode=p-3") &&
     (await page.locator(`${dnb}.resp`).count()) === 3
 );
 
@@ -2964,9 +3096,9 @@ check(
   dnbExport.suggestedFilename()
 );
 const exportFile = {
-  name: "export.json",
-  mimeType: "application/json",
   buffer: Buffer.from(JSON.stringify(exported)),
+  mimeType: "application/json",
+  name: "export.json",
 };
 await page.locator(`${dnb}.import-input`).setInputFiles(exportFile);
 await page.waitForSelector(`${dnb}.history-note.ok`);
@@ -2988,8 +3120,8 @@ check(
 await page.locator(`${dnb}.import-input`).setInputFiles(exportFile);
 await page.waitForFunction(() =>
   document
-    .querySelector(".tool-dual-n-back .history-note")!
-    .textContent!.startsWith("3 sessions added")
+    .querySelector(".tool-dual-n-back .history-note")
+    ?.textContent?.startsWith("3 sessions added")
 );
 check(
   "dual n-back history: the export brings every session and the level back",
@@ -3085,10 +3217,10 @@ await page.waitForFunction(() =>
     localStorage.getItem("html-tools:markdown-editor:draft") ?? "{}"
   ).text?.startsWith("# Smoke")
 );
+const mvTocLinks = await page.locator(`${mv}.toc-link`).allTextContents();
 check(
   "editing updates the preview, contents, stats, and draft",
-  (await page.locator(`${mv}.toc-link`).allTextContents()).join("|") ===
-    "Smoke|Second" &&
+  mvTocLinks.join("|") === "Smoke|Second" &&
     (await page.locator(`${mv}.stat-words`).textContent()) === "12 words"
 );
 await page.locator(`${mv}.filename`).fill("notes");
@@ -3131,16 +3263,17 @@ await page.waitForFunction(
     document.querySelector(".tool-markdown-editor .doc h1")?.textContent ===
     "Smoke"
 );
+const mvRestoredSource = await page.locator(`${mv}.editor`).inputValue();
 check(
   "markdown deep link restores the draft, its name, and the preferences",
-  (await page.locator(`${mv}.editor`).inputValue()).startsWith("# Smoke") &&
+  mvRestoredSource.startsWith("# Smoke") &&
     (await page.locator(`${mv}.filename`).inputValue()) === "notes.md" &&
     (await mvHost().getAttribute("data-view")) === "split" &&
     (await page
       .locator(`${mv}.preview-pane`)
       .evaluate((p) => p.classList.contains("light"))),
   [
-    (await page.locator(`${mv}.editor`).inputValue()).slice(0, 12),
+    mvRestoredSource.slice(0, 12),
     await page.locator(`${mv}.filename`).inputValue(),
     await mvHost().getAttribute("data-view"),
     await page.locator(`${mv}.preview-pane`).getAttribute("class"),
@@ -3283,8 +3416,8 @@ await page.addInitScript(() => {
     constructor(script: string | URL, opts?: WorkerOptions) {
       super(script, opts);
       const entry = {
-        name: opts?.name ?? "",
         created: performance.now(),
+        name: opts?.name ?? "",
       } as (typeof log)[number];
       log.push(entry);
       this.addEventListener("message", (ev: MessageEvent) => {
@@ -3310,14 +3443,18 @@ const ideReady = () =>
     null,
     { timeout: 300_000 }
   );
-const ideTerm = async () =>
-  (await page.locator(`${ide}.xterm-rows`).innerText()).trim();
+/** The Terminal's rows as rendered, one line per row. */
+const ideTerm = async () => {
+  const rows = page.locator(`${ide}.xterm-rows`);
+  await rows.waitFor({ state: "attached" });
+  const [text] = await rows.allInnerTexts();
+  return present(text, "the Terminal's rows").trim();
+};
 await ideReady();
+const idePythonStatus = await textOf(page.locator(`${ide}.st-python`));
 check(
   "ide: interpreter and checker boot",
-  (await page.locator(`${ide}.st-python`).textContent())!.startsWith(
-    "Python 3."
-  )
+  idePythonStatus.startsWith("Python 3.")
 );
 check(
   "ide: a fresh project opens on main.py",
@@ -3336,9 +3473,10 @@ await page.waitForFunction(() =>
     .querySelector(".tool-python-ide .xterm-rows")
     ?.textContent?.includes("Hello from Python!")
 );
+const ideTermAfterRun = await ideTerm();
 check(
   "ide: run prints to the terminal, then the REPL returns",
-  (await ideTerm()).endsWith(">>>")
+  ideTermAfterRun.endsWith(">>>")
 );
 await page.evaluate(() => {
   const { monaco } = globalThis as unknown as {
@@ -3351,10 +3489,13 @@ await page.evaluate(() => {
       };
     };
   };
-  monaco.editor
+  const main = monaco.editor
     .getModels()
-    .find((m) => m.uri.path.endsWith("main.py"))!
-    .setValue("import os\nx: int = 'a'\n");
+    .find((m) => m.uri.path.endsWith("main.py"));
+  if (!main) {
+    throw new Error("Monaco has no model for main.py");
+  }
+  main.setValue("import os\nx: int = 'a'\n");
 });
 await page.waitForFunction(
   () => {
@@ -3398,7 +3539,7 @@ check(
     (await page.locator(`${ide}.tree-row.folder`).count()) === 0
 );
 // Tree operations, and what must follow them: the Deep Link, the Checker, the Interpreter, the folders.
-const ideText = (path: string) =>
+const ideText = (file: string) =>
   page.evaluate((p) => {
     const { monaco } = globalThis as unknown as {
       monaco: {
@@ -3413,8 +3554,8 @@ const ideText = (path: string) =>
         .find((m) => m.uri.path === `/project/${p}`)
         ?.getValue() ?? null
     );
-  }, path);
-const ideSetText = (path: string, text: string) =>
+  }, file);
+const ideSetText = (file: string, text: string) =>
   page.evaluate(
     ([p, t]) => {
       const { monaco } = globalThis as unknown as {
@@ -3427,12 +3568,15 @@ const ideSetText = (path: string, text: string) =>
           };
         };
       };
-      monaco.editor
+      const model = monaco.editor
         .getModels()
-        .find((m) => m.uri.path === `/project/${p}`)!
-        .setValue(t);
+        .find((m) => m.uri.path === `/project/${p}`);
+      if (!model) {
+        throw new Error(`Monaco has no model for ${p}`);
+      }
+      model.setValue(t);
     },
-    [path, text] as const
+    [file, text] as const
   );
 const ideNew = async (btn: string, name: string) => {
   await page.locator(ide + btn).click();
@@ -3441,19 +3585,27 @@ const ideNew = async (btn: string, name: string) => {
   await page.locator(`${ide}.prompt-dialog`).waitFor({ state: "hidden" });
   await page.locator(`${ide}.tree-row[data-path="${name}"]`).waitFor();
 };
-const ideMenu = async (path: string, label: string) => {
+const ideMenu = async (file: string, label: string) => {
   await page
-    .locator(`${ide}.tree-row[data-path="${path}"]`)
+    .locator(`${ide}.tree-row[data-path="${file}"]`)
     .click({ button: "right" });
   await page
     .locator(`${ide}.context-menu button`)
-    .filter({ hasText: new RegExp(`^${label}$`) })
+    .filter({ hasText: new RegExp(`^${label}$`, "u") })
     .click();
+};
+/** Answers the IDE's own confirmation dialog with OK; returns the question it asked. */
+const ideConfirm = async () => {
+  const question = await page.locator(`${ide}.prompt-label`).textContent();
+  const inputHidden = await page.locator(`${ide}.prompt-input`).isHidden();
+  await page.locator(`${ide}.prompt-ok`).click();
+  await page.locator(`${ide}.prompt-dialog`).waitFor({ state: "hidden" });
+  return { inputHidden, question };
 };
 const ideTree = () =>
   page.evaluate(() =>
     [...document.querySelectorAll(".tool-python-ide .tree-row")]
-      .map((r) => (r as HTMLElement).dataset.path!)
+      .map((r) => (r as HTMLElement).dataset.path ?? "")
       .toSorted()
   );
 const ideRun = async (file: string, until: string) => {
@@ -3494,11 +3646,14 @@ await page.evaluate(() => {
   };
   const model = monaco.editor
     .getModels()
-    .find((m) => m.uri.path.endsWith("main.py"))!;
+    .find((m) => m.uri.path.endsWith("main.py"));
+  const [editor] = monaco.editor.getEditors();
+  if (!model || !editor) {
+    throw new Error("Monaco has no main.py model or no editor");
+  }
   model.setValue("");
-  const editor = monaco.editor.getEditors()[0]!;
   editor.setModel(model);
-  editor.setPosition({ lineNumber: 1, column: 1 });
+  editor.setPosition({ column: 1, lineNumber: 1 });
   editor.focus();
 });
 await page.keyboard.type("import collec", { delay: 40 });
@@ -3520,7 +3675,9 @@ check(
   (await ideText("main.py")) === "import collections",
   JSON.stringify(await ideText("main.py"))
 );
-page.on("dialog", (d) => void d.accept());
+page.on("dialog", (d) => {
+  void d.accept();
+});
 await page.locator(`${ide}.tree-row.file[data-path="main.py"]`).click();
 await ideMenu("main.py", "Rename");
 await page.locator(`${ide}.prompt-input`).fill("app.py");
@@ -3562,16 +3719,20 @@ await ideSetText("lib/util.py", "V = 'folder'\n");
 await ideSetText("My File.py", "value = 1\nprint(value)\n");
 await page.locator(`${ide}.tree-row.file[data-path="My File.py"]`).click();
 const ideErrorsBeforeSpaceMove = errors.length;
-await page.evaluate(() => {
-  const target = document.querySelector(
-    '.tool-python-ide .tree-row.folder[data-path="lib"]'
-  )!;
-  const dt = new DataTransfer();
-  dt.setData("text/x-pyide-path", "My File.py");
-  target.dispatchEvent(
-    new DragEvent("drop", { dataTransfer: dt, bubbles: true, cancelable: true })
-  );
-});
+await page
+  .locator(`${ide}.tree-row.folder[data-path="lib"]`)
+  .first()
+  .evaluate((target) => {
+    const dt = new DataTransfer();
+    dt.setData("text/x-pyide-path", "My File.py");
+    target.dispatchEvent(
+      new DragEvent("drop", {
+        bubbles: true,
+        cancelable: true,
+        dataTransfer: dt,
+      })
+    );
+  });
 await page
   .locator(`${ide}.tree-row.file[data-path="lib/My File.py"]`)
   .waitFor();
@@ -3585,7 +3746,7 @@ await page.evaluate(() => {
       };
     };
   };
-  monaco.editor.getEditors()[0]?.setPosition({ lineNumber: 1, column: 2 });
+  monaco.editor.getEditors()[0]?.setPosition({ column: 2, lineNumber: 1 });
 });
 await page.waitForTimeout(1000);
 check(
@@ -3596,17 +3757,20 @@ check(
       "lib/My File.py",
   errors.slice(ideErrorsBeforeSpaceMove).join(" | ")
 );
-await page.evaluate(() => {
-  const dt = new DataTransfer();
-  dt.setData("text/x-pyide-path", "lib/My File.py");
-  document.querySelector(".tool-python-ide .tree")!.dispatchEvent(
-    new DragEvent("drop", {
-      dataTransfer: dt,
-      bubbles: true,
-      cancelable: true,
-    })
-  );
-});
+await page
+  .locator(`${ide}.tree`)
+  .first()
+  .evaluate((tree) => {
+    const dt = new DataTransfer();
+    dt.setData("text/x-pyide-path", "lib/My File.py");
+    tree.dispatchEvent(
+      new DragEvent("drop", {
+        bubbles: true,
+        cancelable: true,
+        dataTransfer: dt,
+      })
+    );
+  });
 await page.locator(`${ide}.tree-row.file[data-path="My File.py"]`).waitFor();
 await ideNew(".new-file-btn", "recreate.py");
 await ideSetText("recreate.py", "OLD = True\n");
@@ -3637,6 +3801,13 @@ await page.waitForFunction(
 await page.waitForTimeout(150);
 await ideSetText("lib.py", "V = 'module'\nTYPED_DURING_RUN = 1\n");
 await ideMenu("recreate.py", "Delete");
+const ideDeleteAsked = await ideConfirm();
+check(
+  "ide: Delete asks first, in the IDE's own dialog",
+  ideDeleteAsked.question === 'Delete "recreate.py"?' &&
+    ideDeleteAsked.inputHidden,
+  JSON.stringify(ideDeleteAsked)
+);
 await page
   .locator(`${ide}.tree-row[data-path="recreate.py"]`)
   .waitFor({ state: "hidden" });
@@ -3680,24 +3851,28 @@ check(
   JSON.stringify(await ideText("flip.txt"))
 );
 await page.locator(`${ide}.tree-row.folder[data-path="made"]`).click();
+const ideTreeWithFolders = await ideTree();
 check(
   "ide: a program's folders reach the Tree",
-  (await ideTree()).includes("made/deep"),
-  (await ideTree()).join(", ")
+  ideTreeWithFolders.includes("made/deep"),
+  ideTreeWithFolders.join(", ")
 );
 await ideMenu("lib_old/util.py", "Delete");
+await ideConfirm();
 await page.waitForFunction(
   () =>
     !document.querySelector(
       '.tool-python-ide .tree-row[data-path="lib_old/util.py"]'
     )
 );
+const ideTreeAfterDelete = await ideTree();
 check(
   "ide: deleting the last file leaves its folder",
-  (await ideTree()).includes("lib_old"),
-  (await ideTree()).join(", ")
+  ideTreeAfterDelete.includes("lib_old"),
+  ideTreeAfterDelete.join(", ")
 );
 await ideMenu("lib_old", "Delete");
+await ideConfirm();
 await page.waitForFunction(
   () =>
     !document.querySelector('.tool-python-ide .tree-row[data-path="lib_old"]')
@@ -3707,20 +3882,23 @@ await ideSetText(
   "import os\nprint('recreated', open('recreate.py').read().strip())\nprint('binary', list(open('flip.txt', 'rb').read()))\nprint('dirs', sorted(d for d, _, _ in os.walk('.')))\n"
 );
 await ideRun("app.py", "dirs [");
+const ideTermRecreated = await ideTerm();
 check(
   "ide: the recreated file reaches the Interpreter",
-  (await ideTerm()).includes("recreated NEW = True"),
-  (await ideTerm()).split("\n").slice(-5).join(" | ")
+  ideTermRecreated.includes("recreated NEW = True"),
+  ideTermRecreated.split("\n").slice(-5).join(" | ")
 );
+const ideTermBinary = await ideTerm();
 check(
   "ide: the binary rewrite reaches the Interpreter",
-  (await ideTerm()).includes("binary [0, 1, 2, 255]"),
-  (await ideTerm()).split("\n").slice(-5).join(" | ")
+  ideTermBinary.includes("binary [0, 1, 2, 255]"),
+  ideTermBinary.split("\n").slice(-5).join(" | ")
 );
+const ideTermDirs = await ideTerm();
 check(
   "ide: the Interpreter's folders match the Tree",
-  (await ideTerm()).includes("dirs ['.', './made', './made/deep']"),
-  (await ideTerm()).split("\n").slice(-5).join(" | ")
+  ideTermDirs.includes("dirs ['.', './made', './made/deep']"),
+  ideTermDirs.split("\n").slice(-5).join(" | ")
 );
 // An edit made right before a reload is journaled and comes back.
 await ideSetText("app.py", "print('edited just before the reload')\n");
@@ -3751,11 +3929,12 @@ await page.waitForFunction(
   null,
   { timeout: 30_000 }
 );
-const boot = (await checkerWorkers()).at(-1)!;
+const bootWorkers = await checkerWorkers();
+const boot = present(bootWorkers.at(-1), "a foreground Checker worker");
 check(
   "ide: the Checker reports within 6 s of its worker's creation",
-  boot.firstDiagnostics! - boot.created < 6000,
-  `${((boot.firstDiagnostics! - boot.created) / 1000).toFixed(2)}s`
+  (boot.firstDiagnostics ?? Number.NaN) - boot.created < 6000,
+  `${(((boot.firstDiagnostics ?? Number.NaN) - boot.created) / 1000).toFixed(2)}s`
 );
 // A settings save that changes nothing about Pyright leaves the Checker running; one that does restarts it.
 const ideSaveSettings = async (change: (dialog: HTMLElement) => void) => {
@@ -3764,17 +3943,19 @@ const ideSaveSettings = async (change: (dialog: HTMLElement) => void) => {
   await page.locator(`${ide}.settings-dialog form button.primary`).click();
   await page.locator(`${ide}.settings-dialog`).waitFor({ state: "hidden" });
 };
-const checkersBefore = (await checkerWorkers()).length;
+const workersBefore = await checkerWorkers();
+const checkersBefore = workersBefore.length;
 await ideSaveSettings((d) => {
   (d.querySelector("input[name=lineLength]") as HTMLInputElement).value = "100";
 });
 await page.waitForTimeout(1500);
+const checkersAfterRuffSettings = await checkerWorkers();
 check(
   "ide: a Ruff-only settings save does not restart the Checker",
-  (await checkerWorkers()).length === checkersBefore &&
+  checkersAfterRuffSettings.length === checkersBefore &&
     (await page.locator(`${ide}.st-checker`).getAttribute("data-state")) ===
       "ready",
-  (await page.locator(`${ide}.st-checker`).getAttribute("data-state"))!
+  await attributeOf(page.locator(`${ide}.st-checker`), "data-state")
 );
 await ideSaveSettings((d) => {
   (
@@ -3791,13 +3972,14 @@ await page.waitForFunction(
   { timeout: 10_000 }
 );
 await ideReady();
+const checkersAfterPyrightSettings = await checkerWorkers();
 check(
   "ide: a Pyright settings change restarts the Checker once",
-  (await checkerWorkers()).length === checkersBefore + 1
+  checkersAfterPyrightSettings.length === checkersBefore + 1
 );
 // The Mirror follows what is installed, not the Lock: micropip's freeze lists every Catalog
 // package either way, so a Catalog package removed must still leave the Checker's view.
-const ideLspMessages = (path: string) =>
+const ideLspMessages = (file: string) =>
   page.evaluate((p) => {
     const { monaco } = globalThis as unknown as {
       monaco: {
@@ -3812,7 +3994,7 @@ const ideLspMessages = (path: string) =>
       .getModelMarkers({})
       .filter((m) => m.owner === "lsp" && m.resource.path === `/project/${p}`)
       .map((m) => m.message);
-  }, path);
+  }, file);
 await ideSetText("app.py", "import six\nprint(six.__version__)\n");
 await page.locator(`${ide}.install-input`).fill("six");
 await page.locator(`${ide}.install-btn`).click();
@@ -3893,21 +4075,22 @@ await page.waitForFunction(
   null,
   { timeout: 60_000 }
 );
+const ideMarkersAfterRemove = await ideLspMessages("app.py");
 check(
   "ide: a removed package is missing for the Checker again",
   true,
-  (await ideLspMessages("app.py")).join(" | ")
+  ideMarkersAfterRemove.join(" | ")
 );
 
 await page.goto(`${url}#markdown-editor`);
 await page.waitForSelector(`${mv}.editor`);
 // Contents in the Narrow Layout is a drawer, closed on load, opened by the button.
-await page.setViewportSize({ width: 600, height: 800 });
+await page.setViewportSize({ height: 800, width: 600 });
 await page.locator(`${mv}.seg button[data-mode=preview]`).click();
 await page.waitForFunction(() =>
   document
-    .querySelector(".tool-markdown-editor")!
-    .classList.contains("toc-drawer")
+    .querySelector(".tool-markdown-editor")
+    ?.classList.contains("toc-drawer")
 );
 check(
   "narrow: contents becomes a drawer and closes",
@@ -3925,11 +4108,11 @@ check(
   "narrow: the backdrop closes the drawer",
   !(await page.locator(`${mv}.toc-backdrop`).isVisible())
 );
-await page.setViewportSize({ width: 1200, height: 800 });
+await page.setViewportSize({ height: 800, width: 1200 });
 await page.waitForFunction(() =>
   document
-    .querySelector(".tool-markdown-editor")!
-    .classList.contains("toc-open")
+    .querySelector(".tool-markdown-editor")
+    ?.classList.contains("toc-open")
 );
 check("wide again: contents comes back as a column", true);
 await page.evaluate(() => {
@@ -3939,7 +4122,7 @@ await page.evaluate(() => {
 });
 
 // Narrow layout: below 768px the sidebar becomes an on-demand drawer.
-await page.setViewportSize({ width: 375, height: 667 });
+await page.setViewportSize({ height: 667, width: 375 });
 await page.goto(`${url}#jsonc-sorter`);
 // waitFor, not isVisible: shrinking the viewport hides the sidebar via a
 // transition, and this goto is a same-document hash navigation, not a reload.
@@ -4001,12 +4184,12 @@ await page.locator(".sidebar").waitFor({ state: "hidden" });
 
 // Widening across the breakpoint restores the inline sidebar; the hamburger
 // gives way to the collapse button in the sidebar's corner.
-await page.setViewportSize({ width: 1200, height: 800 });
+await page.setViewportSize({ height: 800, width: 1200 });
 await page.locator(".sidebar").waitFor({ state: "visible" });
 // CSS shows the sidebar before the matchMedia change event syncs the button.
 await page.waitForFunction(
   () =>
-    document.querySelector(".menu-btn")!.getAttribute("aria-expanded") ===
+    document.querySelector(".menu-btn")?.getAttribute("aria-expanded") ===
     "true"
 );
 check(
@@ -4017,9 +4200,13 @@ check(
 
 // Wide layout: the corner button collapses the sidebar and the main pane
 // takes the full width.
-const paneLeft = async () => (await page.locator(".content").boundingBox())!.x;
+const paneLeft = async () =>
+  present(
+    await page.locator(".content").boundingBox(),
+    "a box for the main pane"
+  ).x;
 await page.waitForFunction(
-  () => document.querySelector(".content")!.getBoundingClientRect().x === 220
+  () => document.querySelector(".content")?.getBoundingClientRect().x === 220
 );
 check("wide: main pane sits beside the sidebar", true);
 
@@ -4035,7 +4222,7 @@ check(
 await page.locator(".collapse-btn").click();
 await page.locator(".sidebar").waitFor({ state: "hidden" });
 await page.waitForFunction(
-  () => document.querySelector(".content")!.getBoundingClientRect().x === 0
+  () => document.querySelector(".content")?.getBoundingClientRect().x === 0
 );
 check(
   "wide: corner button collapses sidebar, focus moves to the reveal button",
@@ -4094,7 +4281,7 @@ check(
 await page.locator(".menu-btn").click();
 await page.locator(".sidebar").waitFor({ state: "visible" });
 await page.waitForFunction(
-  () => document.querySelector(".content")!.getBoundingClientRect().x === 220
+  () => document.querySelector(".content")?.getBoundingClientRect().x === 220
 );
 check(
   "wide: reveal button expands sidebar again, focus moves to the corner button",
@@ -4135,7 +4322,7 @@ check(
 
 // Narrowing while collapsed still starts the drawer closed; the collapse is
 // a wide-layout thing and does not leak into it.
-await page.setViewportSize({ width: 375, height: 667 });
+await page.setViewportSize({ height: 667, width: 375 });
 await page.reload();
 await page.waitForSelector(".menu-btn");
 await page.locator(".menu-btn").click();
@@ -4143,13 +4330,13 @@ await page.locator(".sidebar").waitFor({ state: "visible" });
 check("narrow: drawer opens regardless of collapse preference", true);
 await page.keyboard.press("Escape");
 await page.locator(".sidebar").waitFor({ state: "hidden" });
-await page.setViewportSize({ width: 1200, height: 800 });
+await page.setViewportSize({ height: 800, width: 1200 });
 await page.waitForFunction(
-  () => document.querySelector(".content")!.getBoundingClientRect().x === 0
+  () => document.querySelector(".content")?.getBoundingClientRect().x === 0
 );
 await page.waitForFunction(
   () =>
-    document.querySelector(".menu-btn")!.getAttribute("aria-expanded") ===
+    document.querySelector(".menu-btn")?.getAttribute("aria-expanded") ===
     "false"
 );
 check(
