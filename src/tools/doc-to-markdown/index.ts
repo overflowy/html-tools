@@ -1,4 +1,5 @@
 import "./tool.css";
+import { LANGUAGES, languageName } from "../../shared/ocr-languages";
 import type { Tool } from "../../shell/types";
 import { cancelConversion, convertDocument } from "./convert";
 import type { Phase } from "./convert";
@@ -9,7 +10,6 @@ import {
   clearCached,
   listCached,
 } from "./engines";
-import { LANGUAGES, languageName } from "./languages";
 
 const LANG_KEY = "html-tools:doc-to-markdown:langs";
 const MARKERS_KEY = "html-tools:doc-to-markdown:markers";

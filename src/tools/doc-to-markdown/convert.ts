@@ -4,16 +4,16 @@
 // structurally and Scanned Pages rendered and recognized; images go straight to
 // OCR. Everything here reports progress by phase and stops on cancel.
 
-import { createWorker } from "tesseract.js";
 import type { Worker as TessWorker } from "tesseract.js";
 
+import { languageName } from "../../shared/ocr-languages";
 import { scriptBlobUrl, scriptDataUrl } from "../../shared/script-url";
+import { startTesseract, tesseractCore } from "../../shared/tesseract";
 import { ConvertError } from "./convert-error";
 import { detect } from "./detect";
 import type { ImageFormat, OfficeFormat } from "./detect";
 import { ENGINES, getEngine, languageAsset, pdfjsAsset } from "./engines";
 import type { EngineAsset, Progress } from "./engines";
-import { languageName } from "./languages";
 import { gateByConfidence, ocrBody, ocrMarkdown } from "./ocr-text";
 import type { OcrLine, OcrParagraph } from "./ocr-text";
 import {
@@ -197,26 +197,6 @@ const explain = (e: unknown): Error => {
 
 /* ---------------- tesseract ---------------- */
 
-const SIMD_PROBE = new Uint8Array([
-  0, 97, 115, 109, 1, 0, 0, 0, 1, 5, 1, 96, 0, 1, 123, 3, 2, 1, 0, 10, 10, 1, 8,
-  0, 65, 0, 253, 15, 253, 98, 11,
-]);
-const hasSimd = (() => {
-  try {
-    return WebAssembly.validate(SIMD_PROBE);
-  } catch {
-    return false;
-  }
-})();
-
-/**
- * tesseract.js 7.0.0 reads `l.data` where it means `l.code` when languages are
- * given as bytes (upstream PR #1052). The worker script is ours to patch; a
- * release that has fixed it simply has nothing to replace.
- */
-const patchTesseractWorker = (src: string): string =>
-  src.replace('"string"==typeof t?t:t.data', '"string"==typeof t?t:t.code');
-
 const ocrWorker = async (
   run: Run,
   languages: string[]
@@ -229,13 +209,8 @@ const ocrWorker = async (
     tess.worker.terminate();
     tess = null;
   }
-  const workerSrc = patchTesseractWorker(
-    await engineText(run, ENGINES.tesseractWorker)
-  );
-  const coreSrc = await engineText(
-    run,
-    hasSimd ? ENGINES.tesseractCore : ENGINES.tesseractCoreNoSimd
-  );
+  const workerSrc = await engineText(run, ENGINES.tesseractWorker);
+  const coreSrc = await engineText(run, tesseractCore());
   const models: { code: string; data: Uint8Array }[] = [];
   for (const code of languages) {
     models.push({
@@ -247,44 +222,10 @@ const ocrWorker = async (
     fraction: null,
     text: `Starting OCR (${languages.map(languageName).join(", ")})`,
   });
-
-  // One classic worker that first defines TesseractCore from the single-file
-  // core build, then runs the worker script; with the core global already
-  // present, the script never consults corePath. tesseract.js spawns the
-  // worker itself and messages it at once, so the bootstrap must import
-  // synchronously with both URLs embedded: a blob: URL (see script-url.ts).
-  // The core writes its complaints about unreadable input ("Line cannot be
-  // recognized!!") to stderr, which Emscripten maps to console.error; on a
-  // figure page that is expected, not an error, so route it to a warning.
-  const bootUrl = scriptBlobUrl(
-    `importScripts(${JSON.stringify(scriptDataUrl(coreSrc, "tesseract-core.js"))}, ${JSON.stringify(scriptDataUrl(workerSrc, "tesseract-worker.js"))});
-    const core = TesseractCore;
-    TesseractCore = (m = {}) => core({ printErr: (s) => console.warn("tesseract: " + s), ...m });`
-  );
-  const failure = Promise.withResolvers<never>();
-  try {
-    const worker = await Promise.race([
-      createWorker(models as unknown as string[], 1, {
-        cacheMethod: "none",
-        errorHandler: (e: unknown) =>
-          failure.reject(
-            new Error(
-              `OCR could not start: ${
-                e instanceof Error ? e.message : String(e)
-              }`
-            )
-          ),
-        workerBlobURL: false,
-        workerPath: bootUrl,
-      }),
-      failure.promise,
-    ]);
-    checkCancelled(run);
-    tess = { key, worker };
-    return worker;
-  } finally {
-    URL.revokeObjectURL(bootUrl);
-  }
+  const worker = await startTesseract({ coreSrc, models, workerSrc });
+  checkCancelled(run);
+  tess = { key, worker };
+  return worker;
 };
 
 interface TessBlocks {

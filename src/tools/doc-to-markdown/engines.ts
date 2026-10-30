@@ -3,6 +3,7 @@
 // and the download are shared with every Tool that has Engines.
 
 import type { EngineAsset } from "../../shared/engines";
+import { TESSERACT_ENGINES } from "../../shared/tesseract";
 
 export {
   cacheAvailable,
@@ -15,17 +16,18 @@ export {
   type OnProgress,
   type Progress,
 } from "../../shared/engines";
+export {
+  TESSERACT_CORE_VERSION,
+  TESSERACT_VERSION,
+  TESSDATA_VERSION,
+  languageAsset,
+} from "../../shared/tesseract";
 
 export const ANYDOC_VERSION = "0.2.4";
 export const PDF_INSPECTOR_VERSION = "1.17.0";
 export const PDFJS_VERSION = "6.3.289";
-export const TESSERACT_VERSION = "7.0.0";
-// npm's `latest` tag points at 6.1.2 by a publish-order quirk; tesseract.js 7.0.0 depends on ^7.0.0.
-export const TESSERACT_CORE_VERSION = "7.0.0";
-export const TESSDATA_VERSION = "4.1.0";
 
 const NPM = "https://cdn.jsdelivr.net/npm/";
-const GH = "https://cdn.jsdelivr.net/gh/";
 const PDFJS = `${NPM}pdfjs-dist@${PDFJS_VERSION}/`;
 
 export const ENGINES = {
@@ -73,27 +75,9 @@ export const ENGINES = {
     url: `${PDFJS}legacy/build/pdf.worker.min.mjs`,
     version: PDFJS_VERSION,
   },
-  tesseractCore: {
-    approxBytes: 3_900_000,
-    id: "tesseract-core",
-    label: "tesseract core",
-    url: `${NPM}tesseract.js-core@${TESSERACT_CORE_VERSION}/tesseract-core-simd-lstm.wasm.js`,
-    version: TESSERACT_CORE_VERSION,
-  },
-  tesseractCoreNoSimd: {
-    approxBytes: 3_900_000,
-    id: "tesseract-core-nosimd",
-    label: "tesseract core (no SIMD)",
-    url: `${NPM}tesseract.js-core@${TESSERACT_CORE_VERSION}/tesseract-core-lstm.wasm.js`,
-    version: TESSERACT_CORE_VERSION,
-  },
-  tesseractWorker: {
-    approxBytes: 111_000,
-    id: "tesseract-worker",
-    label: "tesseract.js worker",
-    url: `${NPM}tesseract.js@${TESSERACT_VERSION}/dist/worker.min.js`,
-    version: TESSERACT_VERSION,
-  },
+  tesseractCore: TESSERACT_ENGINES.core,
+  tesseractCoreNoSimd: TESSERACT_ENGINES.coreNoSimd,
+  tesseractWorker: TESSERACT_ENGINES.worker,
 } satisfies Record<string, EngineAsset>;
 
 /** Where each kind of file lives in the pdf.js package. */
@@ -129,12 +113,3 @@ export const pdfjsAsset = (
     version: PDFJS_VERSION,
   };
 };
-
-/** The recognition model for one Language. */
-export const languageAsset = (code: string): EngineAsset => ({
-  approxBytes: 4_000_000,
-  id: `tessdata-${code}`,
-  label: `tesseract ${code}`,
-  url: `${GH}tesseract-ocr/tessdata_fast@${TESSDATA_VERSION}/${code}.traineddata`,
-  version: TESSDATA_VERSION,
-});
