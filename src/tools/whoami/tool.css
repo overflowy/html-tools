@@ -12,11 +12,6 @@
   gap: 8px;
 }
 
-.tool-whoami button:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
-
 .tool-whoami .cards {
   display: grid;
   grid-template-columns: 1fr 1fr;

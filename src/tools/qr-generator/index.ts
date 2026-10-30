@@ -181,9 +181,9 @@ const tool: Tool = {
           <div class="pane-head">
             <span>Preview</span>
             <span class="spacer"></span>
-            <button class="btn-png" type="button"><span class="wide-only">Download </span>PNG</button>
-            <button class="btn-svg" type="button"><span class="wide-only">Download </span>SVG</button>
-            <button class="btn-copy primary" type="button">Copy</button>
+            <button class="btn-png" type="button" disabled><span class="wide-only">Download </span>PNG</button>
+            <button class="btn-svg" type="button" disabled><span class="wide-only">Download </span>SVG</button>
+            <button class="btn-copy primary" type="button" disabled>Copy</button>
           </div>
           <div class="preview-frame">
             <canvas class="qr-canvas" hidden></canvas>
@@ -200,6 +200,8 @@ const tool: Tool = {
     const $fg = $(".opt-fg") as HTMLInputElement;
     const $bg = $(".opt-bg") as HTMLInputElement;
     const $btnCopy = $(".btn-copy") as HTMLButtonElement;
+    // Download and Copy act on the code shown, so they wait for one.
+    const $exports = [$(".btn-png"), $(".btn-svg"), $btnCopy] as HTMLButtonElement[];
     const typeButtons = [...el.querySelectorAll(".type-row button")] as HTMLButtonElement[];
 
     type Field = HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
@@ -284,6 +286,7 @@ const tool: Tool = {
 
     function clearPreview(msg: string, kind = "") {
       lastQr = null;
+      for (const b of $exports) b.disabled = true;
       $canvas.hidden = true;
       setStatus(kind, msg);
     }
@@ -302,6 +305,7 @@ const tool: Tool = {
       try {
         const qr = encode(composed.payload, $ecl.value as Ecl);
         lastQr = qr;
+        for (const b of $exports) b.disabled = false;
         const px = drawCanvas($canvas, qr, clampedSize(), $fg.value, $bg.value);
         $canvas.hidden = false;
         const warning = contrastWarning($fg.value, $bg.value);

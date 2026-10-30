@@ -36,7 +36,7 @@ const tool: Tool = {
             <span class="spacer"></span>
             <button class="btn-paste-enc" type="button">Paste<span class="wide-only"> from clipboard</span></button>
             <button class="btn-clear-enc" type="button">Clear</button>
-            <button class="btn-copy-enc primary" type="button">Copy</button>
+            <button class="btn-copy-enc primary" type="button" disabled>Copy</button>
           </div>
           <textarea class="src enc" spellcheck="false" autocapitalize="off" autocomplete="off"
             placeholder="Paste an LZString-compressed base64 save here to decode it."></textarea>
@@ -48,7 +48,7 @@ const tool: Tool = {
             <span class="spacer"></span>
             <button class="btn-paste-dec" type="button">Paste<span class="wide-only"> from clipboard</span></button>
             <button class="btn-clear-dec" type="button">Clear</button>
-            <button class="btn-copy-dec primary" type="button">Copy</button>
+            <button class="btn-copy-dec primary" type="button" disabled>Copy</button>
           </div>
           <textarea class="src dec" spellcheck="false" autocapitalize="off" autocomplete="off"
             placeholder="Paste or edit JSON here to encode it."></textarea>
@@ -61,6 +61,15 @@ const tool: Tool = {
     const $encStatus = el.querySelector(".enc-status") as HTMLElement;
     const $decStatus = el.querySelector(".dec-status") as HTMLElement;
     const $optIndent = el.querySelector(".opt-indent") as HTMLSelectElement;
+
+    const $copyEnc = el.querySelector(".btn-copy-enc") as HTMLButtonElement;
+    const $copyDec = el.querySelector(".btn-copy-dec") as HTMLButtonElement;
+
+    /** Each side's Copy has something to copy only while that side holds text. */
+    function syncCopy() {
+      $copyEnc.disabled = !$enc.value;
+      $copyDec.disabled = !$dec.value;
+    }
 
     function setStatus(bar: HTMLElement, kind: string, msg: string) {
       bar.className = bar.className.replace(/ (ok|error)$/, "");
@@ -115,6 +124,7 @@ const tool: Tool = {
         // not JSON: show the raw decoded string
       }
       $dec.value = out;
+      syncCopy();
       setStatus($encStatus, "ok", formatBytes(raw.length) + " decoded to " + formatBytes(out.length) + " (" + note + ")" +
         (linked ? "" : " · too large to keep in the URL"));
       setStatus($decStatus, "", "");
@@ -137,6 +147,7 @@ const tool: Tool = {
       }
       const encoded = LZString.compressToBase64(data);
       $enc.value = encoded;
+      syncCopy();
       const linked = publishState();
       setStatus($decStatus, "ok", formatBytes(raw.length) + " encoded to " + formatBytes(encoded.length) + " (JSON, minified)" +
         (linked ? "" : " · too large to keep in the URL"));
@@ -149,8 +160,8 @@ const tool: Tool = {
       timer = setTimeout(fn, 120);
     }
 
-    $enc.addEventListener("input", () => schedule(decode));
-    $dec.addEventListener("input", () => schedule(encode));
+    $enc.addEventListener("input", () => { syncCopy(); schedule(decode); });
+    $dec.addEventListener("input", () => { syncCopy(); schedule(encode); });
     $optIndent.addEventListener("change", () => {
       if ($enc.value.trim()) decode();
       else publishState();
@@ -163,11 +174,13 @@ const tool: Tool = {
       if (["2", "4", "tab", "off"].includes(indent)) $optIndent.value = indent;
       if (packed) $enc.value = packed.replace(/-/g, "+").replace(/_/g, "/");
       if ($enc.value.trim()) decode();
+      syncCopy();
     });
 
     async function pasteInto(area: HTMLTextAreaElement, run: () => void, bar: HTMLElement) {
       try {
         area.value = await navigator.clipboard.readText();
+        syncCopy();
         run();
       } catch {
         setStatus(bar, "error", "The browser blocked clipboard access. Paste with the keyboard instead.");
@@ -185,16 +198,18 @@ const tool: Tool = {
 
     (el.querySelector(".btn-paste-enc") as HTMLButtonElement).addEventListener("click", () => pasteInto($enc, decode, $encStatus));
     (el.querySelector(".btn-paste-dec") as HTMLButtonElement).addEventListener("click", () => pasteInto($dec, encode, $decStatus));
-    (el.querySelector(".btn-copy-enc") as HTMLButtonElement).addEventListener("click", function () { copyFrom($enc, this); });
-    (el.querySelector(".btn-copy-dec") as HTMLButtonElement).addEventListener("click", function () { copyFrom($dec, this); });
+    $copyEnc.addEventListener("click", function () { copyFrom($enc, this); });
+    $copyDec.addEventListener("click", function () { copyFrom($dec, this); });
     (el.querySelector(".btn-clear-enc") as HTMLButtonElement).addEventListener("click", () => {
       $enc.value = "";
+      syncCopy();
       publishState();
       setStatus($encStatus, "", "");
       $enc.focus();
     });
     (el.querySelector(".btn-clear-dec") as HTMLButtonElement).addEventListener("click", () => {
       $dec.value = "";
+      syncCopy();
       setStatus($decStatus, "", "");
       $dec.focus();
     });

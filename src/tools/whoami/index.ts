@@ -71,8 +71,8 @@ const tool: Tool = {
       </section>`;
     el.innerHTML = `
       <div class="toolbar">
+        <button class="btn-copy-all primary" type="button" disabled>Copy all</button>
         <button class="btn-refresh" type="button">Refresh</button>
-        <button class="btn-copy-all primary" type="button">Copy all</button>
       </div>
       <div class="cards">${ROWS.map(cardHtml).join("")}</div>`;
 
@@ -98,6 +98,7 @@ const tool: Tool = {
         $value.innerHTML = esc(cell.text) + (cell.kind === "value" && cell.detail ? '<span class="detail">' + esc(cell.detail) + "</span>" : "");
         ($card.querySelector(".btn-copy") as HTMLButtonElement).disabled = cell.kind !== "value";
       }
+      $btnCopyAll.disabled = !ROWS.some((row) => c[row].kind === "value");
       $btnRefresh.disabled = ctrl !== null;
     }
 

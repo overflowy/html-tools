@@ -296,6 +296,8 @@ const tool: Tool = {
         if (id !== runId) return;
         currentMarkdown = out.markdown;
         output.value = out.markdown;
+        // A document with no text converts to nothing: nothing to copy or save.
+        for (const b of [$(".copy-btn"), $(".download-btn")] as HTMLButtonElement[]) b.disabled = !out.markdown;
         meta.textContent = out.summary;
         result.classList.add("on");
         if (out.note) {

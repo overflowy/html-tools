@@ -155,6 +155,20 @@ export class IdeTerminal {
     return lines.join("\n");
   }
 
+  /**
+   * Whether there is anything to copy: a line of text other than the REPL's
+   * own empty prompt. Reads from the top and stops at the first, so it costs
+   * next to nothing however long the scrollback.
+   */
+  hasOutput(): boolean {
+    const buffer = this.term.buffer.active;
+    const promptRow = this.mode === "repl" && !this.buffer ? buffer.baseY + buffer.cursorY : -1;
+    for (let i = 0; i < buffer.length; i++) {
+      if (i !== promptRow && buffer.getLine(i)?.translateToString(true).trim()) return true;
+    }
+    return false;
+  }
+
   /** Flushes any partial character left in the decoders, at the end of a run. */
   flush() {
     for (const s of ["stdout", "stderr"] as const) {

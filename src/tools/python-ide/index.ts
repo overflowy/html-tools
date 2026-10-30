@@ -179,7 +179,7 @@ const tool: Tool = {
                 <button type="button" class="panel-tab" role="tab" data-panel="problems" aria-selected="false">Problems<span class="badge problems-count" hidden></span></button>
                 <span class="spacer"></span>
                 <button type="button" class="icon figures-btn" title="Show or hide the Figures" aria-pressed="false" hidden>${I.ICON_FIGURE}<span class="badge"></span></button>
-                <button type="button" class="icon terminal-copy" title="Copy the terminal's output">${I.ICON_COPY}</button>
+                <button type="button" class="icon terminal-copy" title="Copy the terminal's output" disabled>${I.ICON_COPY}</button>
                 <button type="button" class="icon terminal-clear" title="Clear the terminal">${I.ICON_CLEAR}</button>
                 <button type="button" class="icon terminal-close" title="Close the panel (${MOD}J)">${I.ICON_CLOSE}</button>
               </div>
@@ -359,6 +359,8 @@ class Ide {
       onComplete: (source) => this.session?.interpreter && this.session.state === "ready" ? this.session.interpreter.complete(source) : Promise.resolve({ completions: [], start: 0 }),
       onResize: (cols, rows) => this.session?.interpreter?.resize(cols, rows),
     });
+    this.terminal.term.onWriteParsed(() => this.syncTerminalCopy());
+    this.syncTerminalCopy();
   }
 
   private readCatalog(lockJson: string) {
@@ -2085,6 +2087,7 @@ class Ide {
     $(".terminal-copy").addEventListener("click", () => void this.copyTerminal());
     $(".terminal-clear").addEventListener("click", () => {
       this.terminal?.clearScreen();
+      this.syncTerminalCopy();
       this.terminal?.focus();
     });
     this.togglePanel(read(PANEL_OPEN_KEY) !== "closed");
@@ -2187,6 +2190,11 @@ class Ide {
       this.terminal?.layout();
       this.terminal?.focus();
     }
+  }
+
+  /** The terminal's Copy waits for something to copy. */
+  private syncTerminalCopy() {
+    (this.$(".terminal-copy") as HTMLButtonElement).disabled = !this.terminal?.hasOutput();
   }
 
   private copyIconTimer = 0;

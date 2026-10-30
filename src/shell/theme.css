@@ -173,6 +173,15 @@ button.primary {
 button:active { transform: translateY(1px); background: var(--surface-3); transition: none; }
 button.primary:active { background: var(--accent); filter: brightness(0.92); }
 
+/* Disabled: nothing to act on yet, such as a Copy with nothing to copy.
+   Dimmed, and deaf to hover, so it does not pretend it would work. One
+   rule for every Tool. (A disabled button never matches :active.) */
+button:disabled { opacity: 0.4; cursor: default; }
+@media (hover: hover) {
+  button:disabled:hover { background: transparent; filter: none; }
+  button.primary:disabled:hover { background: var(--accent); }
+}
+
 textarea {
   font-family: var(--mono);
   font-size: 12px;

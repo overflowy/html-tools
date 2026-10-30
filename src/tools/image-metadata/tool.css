@@ -189,11 +189,6 @@
   flex-wrap: wrap;
 }
 
-.tool-image-metadata .strip-btn:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
 .tool-image-metadata .strip-note {
   font-size: 12.5px;
   color: var(--text-muted);

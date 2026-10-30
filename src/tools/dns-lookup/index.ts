@@ -206,7 +206,7 @@ const tool: Tool = {
           <div class="statusbar"><span class="status-text"></span></div>
         </section>
         <section class="pane">
-          <div class="pane-head"><span>Raw response</span><span class="spacer"></span><button class="btn-copy primary" type="button">Copy</button></div>
+          <div class="pane-head"><span>Raw response</span><span class="spacer"></span><button class="btn-copy primary" type="button" disabled>Copy</button></div>
           <pre class="raw"></pre>
         </section>
       </div>`;
@@ -234,6 +234,7 @@ const tool: Tool = {
 
     function showRaw(value: unknown) {
       $raw.textContent = value === undefined ? "" : JSON.stringify(value, null, 2);
+      $btnCopy.disabled = !$raw.textContent;
     }
 
     function currentType(): string | null {

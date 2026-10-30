@@ -39,7 +39,6 @@
 @media (hover: hover) {
   .tool-python-ide button.icon:hover { color: var(--text); }
 }
-.tool-python-ide button:disabled { opacity: 0.45; cursor: default; }
 .tool-python-ide [hidden] { display: none !important; }
 .tool-python-ide .spacer { flex: 1; }
 
@@ -513,7 +512,6 @@
   border-bottom: 0.5px solid var(--border);
 }
 .tool-python-ide .figures-count { font-family: var(--mono); font-size: 11px; letter-spacing: 0; text-transform: none; min-width: 36px; text-align: center; }
-.tool-python-ide .figures-head button.icon:disabled { opacity: 0.35; }
 /* The Figure sits at the bottom of the panel, its caption beneath it; the room left is above. */
 .tool-python-ide .figures .figure { margin: 10px; flex: 1; min-height: 0; display: flex; flex-direction: column; justify-content: flex-end; }
 .tool-python-ide .figures .figure img { display: block; flex: none; width: 100%; height: auto; max-height: calc(100% - 26px); object-fit: contain; object-position: bottom; cursor: zoom-in; }
@@ -666,7 +664,6 @@
   border-top: 0.5px solid var(--border);
 }
 .tool-python-ide .figure-dialog-name { min-width: 110px; text-align: center; }
-.tool-python-ide .figure-dialog button.icon:disabled { opacity: 0.35; }
 .tool-python-ide .figure-dialog a { color: var(--text-muted); display: inline-flex; }
 @media (hover: hover) {
   .tool-python-ide .figure-dialog a:hover { color: var(--text); }

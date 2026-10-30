@@ -109,11 +109,11 @@ const tool: Tool = {
           Transcript
           <span class="meta"></span>
           <span class="spacer"></span>
-          <button type="button" class="copy-btn" title="Copy the transcript as text">Copy</button>
-          <button type="button" class="dl" data-format="txt" title="Download the transcript as text">.txt</button>
-          <button type="button" class="dl" data-format="srt" title="Download subtitles (SubRip)">.srt</button>
-          <button type="button" class="dl" data-format="vtt" title="Download subtitles (WebVTT)">.vtt</button>
-          <button type="button" class="dl" data-format="json" title="Download every word with its times and probability">.json</button>
+          <button type="button" class="copy-btn" title="Copy the transcript as text" disabled>Copy</button>
+          <button type="button" class="dl" data-format="txt" disabled title="Download the transcript as text">.txt</button>
+          <button type="button" class="dl" data-format="srt" disabled title="Download subtitles (SubRip)">.srt</button>
+          <button type="button" class="dl" data-format="vtt" disabled title="Download subtitles (WebVTT)">.vtt</button>
+          <button type="button" class="dl" data-format="json" disabled title="Download every word with its times and probability">.json</button>
         </div>
         <audio class="player" controls preload="metadata"></audio>
         <div class="cues"></div>
@@ -283,6 +283,12 @@ const tool: Tool = {
     }
     setMode("idle");
 
+    // Copy and the downloads act on the Transcript, so they wait for its first Word.
+    const exportButtons = el.querySelectorAll<HTMLButtonElement>(".result .copy-btn, .result .dl");
+    function syncExports() {
+      for (const b of exportButtons) b.disabled = words.length === 0;
+    }
+
     /** Drop the Transcript and any message; the Source and its player stay. */
     function clearTranscript() {
       words = [];
@@ -294,6 +300,7 @@ const tool: Tool = {
       litAt = -1;
       cuesEl.replaceChildren();
       meta.textContent = "";
+      syncExports();
       errorBox.classList.remove("on");
       note.classList.remove("on");
     }
@@ -346,6 +353,7 @@ const tool: Tool = {
     function addWords(more: Word[]) {
       const follow = cuesEl.scrollHeight - cuesEl.scrollTop - cuesEl.clientHeight < 40;
       words = words.concat(more);
+      syncExports();
       const from = Math.max(0, cues.length - 1);
       cues = toCues(words);
       while (cuesEl.children.length > from) cuesEl.lastElementChild!.remove();

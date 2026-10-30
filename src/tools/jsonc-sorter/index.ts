@@ -447,7 +447,7 @@ const tool: Tool = {
           <div class="pane-head">
             <span>Output</span>
             <span class="spacer"></span>
-            <button class="btn-copy primary" type="button">Copy</button>
+            <button class="btn-copy primary" type="button" disabled>Copy</button>
           </div>
           <pre class="output"></pre>
         </section>
@@ -492,6 +492,7 @@ const tool: Tool = {
       if (!src.trim()) {
         $output.innerHTML = "";
         lastResult = "";
+        $btnCopy.disabled = true;
         setStatus("", "");
         publishState();
         return;
@@ -502,6 +503,7 @@ const tool: Tool = {
         const indent = $optIndent.value === "tab" ? "\t" : " ".repeat(Number($optIndent.value));
         lastResult = serialize(doc, indent);
         $output.innerHTML = highlight(lastResult);
+        $btnCopy.disabled = false;
         const s = countStats(doc.root, { keys: 0, comments: 0 });
         const linked = publishState();
         setStatus(
