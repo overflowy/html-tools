@@ -3356,10 +3356,13 @@ await page.evaluate(() =>
 );
 
 // Dual N-Back: an in-page player watches the board and listens in on Web
-// Audio (each decoded buffer is tagged with the byte length of its file, so
-// the four operation words are told apart by their files' sizes), then
-// answers perfectly, never, or for Arithmetic types the result. Sessions are
-// short through the Deep Link: 5 + N² trials of a second each.
+// Audio, then answers perfectly, never, or for Arithmetic types the result.
+// The tool decodes each recording once, so a letter is known by its buffer;
+// some letters' files are the same size. Each decoded buffer is also tagged
+// with the byte length of its file, which tells the four operation words
+// apart. Sessions are short through the Deep Link: 5 + N² trials of a second
+// each, so the player seeds Math.random before each one: a session left to
+// chance can draw no matches at all, and that scores 0%.
 const dnb = ".tool-dual-n-back ";
 const dnbOps: Record<number, string> = {};
 for (const op of ["add", "subtract", "multiply", "divide"]) {
@@ -3371,22 +3374,34 @@ check(
   Object.keys(dnbOps).length === 4
 );
 type DnbStyle = "perfect" | "silent";
+/** Draws a 2-back Session with matches in both Position and Sound. */
+const DNB_SEED = 1;
 const dnbPlay = (style: DnbStyle) =>
   page
     .locator(".tool-dual-n-back")
     .first()
     .evaluate(
-      (host, [how, ops]) => {
+      (host, [how, ops, seed]) => {
+        type Tagged = AudioBuffer & { dnbLen?: number };
         const w = window as unknown as {
-          dnbHeard: number[];
+          dnbHeard: (Tagged | null)[];
           dnbPlayer?: MutationObserver;
+          dnbRandom?: () => number;
           dnbTapped?: boolean;
         };
         w.dnbHeard = [];
         w.dnbPlayer?.disconnect();
+        // Park-Miller: the Session's trials and letters are drawn from it.
+        // Every product stays below 2⁵³, so the doubles are exact.
+        const modulus = 2_147_483_647;
+        w.dnbRandom ??= Math.random;
+        let state = seed;
+        Math.random = () => {
+          state = (state * 48_271) % modulus;
+          return state / modulus;
+        };
         if (!w.dnbTapped) {
           w.dnbTapped = true;
-          type Tagged = AudioBuffer & { dnbLen?: number };
           const decode = BaseAudioContext.prototype.decodeAudioData;
           BaseAudioContext.prototype.decodeAudioData = function decodeAudioData(
             this: BaseAudioContext,
@@ -3403,7 +3418,7 @@ const dnbPlay = (style: DnbStyle) =>
             this: AudioBufferSourceNode,
             ...args: Parameters<typeof nativeStart>
           ) {
-            w.dnbHeard.push((this.buffer as Tagged | null)?.dnbLen ?? 0);
+            w.dnbHeard.push(this.buffer);
             return nativeStart.apply(this, args);
           };
         }
@@ -3415,7 +3430,7 @@ const dnbPlay = (style: DnbStyle) =>
         const n = Number(level);
         const arithmetic = host.querySelector(".answer:not([hidden])") !== null;
         const cells: number[] = [];
-        const sounds: number[] = [];
+        const sounds: (Tagged | null)[] = [];
         const numbers: number[] = [];
         let heard = 0;
         const key = (k: string) =>
@@ -3437,7 +3452,7 @@ const dnbPlay = (style: DnbStyle) =>
           if (arithmetic) {
             numbers.push(Number(text));
             if (how === "perfect" && t >= n) {
-              const op = apply[ops[played[0] ?? 0] ?? ""];
+              const op = apply[ops[played[0]?.dnbLen ?? 0] ?? ""];
               if (!op) {
                 throw new Error(`No operation recognised for trial ${t}`);
               }
@@ -3447,7 +3462,7 @@ const dnbPlay = (style: DnbStyle) =>
             }
             return;
           }
-          sounds.push(played[0] ?? 0);
+          sounds.push(played[0] ?? null);
           if (how !== "perfect" || t < n) {
             return;
           }
@@ -3487,15 +3502,20 @@ const dnbPlay = (style: DnbStyle) =>
           subtree: true,
         });
       },
-      [style, dnbOps] as [DnbStyle, Record<number, string>]
+      [style, dnbOps, DNB_SEED] as [DnbStyle, Record<number, string>, number]
     );
 const dnbResult = async () => {
   await page.waitForSelector(`${dnb}.overlay.result`, { timeout: 60_000 });
-  await page.evaluate(() =>
-    (
-      window as unknown as { dnbPlayer?: MutationObserver }
-    ).dnbPlayer?.disconnect()
-  );
+  await page.evaluate(() => {
+    const w = window as unknown as {
+      dnbPlayer?: MutationObserver;
+      dnbRandom?: () => number;
+    };
+    w.dnbPlayer?.disconnect();
+    if (w.dnbRandom) {
+      Math.random = w.dnbRandom;
+    }
+  });
   return (await page.locator(`${dnb}.overlay`).textContent()) ?? "";
 };
 
@@ -3536,9 +3556,10 @@ check(
 const perfect = await dnbResult();
 check(
   "dual n-back: a perfect session scores 100% and raises N",
-  perfect.includes("100%") &&
+  (await page.locator(`${dnb}.overlay .score`).textContent()) === "100%" &&
     perfect.includes("N-Back raised to 3") &&
-    /Position\d+–0/u.test(perfect),
+    /Position[1-9]\d*–0/u.test(perfect) &&
+    /Sound[1-9]\d*–0/u.test(perfect),
   perfect
 );
 check(
