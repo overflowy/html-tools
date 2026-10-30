@@ -51,7 +51,3 @@ uv run --with fonttools --with brotli python scripts/build-mona-sans.py "MonaSan
 
 - https://simonwillison.net/2025/Dec/10/html-tools/
 - https://github.com/hattray/markdown-editor
-
-## License
-
-MIT, except the fonts in `src/shell/fonts/`, which are under the SIL Open Font License 1.1 (license files alongside), the sounds in `src/tools/dual-n-back/sounds/`, which are under the GNU GPL v2 (`NOTICE.md` alongside), and the 7-Zip build in `vendor/js7z/`, which is under the GNU LGPL with the unRAR license restriction (`README.md` and the license files alongside). The engines fetched at run time keep their own licenses; among them, MuPDF is under the GNU AGPL and qpdf under the Apache License 2.0.
