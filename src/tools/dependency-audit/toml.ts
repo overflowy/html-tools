@@ -3,29 +3,81 @@
 // else (dates, multi-line strings with line-ending backslashes) is rejected
 // with a message rather than misread.
 
-export class TomlError extends Error {}
+export class TomlError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "TomlError";
+  }
+}
 
 export type TomlTable = Record<string, unknown>;
 
-export function parseToml(src: string): TomlTable {
+/** Whether `c` may appear in a bare key. */
+const isBareKeyChar = (c: string | undefined): boolean =>
+  c !== undefined && /[A-Za-z0-9_-]/u.test(c);
+
+/** Whether `c` ends a bare value token (number, boolean, date). */
+const endsToken = (c: string | undefined): boolean =>
+  c === undefined || /[\s,\]}#]/u.test(c);
+
+/** A bare token as a boolean, number, or date string; undefined when it is none of these. */
+const scalarValue = (tok: string): unknown => {
+  if (tok === "true") {
+    return true;
+  }
+  if (tok === "false") {
+    return false;
+  }
+  if (/^[+-]?(?:0|[1-9](?:_?[0-9])*)$/u.test(tok)) {
+    return Number(tok.replaceAll("_", ""));
+  }
+  if (
+    /^[+-]?(?:0|[1-9](?:_?[0-9])*)(?:\.[0-9](?:_?[0-9])*)?(?:[eE][+-]?[0-9]+)?$/u.test(
+      tok
+    )
+  ) {
+    return Number(tok.replaceAll("_", ""));
+  }
+  if (/^[+-]?(?:inf|nan)$/u.test(tok)) {
+    if (tok.endsWith("nan")) {
+      return Number.NaN;
+    }
+    return tok.startsWith("-") ? -Infinity : Infinity;
+  }
+  if (/^0x[0-9A-Fa-f_]+$/u.test(tok)) {
+    return Number.parseInt(tok.slice(2).replaceAll("_", ""), 16);
+  }
+  if (/^0o[0-7_]+$/u.test(tok)) {
+    return Number.parseInt(tok.slice(2).replaceAll("_", ""), 8);
+  }
+  if (/^0b[01_]+$/u.test(tok)) {
+    return Number.parseInt(tok.slice(2).replaceAll("_", ""), 2);
+  }
+  if (/^\d{4}-\d{2}-\d{2}/u.test(tok) || /^\d{2}:\d{2}:\d{2}/u.test(tok)) {
+    return tok;
+  }
+  return undefined;
+};
+
+export const parseToml = (src: string): TomlTable => {
   const root: TomlTable = {};
   let current: TomlTable = root;
   let i = 0;
   const n = src.length;
   let line = 1;
 
-  function fail(msg: string): never {
+  const fail: (msg: string) => never = (msg) => {
     throw new TomlError(`${msg} at line ${line}`);
-  }
+  };
 
-  function skipWs() {
+  const skipWs = () => {
     while (i < n && (src[i] === " " || src[i] === "\t")) {
       i += 1;
     }
-  }
+  };
 
   /** Whitespace, newlines, and comments: what may sit between values inside arrays. */
-  function skipBlank() {
+  const skipBlank = () => {
     for (;;) {
       skipWs();
       if (src[i] === "#") {
@@ -41,9 +93,9 @@ export function parseToml(src: string): TomlTable {
         return;
       }
     }
-  }
+  };
 
-  function endOfLine() {
+  const endOfLine = () => {
     skipWs();
     if (src[i] === "#") {
       while (i < n && src[i] !== "\n") {
@@ -61,9 +113,9 @@ export function parseToml(src: string): TomlTable {
     }
     i += 1;
     line += 1;
-  }
+  };
 
-  function basicString(triple: boolean): string {
+  const basicString = (triple: boolean): string => {
     // Opening quotes already consumed.
     let out = "";
     if (triple && src[i] === "\n") {
@@ -71,10 +123,10 @@ export function parseToml(src: string): TomlTable {
       line += 1;
     }
     for (;;) {
-      if (i >= n) {
-        fail("Unterminated string");
+      const c = src[i];
+      if (c === undefined) {
+        return fail("Unterminated string");
       }
-      const c = src[i]!;
       if (c === '"') {
         if (!triple) {
           i += 1;
@@ -149,9 +201,9 @@ export function parseToml(src: string): TomlTable {
       out += c;
       i += 1;
     }
-  }
+  };
 
-  function literalString(triple: boolean): string {
+  const literalString = (triple: boolean): string => {
     const close = triple ? "'''" : "'";
     const end = src.indexOf(close, i);
     if (end === -1) {
@@ -161,12 +213,12 @@ export function parseToml(src: string): TomlTable {
     if (triple && s.startsWith("\n")) {
       s = s.slice(1);
     }
-    line += (s.match(/\n/g) || []).length;
+    line += (s.match(/\n/gu) || []).length;
     i = end + close.length;
     return s;
-  }
+  };
 
-  function parseString(): string {
+  const parseString = (): string => {
     if (src.startsWith('"""', i)) {
       i += 3;
       return basicString(true);
@@ -181,9 +233,9 @@ export function parseToml(src: string): TomlTable {
     }
     i += 1;
     return literalString(false);
-  }
+  };
 
-  function parseKeyPath(): string[] {
+  const parseKeyPath = (): string[] => {
     const keys: string[] = [];
     for (;;) {
       skipWs();
@@ -192,7 +244,7 @@ export function parseToml(src: string): TomlTable {
         keys.push(parseString());
       } else {
         let j = i;
-        while (j < n && /[A-Za-z0-9_-]/.test(src[j]!)) {
+        while (isBareKeyChar(src[j])) {
           j += 1;
         }
         if (j === i) {
@@ -208,123 +260,10 @@ export function parseToml(src: string): TomlTable {
       }
       return keys;
     }
-  }
-
-  function parseValue(): unknown {
-    skipWs();
-    const c = src[i];
-    if (c === undefined) {
-      fail("Expected a value");
-    }
-    if (c === '"' || c === "'") {
-      return parseString();
-    }
-    if (c === "[") {
-      return parseArray();
-    }
-    if (c === "{") {
-      return parseInlineTable();
-    }
-    let j = i;
-    while (j < n && !/[\s,\]}#]/.test(src[j]!)) {
-      j += 1;
-    }
-    const tok = src.slice(i, j);
-    i = j;
-    if (tok === "true") {
-      return true;
-    }
-    if (tok === "false") {
-      return false;
-    }
-    if (/^[+-]?(0|[1-9](_?[0-9])*)$/.test(tok)) {
-      return Number(tok.replaceAll("_", ""));
-    }
-    if (
-      /^[+-]?(0|[1-9](_?[0-9])*)(\.[0-9](_?[0-9])*)?([eE][+-]?[0-9]+)?$/.test(
-        tok
-      )
-    ) {
-      return Number(tok.replaceAll("_", ""));
-    }
-    if (/^[+-]?(inf|nan)$/.test(tok)) {
-      return tok.endsWith("nan")
-        ? Number.NaN
-        : tok.startsWith("-")
-          ? -Infinity
-          : Infinity;
-    }
-    if (/^0x[0-9A-Fa-f_]+$/.test(tok)) {
-      return Number.parseInt(tok.slice(2).replaceAll("_", ""), 16);
-    }
-    if (/^0o[0-7_]+$/.test(tok)) {
-      return Number.parseInt(tok.slice(2).replaceAll("_", ""), 8);
-    }
-    if (/^0b[01_]+$/.test(tok)) {
-      return Number.parseInt(tok.slice(2).replaceAll("_", ""), 2);
-    }
-    if (/^\d{4}-\d{2}-\d{2}/.test(tok) || /^\d{2}:\d{2}:\d{2}/.test(tok)) {
-      return tok;
-    }
-    fail(`Unexpected value ${JSON.stringify(tok)}`);
-  }
-
-  function parseArray(): unknown[] {
-    i += 1; // [
-    const out: unknown[] = [];
-    for (;;) {
-      skipBlank();
-      if (src[i] === "]") {
-        i += 1;
-        return out;
-      }
-      out.push(parseValue());
-      skipBlank();
-      if (src[i] === ",") {
-        i += 1;
-        continue;
-      }
-      if (src[i] === "]") {
-        i += 1;
-        return out;
-      }
-      fail("Expected ',' or ']' in array");
-    }
-  }
-
-  function parseInlineTable(): TomlTable {
-    i += 1; // {
-    const out: TomlTable = {};
-    skipWs();
-    if (src[i] === "}") {
-      i += 1;
-      return out;
-    }
-    for (;;) {
-      const keys = parseKeyPath();
-      skipWs();
-      if (src[i] !== "=") {
-        fail("Expected '=' in inline table");
-      }
-      i += 1;
-      const value = parseValue();
-      assign(out, keys, value);
-      skipWs();
-      if (src[i] === ",") {
-        i += 1;
-        skipWs();
-        continue;
-      }
-      if (src[i] === "}") {
-        i += 1;
-        return out;
-      }
-      fail("Expected ',' or '}' in inline table");
-    }
-  }
+  };
 
   /** Walk `keys` from `base`, creating tables as needed; an array on the way means its last element. */
-  function resolve(base: TomlTable, keys: string[]): TomlTable {
+  const resolve = (base: TomlTable, keys: string[]): TomlTable => {
     let t = base;
     for (const k of keys) {
       let v = t[k];
@@ -341,16 +280,106 @@ export function parseToml(src: string): TomlTable {
       t = v as TomlTable;
     }
     return t;
-  }
+  };
 
-  function assign(base: TomlTable, keys: string[], value: unknown) {
+  /** The last key of a path; parseKeyPath never returns an empty one. */
+  const lastKey = (keys: string[]): string =>
+    keys.at(-1) ?? fail("Expected a key");
+
+  const assign = (base: TomlTable, keys: string[], value: unknown) => {
     const t = resolve(base, keys.slice(0, -1));
-    const last = keys.at(-1)!;
+    const last = lastKey(keys);
     if (last in t) {
       fail(`Duplicate key ${last}`);
     }
     t[last] = value;
-  }
+  };
+
+  /** An array whose items `parseItem` reads; it is passed in because items may themselves be arrays. */
+  const parseArray = (parseItem: () => unknown): unknown[] => {
+    // Past the opening [.
+    i += 1;
+    const out: unknown[] = [];
+    for (;;) {
+      skipBlank();
+      if (src[i] === "]") {
+        i += 1;
+        return out;
+      }
+      out.push(parseItem());
+      skipBlank();
+      if (src[i] === ",") {
+        i += 1;
+        continue;
+      }
+      if (src[i] === "]") {
+        i += 1;
+        return out;
+      }
+      fail("Expected ',' or ']' in array");
+    }
+  };
+
+  /** An inline table whose values `parseItem` reads; it is passed in because values may themselves be tables. */
+  const parseInlineTable = (parseItem: () => unknown): TomlTable => {
+    // Past the opening {.
+    i += 1;
+    const out: TomlTable = {};
+    skipWs();
+    if (src[i] === "}") {
+      i += 1;
+      return out;
+    }
+    for (;;) {
+      const keys = parseKeyPath();
+      skipWs();
+      if (src[i] !== "=") {
+        fail("Expected '=' in inline table");
+      }
+      i += 1;
+      const value = parseItem();
+      assign(out, keys, value);
+      skipWs();
+      if (src[i] === ",") {
+        i += 1;
+        skipWs();
+        continue;
+      }
+      if (src[i] === "}") {
+        i += 1;
+        return out;
+      }
+      fail("Expected ',' or '}' in inline table");
+    }
+  };
+
+  const parseValue = (): unknown => {
+    skipWs();
+    const c = src[i];
+    if (c === undefined) {
+      fail("Expected a value");
+    }
+    if (c === '"' || c === "'") {
+      return parseString();
+    }
+    if (c === "[") {
+      return parseArray(parseValue);
+    }
+    if (c === "{") {
+      return parseInlineTable(parseValue);
+    }
+    let j = i;
+    while (!endsToken(src[j])) {
+      j += 1;
+    }
+    const tok = src.slice(i, j);
+    i = j;
+    const value = scalarValue(tok);
+    if (value === undefined) {
+      fail(`Unexpected value ${JSON.stringify(tok)}`);
+    }
+    return value;
+  };
 
   while (i < n) {
     skipBlank();
@@ -365,7 +394,7 @@ export function parseToml(src: string): TomlTable {
       }
       i += 2;
       const parent = resolve(root, keys.slice(0, -1));
-      const last = keys.at(-1)!;
+      const last = lastKey(keys);
       let arr = parent[last];
       if (arr === undefined) {
         arr = [];
@@ -402,4 +431,4 @@ export function parseToml(src: string): TomlTable {
     endOfLine();
   }
   return root;
-}
+};

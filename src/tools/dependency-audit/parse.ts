@@ -8,15 +8,7 @@ import { parseUvLock } from "./uv";
 import { parseYaml } from "./yaml";
 import { parseYarnLock } from "./yarn";
 
-export function parseLockfile(text: string, filename = ""): ParsedLockfile {
-  const detected = detectKind(text, filename);
-  if (detected.kind === null) {
-    throw new LockfileError(detected.refusal);
-  }
-  return parseKind(detected.kind, text);
-}
-
-export function parseKind(kind: LockfileKind, text: string): ParsedLockfile {
+export const parseKind = (kind: LockfileKind, text: string): ParsedLockfile => {
   try {
     switch (kind) {
       case "package-lock": {
@@ -34,6 +26,9 @@ export function parseKind(kind: LockfileKind, text: string): ParsedLockfile {
       case "uv": {
         return parseUvLock(text);
       }
+      default: {
+        throw new LockfileError(`Unknown lockfile kind ${String(kind)}.`);
+      }
     }
   } catch (error) {
     if (error instanceof LockfileError) {
@@ -43,4 +38,12 @@ export function parseKind(kind: LockfileKind, text: string): ParsedLockfile {
       `Could not read this ${KIND_FILENAME[kind]}: ${(error as Error).message}`
     );
   }
-}
+};
+
+export const parseLockfile = (text: string, filename = ""): ParsedLockfile => {
+  const detected = detectKind(text, filename);
+  if (detected.kind === null) {
+    throw new LockfileError(detected.refusal);
+  }
+  return parseKind(detected.kind, text);
+};

@@ -57,45 +57,54 @@ export interface AuditResult {
 
 export type Progress = (message: string) => void;
 
-export async function runAudit(
+type ReadableReport = LockfileReport & { parsed: ParsedLockfile };
+
+const readFile = (f: InputFile): LockfileReport => {
+  try {
+    return {
+      error: null,
+      name: f.name || "pasted",
+      packages: [],
+      parsed: parseLockfile(f.text, f.name),
+    };
+  } catch (error) {
+    return {
+      error: error instanceof LockfileError ? error.message : String(error),
+      name: f.name || "pasted",
+      packages: [],
+      parsed: null,
+    };
+  }
+};
+
+const advisoryProgress = (fetched: number, total: number): string =>
+  `Fetching ${total} advisor${total === 1 ? "y" : "ies"}… ${fetched}/${total}`;
+
+export const runAudit = async (
   files: InputFile[],
   fetcher: JsonFetch,
   signal: AbortSignal,
   progress: Progress
-): Promise<AuditResult> {
+): Promise<AuditResult> => {
   const started = performance.now();
-  const reports: LockfileReport[] = files.map((f) => {
-    try {
-      return {
-        name: f.name || "pasted",
-        parsed: parseLockfile(f.text, f.name),
-        error: null,
-        packages: [],
-      };
-    } catch (error) {
-      return {
-        name: f.name || "pasted",
-        parsed: null,
-        error: error instanceof LockfileError ? error.message : String(error),
-        packages: [],
-      };
-    }
-  });
-  const readable = reports.filter((r) => r.parsed);
+  const reports = files.map(readFile);
+  const readable = reports.filter(
+    (r): r is ReadableReport => r.parsed !== null
+  );
   if (!readable.length) {
+    const onlyError = reports.length === 1 ? reports[0]?.error : null;
     throw new AuditError(
-      reports.length === 1
-        ? reports[0]!.error!
-        : `None of the ${reports.length} files could be read: ${reports
-            .map((r) => `${r.name} (${r.error})`)
-            .join("; ")}`
+      onlyError ??
+        `None of the ${reports.length} files could be read: ${reports
+          .map((r) => `${r.name} (${r.error})`)
+          .join("; ")}`
     );
   }
 
   // Distinct queries across every Lockfile.
   const queries = new Map<string, ReturnType<typeof queryFor>>();
   for (const r of readable) {
-    for (const p of r.parsed!.packages) {
+    for (const p of r.parsed.packages) {
       const q = queryFor(p);
       queries.set(queryKey(q), q);
     }
@@ -103,11 +112,11 @@ export async function runAudit(
   const queryList = [...queries.values()];
   if (!queryList.length) {
     return {
-      lockfiles: reports,
       advisories: [],
-      queried: 0,
       failedRecords: [],
+      lockfiles: reports,
       ms: Math.round(performance.now() - started),
+      queried: 0,
     };
   }
   progress(
@@ -127,12 +136,16 @@ export async function runAudit(
   );
   const idsByQuery = new Map<string, string[]>();
   const allIds = new Set<string>();
-  queryList.forEach((q, i) => {
-    idsByQuery.set(queryKey(q), idLists[i]!);
-    for (const id of idLists[i]!) {
+  for (const [i, q] of queryList.entries()) {
+    const list = idLists[i];
+    if (!list) {
+      throw new AuditError("OSV.dev returned fewer results than queries.");
+    }
+    idsByQuery.set(queryKey(q), list);
+    for (const id of list) {
       allIds.add(id);
     }
-  });
+  }
 
   // Every record once, failures kept as stubs rather than failing the Audit.
   const ids = [...allIds];
@@ -140,11 +153,7 @@ export async function runAudit(
   const failedRecords: string[] = [];
   let fetched = 0;
   if (ids.length) {
-    progress(
-      `Fetching ${ids.length} advisor${ids.length === 1 ? "y" : "ies"}… 0/${
-        ids.length
-      }`
-    );
+    progress(advisoryProgress(0, ids.length));
   }
   await pool(ids, CONCURRENCY, async (id) => {
     try {
@@ -157,17 +166,13 @@ export async function runAudit(
       failedRecords.push(id);
     }
     fetched += 1;
-    progress(
-      `Fetching ${ids.length} advisor${ids.length === 1 ? "y" : "ies"}… ${
-        fetched
-      }/${ids.length}`
-    );
+    progress(advisoryProgress(fetched, ids.length));
   });
   const byId = mergeAdvisories(records);
 
   const seen = new Map<string, Advisory>();
   for (const r of readable) {
-    r.packages = r.parsed!.packages.map((pkg) => {
+    r.packages = r.parsed.packages.map((pkg) => {
       const hits = new Map<string, Hit>();
       for (const id of idsByQuery.get(queryKey(queryFor(pkg))) ?? []) {
         const advisory = byId.get(id);
@@ -178,23 +183,23 @@ export async function runAudit(
         seen.set(advisory.id, advisory);
       }
       return {
-        pkg,
         hits: [...hits.values()].toSorted(
           (a, b) =>
             compareSeverity(a.advisory.severity, b.advisory.severity) ||
             a.advisory.id.localeCompare(b.advisory.id)
         ),
+        pkg,
       };
     });
   }
   return {
-    lockfiles: reports,
     advisories: [...seen.values()].toSorted(
       (a, b) =>
         compareSeverity(a.severity, b.severity) || a.id.localeCompare(b.id)
     ),
-    queried: queryList.length,
     failedRecords,
+    lockfiles: reports,
     ms: Math.round(performance.now() - started),
+    queried: queryList.length,
   };
-}
+};

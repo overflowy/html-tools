@@ -1,28 +1,27 @@
 // The Audit as Markdown, for pasting into an issue or pull request.
-import type { AuditResult, AuditedPackage, LockfileReport } from "./audit";
+import type { AuditResult, AuditedPackage, Hit, LockfileReport } from "./audit";
 import { REASON_LABEL } from "./lockfiles";
 import type { Advisory } from "./osv";
 
-export function plural(n: number, word: string): string {
+export const plural = (n: number, word: string): string => {
   if (n === 1) {
     return `${n} ${word}`;
   }
   return `${n} ${word.endsWith("y") ? `${word.slice(0, -1)}ies` : `${word}s`}`;
-}
+};
 
-export function severityText(a: Advisory): string {
+export const severityText = (a: Advisory): string => {
   const band =
     a.severity.band === "unknown" ? "unknown severity" : a.severity.band;
   return a.severity.score === null
     ? band
     : `${band} ${a.severity.score.toFixed(1)}`;
-}
+};
 
-export function osvUrl(id: string): string {
-  return `https://osv.dev/vulnerability/${encodeURIComponent(id)}`;
-}
+export const osvUrl = (id: string): string =>
+  `https://osv.dev/vulnerability/${encodeURIComponent(id)}`;
 
-export function packageTags(p: AuditedPackage["pkg"]): string[] {
+export const packageTags = (p: AuditedPackage["pkg"]): string[] => {
   const tags: string[] = [];
   if (p.direct === true) {
     tags.push("direct");
@@ -31,11 +30,28 @@ export function packageTags(p: AuditedPackage["pkg"]): string[] {
   }
   tags.push(...p.groups);
   return tags;
-}
+};
 
-function packageMarkdown(ap: AuditedPackage): string {
+/** The worst Advisory on a Package that has at least one hit. */
+export const worstAdvisory = (ap: AuditedPackage): Advisory => {
+  const [first] = ap.hits;
+  if (!first) {
+    throw new Error(`${ap.pkg.name}@${ap.pkg.version} has no advisories.`);
+  }
+  return first.advisory;
+};
+
+/** The fix sentence for one hit, or "" when the records say nothing either way. */
+export const fixSentence = (fix: Hit["fix"]): string => {
+  if (fix.fixed) {
+    return `Fixed in ${fix.fixed}.`;
+  }
+  return fix.unfixed ? "No fixed version." : "";
+};
+
+const packageMarkdown = (ap: AuditedPackage): string => {
   const tags = packageTags(ap.pkg);
-  const worst = ap.hits[0]!.advisory;
+  const worst = worstAdvisory(ap);
   const lines = [
     `### ${ap.pkg.name}@${ap.pkg.version}${
       tags.length ? ` · ${tags.join(", ")}` : ""
@@ -43,23 +59,19 @@ function packageMarkdown(ap: AuditedPackage): string {
   ];
   for (const { advisory, fix } of ap.hits) {
     const ids = [advisory.id, ...advisory.aliases].join(", ");
-    const fixText = fix.fixed
-      ? `Fixed in ${fix.fixed}.`
-      : fix.unfixed
-        ? "No fixed version."
-        : "";
+    const fixText = fixSentence(fix);
     lines.push(
       `- [${advisory.id}](${osvUrl(advisory.id)})${
         advisory.aliases.length ? ` (${ids.slice(advisory.id.length + 2)})` : ""
       } · ${severityText(advisory)}${
-        advisory.summary ? `: ${advisory.summary.replaceAll(/\s+/g, " ")}` : ""
+        advisory.summary ? `: ${advisory.summary.replaceAll(/\s+/gu, " ")}` : ""
       }${fixText ? ` ${fixText}` : ""}`
     );
   }
   return lines.join("\n");
-}
+};
 
-function lockfileMarkdown(r: LockfileReport): string {
+const lockfileMarkdown = (r: LockfileReport): string => {
   if (!r.parsed) {
     return `## ${r.name}\n\nCould not be read: ${r.error}`;
   }
@@ -100,12 +112,12 @@ function lockfileMarkdown(r: LockfileReport): string {
     );
   }
   return lines.join("\n");
-}
+};
 
-export function reportMarkdown(
+export const reportMarkdown = (
   result: AuditResult,
   sourceLabel: string | null
-): string {
+): string => {
   const packages = result.lockfiles.reduce(
     (n, r) => n + (r.parsed?.packages.length ?? 0),
     0
@@ -136,4 +148,4 @@ export function reportMarkdown(
   return `${head.join("\n")}\n\n${result.lockfiles
     .map(lockfileMarkdown)
     .join("\n\n")}\n`;
-}
+};

@@ -4,11 +4,11 @@
 // direct; classic does not.
 import {
   LockfileError,
-  PackageSet,
   looksLikeVersion,
   nonRegistryReason,
 } from "./lockfiles";
 import type { ParsedLockfile } from "./lockfiles";
+import { PackageSet } from "./package-set";
 
 interface Block {
   /** The descriptors this entry satisfies, e.g. `lodash@^4.17.0`, `@babel/core@npm:^7.0.0`. */
@@ -18,8 +18,8 @@ interface Block {
   dependencies: Record<string, string>;
 }
 
-function unquote(s: string): string {
-  s = s.trim();
+const unquote = (raw: string): string => {
+  const s = raw.trim();
   if (
     (s.startsWith('"') && s.endsWith('"')) ||
     (s.startsWith("'") && s.endsWith("'"))
@@ -33,10 +33,10 @@ function unquote(s: string): string {
     }
   }
   return s;
-}
+};
 
 /** Splits a block header (`"a@^1", "a@^2":`) into its descriptors, respecting quotes. */
-function splitKeys(header: string): string[] {
+const splitKeys = (header: string): string[] => {
   const out: string[] = [];
   let cur = "";
   let quote = "";
@@ -62,27 +62,38 @@ function splitKeys(header: string): string[] {
     out.push(cur.trim());
   }
   return out;
-}
+};
 
 /** Splits `name@range` at the `@` that is not a scope marker. */
-export function splitDescriptor(desc: string): { name: string; range: string } {
+export const splitDescriptor = (
+  desc: string
+): { name: string; range: string } => {
   const at = desc.indexOf("@", 1);
   if (at === -1) {
     return { name: desc, range: "" };
   }
   return { name: desc.slice(0, at), range: desc.slice(at + 1) };
-}
+};
 
-export function isBerry(text: string): boolean {
-  return /^__metadata:/m.test(text);
-}
+export const isBerry = (text: string): boolean => /^__metadata:/mu.test(text);
 
-function parseBlocks(text: string, berry: boolean): Block[] {
+const BERRY_FIELD = /^(?<key>"[^"]*"|'[^']*'|[^:]+):\s*(?<value>.*)$/u;
+const CLASSIC_FIELD = /^(?<key>"[^"]*"|'[^']*'|\S+)\s+(?<value>.*)$/u;
+
+const splitField = (body: string, berry: boolean): [string, string] => {
+  const groups = (berry ? BERRY_FIELD : CLASSIC_FIELD).exec(body)?.groups;
+  if (!groups) {
+    return [body, ""];
+  }
+  return [unquote(groups.key), unquote(groups.value)];
+};
+
+const parseBlocks = (text: string, berry: boolean): Block[] => {
   const blocks: Block[] = [];
   let cur: Block | null = null;
   let nested = "";
   for (const raw of text.split("\n")) {
-    const line = raw.replace(/\r$/, "");
+    const line = raw.replace(/\r$/u, "");
     if (!line.trim() || line.trimStart().startsWith("#")) {
       continue;
     }
@@ -93,9 +104,9 @@ function parseBlocks(text: string, berry: boolean): Block[] {
         continue;
       }
       cur = {
-        keys: splitKeys(body.slice(0, -1)),
-        fields: {},
         dependencies: {},
+        fields: {},
+        keys: splitKeys(body.slice(0, -1)),
       };
       nested = "";
       blocks.push(cur);
@@ -120,83 +131,61 @@ function parseBlocks(text: string, berry: boolean): Block[] {
     }
   }
   return blocks;
-}
+};
 
-function splitField(body: string, berry: boolean): [string, string] {
-  if (berry) {
-    const m = /^("[^"]*"|'[^']*'|[^:]+):\s*(.*)$/.exec(body);
-    if (!m) {
-      return [body, ""];
+/** Why a classic entry is not a registry release, from its range, its resolved URL, or a missing version. */
+const classicReason = (range: string, resolved: string, version: string) => {
+  const fromRange = nonRegistryReason(range);
+  if (fromRange) {
+    return fromRange;
+  }
+  if (resolved) {
+    return nonRegistryReason(resolved);
+  }
+  return looksLikeVersion(version) ? null : "path";
+};
+
+const parseClassic = (blocks: Block[], set: PackageSet): ParsedLockfile => {
+  for (const b of blocks) {
+    const version = b.fields.version ?? "";
+    const resolved = b.fields.resolved ?? "";
+    for (const key of b.keys) {
+      let { name, range } = splitDescriptor(key);
+      if (range.startsWith("npm:")) {
+        ({ name, range } = splitDescriptor(range.slice(4)));
+      }
+      const reason = classicReason(range, resolved, version);
+      if (reason) {
+        set.skip(
+          name,
+          looksLikeVersion(version) ? version : "",
+          reason,
+          resolved || range
+        );
+      } else if (looksLikeVersion(version)) {
+        set.add(name, version, null);
+      }
     }
-    return [unquote(m[1]!), unquote(m[2]!)];
   }
-  const m = /^("[^"]*"|'[^']*'|\S+)\s+(.*)$/.exec(body);
-  if (!m) {
-    return [body, ""];
-  }
-  return [unquote(m[1]!), unquote(m[2]!)];
-}
+  return {
+    ecosystem: "npm",
+    kind: "yarn",
+    knowsDirect: false,
+    knowsGroups: false,
+    label: "yarn.lock classic (v1)",
+    notChecked: set.notChecked,
+    packages: set.packages(),
+  };
+};
 
-export function parseYarnLock(text: string): ParsedLockfile {
-  const berry = isBerry(text);
-  if (!berry && !/^# yarn lockfile v1/m.test(text)) {
-    throw new LockfileError(
-      'This yarn.lock has neither the classic "# yarn lockfile v1" header nor a berry __metadata block.'
-    );
-  }
-  const blocks = parseBlocks(text, berry).filter(
-    (b) => !b.keys.includes("__metadata")
-  );
-  const set = new PackageSet("npm");
+/** The blocks some workspace depends on directly. */
+const directBerryBlocks = (blocks: Block[]): Set<Block> => {
   const byDescriptor = new Map<string, Block>();
   for (const b of blocks) {
     for (const k of b.keys) {
       byDescriptor.set(k, b);
     }
   }
-
-  if (!berry) {
-    for (const b of blocks) {
-      const version = b.fields.version ?? "";
-      const resolved = b.fields.resolved ?? "";
-      for (const key of b.keys) {
-        let { name, range } = splitDescriptor(key);
-        if (range.startsWith("npm:")) {
-          const alias = splitDescriptor(range.slice(4));
-          name = alias.name;
-          range = alias.range;
-        }
-        const reason =
-          nonRegistryReason(range) ??
-          (resolved
-            ? nonRegistryReason(resolved)
-            : looksLikeVersion(version)
-              ? null
-              : "path");
-        if (reason) {
-          set.skip(
-            name,
-            looksLikeVersion(version) ? version : "",
-            reason,
-            resolved || range
-          );
-        } else if (looksLikeVersion(version)) {
-          set.add(name, version, null);
-        }
-      }
-    }
-    return {
-      kind: "yarn",
-      ecosystem: "npm",
-      label: "yarn.lock classic (v1)",
-      packages: set.packages(),
-      notChecked: set.notChecked,
-      knowsDirect: false,
-      knowsGroups: false,
-    };
-  }
-
-  // Berry: the resolution field names the real package and how it was fetched.
   const directBlocks = new Set<Block>();
   for (const b of blocks) {
     const res = b.fields.resolution ?? b.keys[0] ?? "";
@@ -213,16 +202,20 @@ export function parseYarnLock(text: string): ParsedLockfile {
       }
     }
   }
+  return directBlocks;
+};
+
+const parseBerry = (blocks: Block[], set: PackageSet): ParsedLockfile => {
+  // Berry: the resolution field names the real package and how it was fetched.
+  const directBlocks = directBerryBlocks(blocks);
   for (const b of blocks) {
     const res = b.fields.resolution ?? b.keys[0] ?? "";
     let { name, range } = splitDescriptor(res);
     const version = b.fields.version ?? "";
     if (range.startsWith("patch:")) {
       // A patched package is still the registry release underneath; OSV knows it by that version.
-      const inner = decodeURIComponent(range.slice(6).split("#")[0]!);
-      const innerDesc = splitDescriptor(inner);
-      name = innerDesc.name;
-      range = innerDesc.range;
+      const [inner] = range.slice(6).split("#");
+      ({ name, range } = splitDescriptor(decodeURIComponent(inner)));
     }
     if (range.startsWith("npm:")) {
       if (looksLikeVersion(version)) {
@@ -243,12 +236,26 @@ export function parseYarnLock(text: string): ParsedLockfile {
     set.skip(name, looksLikeVersion(version) ? version : "", reason, range);
   }
   return {
-    kind: "yarn",
     ecosystem: "npm",
-    label: "yarn.lock berry",
-    packages: set.packages(),
-    notChecked: set.notChecked,
+    kind: "yarn",
     knowsDirect: true,
     knowsGroups: false,
+    label: "yarn.lock berry",
+    notChecked: set.notChecked,
+    packages: set.packages(),
   };
-}
+};
+
+export const parseYarnLock = (text: string): ParsedLockfile => {
+  const berry = isBerry(text);
+  if (!berry && !/^# yarn lockfile v1/mu.test(text)) {
+    throw new LockfileError(
+      'This yarn.lock has neither the classic "# yarn lockfile v1" header nor a berry __metadata block.'
+    );
+  }
+  const blocks = parseBlocks(text, berry).filter(
+    (b) => !b.keys.includes("__metadata")
+  );
+  const set = new PackageSet("npm");
+  return berry ? parseBerry(blocks, set) : parseClassic(blocks, set);
+};

@@ -15,7 +15,7 @@ import { splitDescriptor } from "./yarn";
 const fixture = (name: string) =>
   Bun.file(`${import.meta.dir}/fixtures/${name}`).text();
 
-function pkg(p: ParsedLockfile, name: string, version: string) {
+const pkg = (p: ParsedLockfile, name: string, version: string) => {
   const found = p.packages.find(
     (x) => x.name === name && x.version === version
   );
@@ -27,9 +27,9 @@ function pkg(p: ParsedLockfile, name: string, version: string) {
     );
   }
   return found;
-}
+};
 
-function skipped(p: ParsedLockfile, name: string) {
+const skipped = (p: ParsedLockfile, name: string) => {
   const found = p.notChecked.find((x) => x.name === name);
   if (!found) {
     throw new Error(
@@ -37,7 +37,7 @@ function skipped(p: ParsedLockfile, name: string) {
     );
   }
   return found;
-}
+};
 
 describe("detectKind", () => {
   test("by file name", () => {
@@ -398,14 +398,14 @@ describe("toml subset", () => {
     expect(doc.a).toBe(1);
     expect(doc.b).toBe("x");
     expect(doc.p).toEqual([
-      { name: "one", meta: { k: [{ n: "z" }] } },
-      { name: "two", flag: true },
+      { meta: { k: [{ n: "z" }] }, name: "one" },
+      { flag: true, name: "two" },
     ]);
   });
   test("escapes and literal strings", () => {
     expect(parseToml('s = "a\\"b\\n"\nl = \'C:\\path\'\n')).toEqual({
-      s: 'a"b\n',
       l: "C:\\path",
+      s: 'a"b\n',
     });
   });
   test("rejects garbage with a line number", () => {
@@ -429,9 +429,9 @@ describe("yaml subset", () => {
       "packages:\n  left-pad@https://codeload.github.com/x/y/tar.gz/abc:\n    version: 1.3.0\n  empty:\n"
     ) as Record<string, Record<string, unknown>>;
     expect(
-      doc.packages!["left-pad@https://codeload.github.com/x/y/tar.gz/abc"]
+      doc.packages["left-pad@https://codeload.github.com/x/y/tar.gz/abc"]
     ).toEqual({ version: "1.3.0" });
-    expect(doc.packages!.empty).toBeNull();
+    expect(doc.packages.empty).toBeNull();
   });
   test("block scalars are refused", () => {
     expect(() => parseYaml("a: |\n  text\n")).toThrow("Block scalars");

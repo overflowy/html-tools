@@ -5,20 +5,29 @@ export type Ecosystem = "npm" | "PyPI";
 
 export type LockfileKind = "package-lock" | "yarn" | "pnpm" | "bun" | "uv";
 
+/** Every kind, in the order a repository is searched for its Lockfile. */
+export const LOCKFILE_KINDS: readonly LockfileKind[] = [
+  "package-lock",
+  "yarn",
+  "pnpm",
+  "bun",
+  "uv",
+];
+
 export const KIND_FILENAME: Record<LockfileKind, string> = {
-  "package-lock": "package-lock.json",
-  yarn: "yarn.lock",
-  pnpm: "pnpm-lock.yaml",
   bun: "bun.lock",
+  "package-lock": "package-lock.json",
+  pnpm: "pnpm-lock.yaml",
   uv: "uv.lock",
+  yarn: "yarn.lock",
 };
 
 export const KIND_ECOSYSTEM: Record<LockfileKind, Ecosystem> = {
-  "package-lock": "npm",
-  yarn: "npm",
-  pnpm: "npm",
   bun: "npm",
+  "package-lock": "npm",
+  pnpm: "npm",
   uv: "PyPI",
+  yarn: "npm",
 };
 
 /** One name-and-version pair from a Lockfile, deduplicated within the file. */
@@ -57,80 +66,20 @@ export interface ParsedLockfile {
 }
 
 /** A Lockfile that cannot be read: message fit to show as-is. */
-export class LockfileError extends Error {}
+export class LockfileError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "LockfileError";
+  }
+}
 
 export const REASON_LABEL: Record<NotCheckedReason, string> = {
   git: "git dependency",
   path: "local path",
+  root: "the project itself",
   url: "tarball URL",
   workspace: "workspace member",
-  root: "the project itself",
 };
-
-/** Builds a package list with duplicates merged: direct wins over transitive, groups union. */
-export class PackageSet {
-  private byKey = new Map<string, Package>();
-  readonly notChecked: NotChecked[] = [];
-  private seenNotChecked = new Set<string>();
-
-  constructor(readonly ecosystem: Ecosystem) {}
-
-  add(
-    name: string,
-    version: string,
-    direct: boolean | null,
-    groups: string[] = []
-  ): Package {
-    const key = `${name}@${version}`;
-    let p = this.byKey.get(key);
-    if (!p) {
-      p = {
-        name,
-        version,
-        ecosystem: this.ecosystem,
-        direct,
-        groups: [...groups],
-      };
-      this.byKey.set(key, p);
-      return p;
-    }
-    if (direct === true) {
-      p.direct = true;
-    } else if (direct === false && p.direct === null) {
-      p.direct = false;
-    }
-    for (const g of groups) {
-      if (!p.groups.includes(g)) {
-        p.groups.push(g);
-      }
-    }
-    return p;
-  }
-
-  skip(name: string, version: string, reason: NotCheckedReason, detail = "") {
-    const key = `${name}@${version}@${reason}`;
-    if (this.seenNotChecked.has(key)) {
-      return;
-    }
-    this.seenNotChecked.add(key);
-    this.notChecked.push({ name, version, reason, detail });
-  }
-
-  get(name: string, version: string): Package | undefined {
-    return this.byKey.get(`${name}@${version}`);
-  }
-
-  hasSkipped(name: string): boolean {
-    return this.notChecked.some((n) => n.name === name);
-  }
-
-  packages(): Package[] {
-    return [...this.byKey.values()].toSorted(
-      (a, b) =>
-        a.name.localeCompare(b.name) || compareLoose(a.version, b.version)
-    );
-  }
-}
 
 /**
  * Orders version strings well enough to sort a list and to pick the smallest
@@ -138,13 +87,13 @@ export class PackageSet {
  * pre-release sorts before its release. Not a full semver or PEP 440 comparator;
  * OSV does the actual affected-version matching.
  */
-export function compareLoose(a: string, b: string): number {
+export const compareLoose = (a: string, b: string): number => {
   const split = (v: string) => {
-    const [main, pre = ""] = v.replace(/^v/, "").split(/[-+]/, 2) as [
+    const [main, pre = ""] = v.replace(/^v/u, "").split(/[-+]/u, 2) as [
       string,
       string?,
     ];
-    const nums = main.split(".").map((s) => (/^\d+$/.test(s) ? Number(s) : s));
+    const nums = main.split(".").map((s) => (/^\d+$/u.test(s) ? Number(s) : s));
     return { nums, pre };
   };
   const x = split(a);
@@ -171,208 +120,137 @@ export function compareLoose(a: string, b: string): number {
     return -1;
   }
   return x.pre < y.pre ? -1 : 1;
-}
+};
 
 /** True for a version string a registry could hold, as opposed to a URL, path, or protocol spec. */
-export function looksLikeVersion(v: string): boolean {
-  return /^\d/.test(v) && !v.includes("://") && !v.includes("/");
-}
+export const looksLikeVersion = (v: string): boolean =>
+  /^\d/u.test(v) && !v.includes("://") && !v.includes("/");
+
+const PATH_PREFIXES = [
+  "file:",
+  "link:",
+  "portal:",
+  "directory:",
+  "./",
+  "../",
+  "/",
+];
+
+const GIT_PREFIXES = [
+  "git+",
+  "git:",
+  "git@",
+  "github:",
+  "gitlab:",
+  "bitbucket:",
+  "ssh://",
+];
+
+/** Whether a lowercased spec names a git host or repository rather than a tarball. */
+const isGitSpec = (s: string): boolean =>
+  GIT_PREFIXES.some((p) => s.startsWith(p)) ||
+  s.includes("codeload.github.com") ||
+  (/^https?:\/\//u.test(s) && /\.git(?:#|$)/u.test(s)) ||
+  /^(?:github|gitlab|bitbucket)\.(?:com|org)\//u.test(s);
 
 /** How a package spec or resolution says it is not a registry release; null when it is one. */
-export function nonRegistryReason(spec: string): NotCheckedReason | null {
+export const nonRegistryReason = (spec: string): NotCheckedReason | null => {
   const s = spec.toLowerCase();
   if (s.startsWith("workspace:")) {
     return "workspace";
   }
-  if (
-    s.startsWith("file:") ||
-    s.startsWith("link:") ||
-    s.startsWith("portal:") ||
-    s.startsWith("directory:") ||
-    s.startsWith("./") ||
-    s.startsWith("../") ||
-    s.startsWith("/")
-  ) {
+  if (PATH_PREFIXES.some((p) => s.startsWith(p))) {
     return "path";
   }
-  if (
-    s.startsWith("git+") ||
-    s.startsWith("git:") ||
-    s.startsWith("git@") ||
-    s.startsWith("github:") ||
-    s.startsWith("gitlab:") ||
-    s.startsWith("bitbucket:") ||
-    s.startsWith("ssh://")
-  ) {
+  if (isGitSpec(s)) {
     return "git";
   }
-  if (
-    s.includes("codeload.github.com") ||
-    (/^https?:\/\//.test(s) && /\.git(#|$)/.test(s))
-  ) {
-    return "git";
-  }
-  if (/^(github|gitlab|bitbucket)\.(com|org)\//.test(s)) {
-    return "git";
-  }
-  if (/^https?:\/\//.test(s)) {
+  if (/^https?:\/\//u.test(s)) {
     return s.includes("/-/") ? null : "url";
   }
-  if (/^[\w.-]+\/[\w.-]+(#|$)/.test(s) && !s.startsWith("@")) {
+  if (/^[\w.-]+\/[\w.-]+(?:#|$)/u.test(s) && !s.startsWith("@")) {
     return "git";
   }
   return null;
-}
+};
 
 /** PEP 503 normalization: what PyPI and OSV know a Python package by. */
-export function normalizePyPiName(name: string): string {
-  return name.toLowerCase().replaceAll(/[-_.]+/g, "-");
-}
+export const normalizePyPiName = (name: string): string =>
+  name.toLowerCase().replaceAll(/[-_.]+/gu, "-");
 
 export type Detected = { kind: LockfileKind } | { kind: null; refusal: string };
 
 const BINARY_BUN =
   "bun.lockb is Bun's binary lockfile. Run `bun install --save-text-lockfile` (Bun 1.2 or newer) to get a text bun.lock and audit that.";
 
-/** Decides which parser a file gets, from its name when it has one, otherwise from its content. */
-export function detectKind(text: string, filename = ""): Detected {
-  const base = filename.split("/").pop()!.toLowerCase();
-  if (base === "bun.lockb") {
-    return { kind: null, refusal: BINARY_BUN };
-  }
-  if (base === "package-lock.json" || base === "npm-shrinkwrap.json") {
-    return { kind: "package-lock" };
-  }
-  if (base === "yarn.lock") {
-    return { kind: "yarn" };
-  }
-  if (base === "pnpm-lock.yaml") {
-    return { kind: "pnpm" };
-  }
-  if (base === "bun.lock") {
-    return { kind: "bun" };
-  }
-  if (base === "uv.lock") {
-    return { kind: "uv" };
-  }
-  if (base === "package.json") {
-    return { kind: null, refusal: declarationRefusal("package.json") };
-  }
-  if (base === "pyproject.toml") {
-    return { kind: null, refusal: declarationRefusal("pyproject.toml") };
-  }
-  if (base === "requirements.txt" || /^requirements[-_.\w]*\.txt$/.test(base)) {
-    return { kind: null, refusal: declarationRefusal("requirements.txt") };
-  }
-  if (base === "poetry.lock") {
-    return {
-      kind: null,
-      refusal:
-        "poetry.lock is not supported; uv.lock is the Python lockfile this tool reads.",
-    };
-  }
-  if (base === "pipfile.lock") {
-    return {
-      kind: null,
-      refusal:
-        "Pipfile.lock is not supported; uv.lock is the Python lockfile this tool reads.",
-    };
-  }
+const declarationRefusal = (name: string): string =>
+  `This looks like ${
+    name
+  }, which declares version ranges, not installed versions. Audit the lockfile instead${
+    name === "package.json"
+      ? " (package-lock.json, yarn.lock, pnpm-lock.yaml, or bun.lock)."
+      : " (uv.lock)."
+  }`;
 
-  const t = text.trimStart();
-  if ([...t.slice(0, 64)].some((c) => c.charCodeAt(0) < 9)) {
-    return { kind: null, refusal: BINARY_BUN };
-  }
-  if (t.startsWith("{")) {
-    // Top-level keys decide: bun.lock has "workspaces" beside "lockfileVersion"; package-lock.json has "packages" or "dependencies" there.
-    const keys = topLevelKeys(t);
-    if (keys.has("lockfileVersion") && keys.has("workspaces")) {
-      return { kind: "bun" };
+/** The index just past the closing quote of the JSON string opening at `start`. */
+const skipString = (src: string, start: number): number => {
+  let j = start + 1;
+  while (j < src.length && src[j] !== '"') {
+    if (src[j] === "\\") {
+      j += 1;
     }
-    if (keys.has("lockfileVersion")) {
-      return { kind: "package-lock" };
-    }
-    if (keys.has("dependencies") || keys.has("devDependencies")) {
-      return { kind: null, refusal: declarationRefusal("package.json") };
-    }
-    return {
-      kind: null,
-      refusal: "This JSON is not a lockfile this tool reads.",
-    };
+    j += 1;
   }
-  if (/^lockfileVersion:/m.test(t)) {
-    return { kind: "pnpm" };
-  }
-  if (/^# yarn lockfile v1/m.test(t) || /^__metadata:/m.test(t)) {
-    return { kind: "yarn" };
-  }
-  if (
-    /^\[\[package\]\]/m.test(t) ||
-    (/^version = \d/m.test(t) && /^requires-python = /m.test(t))
+  return j + 1;
+};
+
+/** Whether the next non-whitespace character from `start` is a colon. */
+const colonFollows = (src: string, start: number): boolean => {
+  let k = start;
+  while (
+    k < src.length &&
+    (src[k] === " " || src[k] === "\t" || src[k] === "\n" || src[k] === "\r")
   ) {
-    return { kind: "uv" };
+    k += 1;
   }
-  if (
-    /^\[project\]/m.test(t) ||
-    /^\[tool\.poetry\]/m.test(t) ||
-    /^\[build-system\]/m.test(t)
-  ) {
-    return { kind: null, refusal: declarationRefusal("pyproject.toml") };
+  return src[k] === ":";
+};
+
+/** The index just past a comment opening at `start`, or `start` when none opens there. */
+const skipComment = (src: string, start: number): number => {
+  if (src[start] !== "/") {
+    return start;
   }
-  if (/^[A-Za-z0-9][\w.-]*\s*(==|>=|<=|~=|!=|>|<)/m.test(t)) {
-    return { kind: null, refusal: declarationRefusal("requirements.txt") };
+  if (src[start + 1] === "/") {
+    const e = src.indexOf("\n", start);
+    return e === -1 ? src.length : e;
   }
-  return {
-    kind: null,
-    refusal:
-      "Not a lockfile this tool reads. Paste package-lock.json, yarn.lock, pnpm-lock.yaml, bun.lock, or uv.lock.",
-  };
-}
+  if (src[start + 1] === "*") {
+    const e = src.indexOf("*/", start + 2);
+    return e === -1 ? src.length : e + 2;
+  }
+  return start;
+};
 
 /** The keys of the outermost object, read by skipping nested values; tolerant of comments and trailing commas. */
-function topLevelKeys(src: string): Set<string> {
+const topLevelKeys = (src: string): Set<string> => {
   const keys = new Set<string>();
   let depth = 0;
   let i = 0;
   const n = src.length;
   while (i < n) {
-    const c = src[i]!;
+    const c = src[i];
     if (c === '"') {
-      let j = i + 1;
-      while (j < n && src[j] !== '"') {
-        if (src[j] === "\\") {
-          j += 1;
-        }
-        j += 1;
+      const end = skipString(src, i);
+      if (depth === 1 && colonFollows(src, end)) {
+        keys.add(src.slice(i + 1, end - 1));
       }
-      const s = src.slice(i + 1, j);
-      i = j + 1;
-      if (depth === 1) {
-        let k = i;
-        while (
-          k < n &&
-          (src[k] === " " ||
-            src[k] === "\t" ||
-            src[k] === "\n" ||
-            src[k] === "\r")
-        ) {
-          k += 1;
-        }
-        if (src[k] === ":") {
-          keys.add(s);
-        }
-      }
+      i = end;
       continue;
     }
-    if (c === "/" && src[i + 1] === "/") {
-      while (i < n && src[i] !== "\n") {
-        i += 1;
-      }
-      continue;
-    }
-    if (c === "/" && src[i + 1] === "*") {
-      const e = src.indexOf("*/", i + 2);
-      i = e === -1 ? n : e + 2;
+    const afterComment = skipComment(src, i);
+    if (afterComment !== i) {
+      i = afterComment;
       continue;
     }
     if (c === "{" || c === "[") {
@@ -383,14 +261,115 @@ function topLevelKeys(src: string): Set<string> {
     i += 1;
   }
   return keys;
-}
+};
 
-function declarationRefusal(name: string): string {
-  return `This looks like ${
-    name
-  }, which declares version ranges, not installed versions. Audit the lockfile instead${
-    name === "package.json"
-      ? " (package-lock.json, yarn.lock, pnpm-lock.yaml, or bun.lock)."
-      : " (uv.lock)."
-  }`;
-}
+const KIND_BY_BASENAME = new Map<string, LockfileKind>([
+  ["package-lock.json", "package-lock"],
+  ["npm-shrinkwrap.json", "package-lock"],
+  ["yarn.lock", "yarn"],
+  ["pnpm-lock.yaml", "pnpm"],
+  ["bun.lock", "bun"],
+  ["uv.lock", "uv"],
+]);
+
+const unsupportedPython = (name: string) =>
+  `${name} is not supported; uv.lock is the Python lockfile this tool reads.`;
+
+/** The refusal a file name alone earns, or null when the name does not decide. */
+const refusalByName = (base: string): string | null => {
+  if (base === "bun.lockb") {
+    return BINARY_BUN;
+  }
+  if (base === "package.json" || base === "pyproject.toml") {
+    return declarationRefusal(base);
+  }
+  if (
+    base === "requirements.txt" ||
+    /^requirements[-_.\w]*\.txt$/u.test(base)
+  ) {
+    return declarationRefusal("requirements.txt");
+  }
+  if (base === "poetry.lock") {
+    return unsupportedPython("poetry.lock");
+  }
+  if (base === "pipfile.lock") {
+    return unsupportedPython("Pipfile.lock");
+  }
+  return null;
+};
+
+/** Whether a string holds a character below tab, which text lockfiles never do. */
+const hasControlCharacter = (s: string): boolean => {
+  for (let k = 0; k < s.length; k += 1) {
+    if ((s.codePointAt(k) ?? 0) < 9) {
+      return true;
+    }
+  }
+  return false;
+};
+
+const detectJson = (t: string): Detected => {
+  // Top-level keys decide: bun.lock has "workspaces" beside "lockfileVersion"; package-lock.json has "packages" or "dependencies" there.
+  const keys = topLevelKeys(t);
+  if (keys.has("lockfileVersion") && keys.has("workspaces")) {
+    return { kind: "bun" };
+  }
+  if (keys.has("lockfileVersion")) {
+    return { kind: "package-lock" };
+  }
+  if (keys.has("dependencies") || keys.has("devDependencies")) {
+    return { kind: null, refusal: declarationRefusal("package.json") };
+  }
+  return {
+    kind: null,
+    refusal: "This JSON is not a lockfile this tool reads.",
+  };
+};
+
+const detectText = (t: string): Detected => {
+  if (/^lockfileVersion:/mu.test(t)) {
+    return { kind: "pnpm" };
+  }
+  if (/^# yarn lockfile v1/mu.test(t) || /^__metadata:/mu.test(t)) {
+    return { kind: "yarn" };
+  }
+  if (
+    /^\[\[package\]\]/mu.test(t) ||
+    (/^version = \d/mu.test(t) && /^requires-python = /mu.test(t))
+  ) {
+    return { kind: "uv" };
+  }
+  if (
+    /^\[project\]/mu.test(t) ||
+    /^\[tool\.poetry\]/mu.test(t) ||
+    /^\[build-system\]/mu.test(t)
+  ) {
+    return { kind: null, refusal: declarationRefusal("pyproject.toml") };
+  }
+  if (/^[A-Za-z0-9][\w.-]*\s*(?:==|>=|<=|~=|!=|>|<)/mu.test(t)) {
+    return { kind: null, refusal: declarationRefusal("requirements.txt") };
+  }
+  return {
+    kind: null,
+    refusal:
+      "Not a lockfile this tool reads. Paste package-lock.json, yarn.lock, pnpm-lock.yaml, bun.lock, or uv.lock.",
+  };
+};
+
+/** Decides which parser a file gets, from its name when it has one, otherwise from its content. */
+export const detectKind = (text: string, filename = ""): Detected => {
+  const base = (filename.split("/").pop() ?? "").toLowerCase();
+  const kind = KIND_BY_BASENAME.get(base);
+  if (kind) {
+    return { kind };
+  }
+  const refusal = refusalByName(base);
+  if (refusal !== null) {
+    return { kind: null, refusal };
+  }
+  const t = text.trimStart();
+  if (hasControlCharacter(t.slice(0, 64))) {
+    return { kind: null, refusal: BINARY_BUN };
+  }
+  return t.startsWith("{") ? detectJson(t) : detectText(t);
+};

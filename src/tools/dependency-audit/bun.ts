@@ -4,24 +4,24 @@
 // root workspace lists its direct dependencies by group.
 import {
   LockfileError,
-  PackageSet,
   looksLikeVersion,
   nonRegistryReason,
 } from "./lockfiles";
 import type { ParsedLockfile } from "./lockfiles";
+import { PackageSet } from "./package-set";
 
 type Obj = Record<string, unknown>;
 
 /** JSON with // and /* comments and trailing commas allowed. */
-export function parseJsonc(src: string): unknown {
+export const parseJsonc = (src: string): unknown => {
   let i = 0;
   const n = src.length;
-  function fail(msg: string): never {
+  const fail: (msg: string) => never = (msg) => {
     throw new LockfileError(`${msg} at offset ${i}`);
-  }
-  function ws() {
+  };
+  const ws = () => {
     for (;;) {
-      while (i < n && /\s/.test(src[i]!)) {
+      while (i < n && /\s/u.test(src[i])) {
         i += 1;
       }
       if (src[i] === "/" && src[i + 1] === "/") {
@@ -40,8 +40,23 @@ export function parseJsonc(src: string): unknown {
       }
       return;
     }
-  }
-  function value(): unknown {
+  };
+  const str = (): string => {
+    let j = i + 1;
+    while (j < n && src[j] !== '"') {
+      if (src[j] === "\\") {
+        j += 1;
+      }
+      j += 1;
+    }
+    if (j >= n) {
+      fail("Unterminated string");
+    }
+    const raw = src.slice(i, j + 1);
+    i = j + 1;
+    return JSON.parse(raw);
+  };
+  const value = (): unknown => {
     ws();
     const c = src[i];
     if (c === "{") {
@@ -100,37 +115,24 @@ export function parseJsonc(src: string): unknown {
     if (c === '"') {
       return str();
     }
-    const m = /^(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|true|false|null)/.exec(
+    const m = /^(?:-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|true|false|null)/u.exec(
       src.slice(i, i + 64)
     );
     if (!m) {
-      fail(`Unexpected character ${JSON.stringify(c ?? "end of input")}`);
+      return fail(
+        `Unexpected character ${JSON.stringify(c ?? "end of input")}`
+      );
     }
     i += m[0].length;
     return JSON.parse(m[0]);
-  }
-  function str(): string {
-    let j = i + 1;
-    while (j < n && src[j] !== '"') {
-      if (src[j] === "\\") {
-        j += 1;
-      }
-      j += 1;
-    }
-    if (j >= n) {
-      fail("Unterminated string");
-    }
-    const raw = src.slice(i, j + 1);
-    i = j + 1;
-    return JSON.parse(raw);
-  }
+  };
   const v = value();
   ws();
   if (i < n) {
     fail("Unexpected content after the document");
   }
   return v;
-}
+};
 
 const ROOT_GROUPS: [string, string[]][] = [
   ["dependencies", []],
@@ -139,12 +141,8 @@ const ROOT_GROUPS: [string, string[]][] = [
   ["peerDependencies", ["peer"]],
 ];
 
-export function parseBunLock(text: string): ParsedLockfile {
-  const doc = parseJsonc(text);
-  if (typeof doc !== "object" || doc === null || Array.isArray(doc)) {
-    throw new LockfileError("bun.lock must be a JSON object.");
-  }
-  const lock = doc as Obj;
+/** The lockfileVersion, when it is one this reader knows. */
+const supportedVersion = (lock: Obj): number => {
   // v2 (Bun 1.4) only tightened what Bun accepts at parse time; the shape is that of v0 and v1.
   const version = Number(lock.lockfileVersion);
   if (![0, 1, 2].includes(version)) {
@@ -154,9 +152,14 @@ export function parseBunLock(text: string): ParsedLockfile {
       )} is not supported; 0, 1, and 2 are.`
     );
   }
-  const set = new PackageSet("npm");
+  return version;
+};
 
-  const workspaces = (lock.workspaces ?? {}) as Record<string, Obj>;
+/** Lists every workspace as Not Checked and returns the root's direct dependencies with their Groups. */
+const readWorkspaces = (
+  workspaces: Record<string, Obj>,
+  set: PackageSet
+): Map<string, string[]> => {
   const directGroups = new Map<string, string[]>();
   for (const [path, ws] of Object.entries(workspaces)) {
     const name = typeof ws?.name === "string" ? ws.name : path;
@@ -178,6 +181,20 @@ export function parseBunLock(text: string): ParsedLockfile {
       }
     }
   }
+  return directGroups;
+};
+
+export const parseBunLock = (text: string): ParsedLockfile => {
+  const doc = parseJsonc(text);
+  if (typeof doc !== "object" || doc === null || Array.isArray(doc)) {
+    throw new LockfileError("bun.lock must be a JSON object.");
+  }
+  const lock = doc as Obj;
+  const version = supportedVersion(lock);
+  const set = new PackageSet("npm");
+
+  const workspaces = (lock.workspaces ?? {}) as Record<string, Obj>;
+  const directGroups = readWorkspaces(workspaces, set);
 
   const packages = (lock.packages ?? {}) as Record<string, unknown[]>;
   for (const [key, entry] of Object.entries(packages)) {
@@ -192,23 +209,24 @@ export function parseBunLock(text: string): ParsedLockfile {
       nonRegistryReason(spec) ?? (looksLikeVersion(spec) ? null : "url");
     if (reason) {
       if (reason === "workspace" && workspaces[spec.slice(10)]) {
+        // Already listed from the workspaces map.
         continue;
-      } // already listed from the workspaces map
+      }
       set.skip(name, "", reason, spec);
       continue;
     }
     // Only a top-level key (no "parent/" prefix) can be one of the root's own dependencies.
-    const direct =
-      !key.includes("/") || key === name ? directGroups.has(key) : false;
-    set.add(name, spec, direct, direct ? directGroups.get(key)! : []);
+    const groups =
+      !key.includes("/") || key === name ? directGroups.get(key) : undefined;
+    set.add(name, spec, groups !== undefined, groups ?? []);
   }
   return {
-    kind: "bun",
     ecosystem: "npm",
-    label: `bun.lock v${version}`,
-    packages: set.packages(),
-    notChecked: set.notChecked,
+    kind: "bun",
     knowsDirect: true,
     knowsGroups: true,
+    label: `bun.lock v${version}`,
+    notChecked: set.notChecked,
+    packages: set.packages(),
   };
-}
+};

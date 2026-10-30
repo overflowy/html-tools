@@ -6,6 +6,7 @@ import { runAudit } from "./audit";
 import type {
   AuditResult,
   AuditedPackage,
+  Hit,
   InputFile,
   LockfileReport,
 } from "./audit";
@@ -13,6 +14,7 @@ import type { Band } from "./cvss";
 import { lockfileUrls, parseSource, sourceLabel, sourcePage } from "./github";
 import type { Source } from "./github";
 import { KIND_FILENAME, REASON_LABEL, detectKind } from "./lockfiles";
+import type { ParsedLockfile } from "./lockfiles";
 import { AuditError, browserFetch, compareSeverity } from "./osv";
 import type { Advisory } from "./osv";
 import {
@@ -21,6 +23,7 @@ import {
   plural,
   reportMarkdown,
   severityText,
+  worstAdvisory,
 } from "./report";
 
 /** Longest compressed input we are willing to put in the Deep Link. */
@@ -32,40 +35,42 @@ const BANDS: Band[] = ["critical", "high", "moderate", "low", "unknown"];
 const PRIVACY_NOTE =
   "An audit sends package names and versions to OSV.dev, and nothing else.";
 
-function esc(s: string): string {
-  return s.replaceAll(
-    /[&<>"]/g,
-    (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!
-  );
-}
+const HTML_ESCAPES: Record<string, string> = {
+  '"': "&quot;",
+  "&": "&amp;",
+  "<": "&lt;",
+  ">": "&gt;",
+};
 
-function sevPill(a: Advisory): string {
-  return `<span class="sev ${a.severity.band}"${
+const esc = (s: string): string =>
+  s.replaceAll(/[&<>"]/gu, (c) => HTML_ESCAPES[c] ?? c);
+
+const sevPill = (a: Advisory): string =>
+  `<span class="sev ${a.severity.band}"${
     a.severity.vector ? ` title="${esc(a.severity.vector)}"` : ""
   }>${esc(severityText(a))}</span>`;
-}
 
-function link(href: string, text: string): string {
-  return `<a href="${esc(href)}" target="_blank" rel="noreferrer">${esc(
-    text
-  )}</a>`;
-}
+const link = (href: string, text: string): string =>
+  `<a href="${esc(href)}" target="_blank" rel="noreferrer">${esc(text)}</a>`;
 
-function advisoryHtml(ap: AuditedPackage, index: number): string {
-  const { advisory, fix } = ap.hits[index]!;
+/** The fix line under an advisory, or "" when the records say nothing either way. */
+const fixLine = (fix: Hit["fix"]): string => {
+  if (fix.fixed) {
+    return `Fixed in ${fix.fixed}${
+      fix.introduced && fix.introduced !== "0"
+        ? `, affected since ${fix.introduced}`
+        : ""
+    }.`;
+  }
+  return fix.unfixed ? "No fixed version yet." : "";
+};
+
+const advisoryHtml = ({ advisory, fix }: Hit): string => {
   const aliases = advisory.aliases.length
     ? `<span class="aliases">${advisory.aliases.map(esc).join(", ")}</span>`
     : "";
   const others = advisory.ids.filter((id) => id !== advisory.id);
-  const fixText = fix.fixed
-    ? `Fixed in ${fix.fixed}${
-        fix.introduced && fix.introduced !== "0"
-          ? `, affected since ${fix.introduced}`
-          : ""
-      }.`
-    : fix.unfixed
-      ? "No fixed version yet."
-      : "";
+  const fixText = fixLine(fix);
   const failed = advisory.failed.length
     ? `<p class="note">Details for ${advisory.failed
         .map(esc)
@@ -100,17 +105,20 @@ function advisoryHtml(ap: AuditedPackage, index: number): string {
       )
     )}</pre></div></details></div>`
   );
-}
+};
 
-function packageHtml(ap: AuditedPackage): string {
+/** The data-scope a card filters on: "direct", "transitive", or "" when the Lockfile cannot tell. */
+const scopeOf = (direct: boolean | null): string => {
+  if (direct === null) {
+    return "";
+  }
+  return direct ? "direct" : "transitive";
+};
+
+const packageHtml = (ap: AuditedPackage): string => {
   const tags = packageTags(ap.pkg);
-  const worst = ap.hits[0]!.advisory;
-  const scope =
-    ap.pkg.direct === true
-      ? "direct"
-      : ap.pkg.direct === false
-        ? "transitive"
-        : "";
+  const worst = worstAdvisory(ap);
+  const scope = scopeOf(ap.pkg.direct);
   return (
     `<section class="card" data-band="${worst.severity.band}" data-scope="${
       scope
@@ -124,12 +132,12 @@ function packageHtml(ap: AuditedPackage): string {
       "advisory"
     )}</span>${sevPill(worst)}</div>` +
     `<div class="card-body">${ap.hits
-      .map((_, i) => advisoryHtml(ap, i))
+      .map((hit) => advisoryHtml(hit))
       .join("")}</div></section>`
   );
-}
+};
 
-function lockfileHtml(r: LockfileReport, index: number): string {
+const lockfileHtml = (r: LockfileReport, index: number): string => {
   const head = `<summary><span class="type-badge">${
     r.parsed ? r.parsed.ecosystem : "?"
   }</span><span class="lf-name">${esc(r.name)}</span>${
@@ -147,10 +155,8 @@ function lockfileHtml(r: LockfileReport, index: number): string {
     .filter((p) => p.hits.length)
     .toSorted(
       (a, b) =>
-        compareSeverity(
-          a.hits[0]!.advisory.severity,
-          b.hits[0]!.advisory.severity
-        ) || a.pkg.name.localeCompare(b.pkg.name)
+        compareSeverity(worstAdvisory(a).severity, worstAdvisory(b).severity) ||
+        a.pkg.name.localeCompare(b.pkg.name)
     );
   const clean = r.packages.filter((p) => !p.hits.length);
   let body = "";
@@ -197,13 +203,84 @@ function lockfileHtml(r: LockfileReport, index: number): string {
   return `<details class="lockfile" open data-file="${index}">${
     head
   }<div class="lf-body">${body}</div></details>`;
+};
+
+/** The status bar's tone after an Audit: unreadable files or a critical or high advisory are errors. */
+const resultTone = (failedFiles: number, r: AuditResult): string => {
+  if (failedFiles) {
+    return "error";
+  }
+  if (!r.advisories.length) {
+    return "ok";
+  }
+  const worst = r.advisories[0]?.severity.band;
+  return worst === "critical" || worst === "high" ? "error" : "";
+};
+
+/** Why a file is not a lockfile this tool reads, or "" when it is one. */
+const refusalOf = (f: InputFile): string => {
+  const d = detectKind(f.text, f.name);
+  return d.kind === null ? d.refusal : "";
+};
+
+/** Filter settings read once per pass over the results. */
+interface Filters {
+  shown: Set<string>;
+  scope: string;
+  prodOnly: boolean;
 }
+
+/** Shows or hides one card and its advisories; returns the ids left visible. */
+const filterCard = (card: HTMLElement, f: Filters): string[] => {
+  const cardScope = card.dataset.scope;
+  const groups = (card.dataset.groups ?? "").split(" ").filter(Boolean);
+  const ok =
+    !(f.scope === "d" && cardScope !== "direct") &&
+    !(f.scope === "t" && cardScope !== "transitive") &&
+    !(f.prodOnly && groups.includes("dev"));
+  const visible: string[] = [];
+  for (const adv of card.querySelectorAll(
+    ".advisory"
+  ) as NodeListOf<HTMLElement>) {
+    const on = ok && f.shown.has(adv.dataset.band ?? "unknown");
+    adv.hidden = !on;
+    if (on) {
+      visible.push(adv.dataset.id ?? "");
+    }
+  }
+  card.hidden = visible.length === 0;
+  return visible;
+};
+
+/** Updates a lockfile's "all hidden" note and its count after filtering. */
+const showLockfileCounts = (
+  lf: HTMLElement,
+  lfCards: number,
+  lfIds: Set<string>
+) => {
+  const total = lf.querySelectorAll(".card").length;
+  const allHidden = lf.querySelector(".all-hidden") as HTMLElement | null;
+  if (allHidden) {
+    allHidden.hidden = !(total > 0 && lfCards === 0);
+  }
+  const count = lf.querySelector(".count") as HTMLElement | null;
+  if (count && !lf.classList.contains("failed")) {
+    const pkgs = Number(lf.dataset.packages ?? 0);
+    count.textContent =
+      lfCards === total
+        ? `${plural(lfIds.size, "advisory")} in ${lfCards} of ${plural(
+            pkgs,
+            "package"
+          )}`
+        : `showing ${lfIds.size} of ${plural(
+            Number(lf.dataset.advisories ?? 0),
+            "advisory"
+          )}`;
+  }
+};
 
 const tool: Tool = {
   id: "dependency-audit",
-  name: "Dependency Audit",
-  subtitle:
-    "Check every package in a lockfile against the OSV.dev vulnerability database.",
   keywords: [
     "vulnerability",
     "vulnerabilities",
@@ -294,20 +371,29 @@ const tool: Tool = {
     let result: AuditResult | null = null;
     let inflight: AbortController | null = null;
 
-    function setStatus(kind: string, msg: string) {
+    const setStatus = (kind: string, msg: string) => {
       $status.className = `statusbar ${kind}`;
       $statusText.textContent = msg;
-    }
+    };
 
-    function inputFiles(): InputFile[] {
+    const inputFiles = (): InputFile[] => {
       const files = [...loaded];
       if ($src.value.trim()) {
         files.push({ name: "", text: $src.value });
       }
       return files;
-    }
+    };
 
-    function renderFiles() {
+    /** The severity checkbox for a band; one is rendered for every band. */
+    const sevBox = (band: Band): HTMLInputElement => {
+      const box = sevBoxes.find((c) => c.value === band);
+      if (!box) {
+        throw new Error(`No severity checkbox for ${band}`);
+      }
+      return box;
+    };
+
+    const renderFiles = () => {
       $files.hidden = loaded.length === 0;
       $files.innerHTML = loaded
         .map((f, i) => {
@@ -323,9 +409,9 @@ const tool: Tool = {
           }" aria-label="Remove ${esc(f.name)}">×</button></span>`;
         })
         .join("");
-    }
+    };
 
-    function syncKindLabel() {
+    const syncKindLabel = () => {
       const text = $src.value;
       if (!text.trim()) {
         $kind.textContent = "";
@@ -336,15 +422,13 @@ const tool: Tool = {
       $kind.textContent = d.kind ? KIND_FILENAME[d.kind] : "not a lockfile";
       $kind.className = `kind-label ${d.kind ? "ok" : "bad"}`;
       $kind.title = d.kind ? "" : d.refusal;
-    }
+    };
 
     /* ---------------- state ---------------- */
 
     /** State layout: `<severity bits>.<scope>.<group>.<source>` where source is `gh:<repo shorthand>`, `lz:<compressed files>`, or empty. */
-    function publishState(): boolean {
-      const sev = BANDS.map((b) =>
-        sevBoxes.find((c) => c.value === b)!.checked ? "1" : "0"
-      ).join("");
+    const publishState = (): boolean => {
+      const sev = BANDS.map((b) => (sevBox(b).checked ? "1" : "0")).join("");
       let src = "";
       let fits = true;
       if (source) {
@@ -364,16 +448,16 @@ const tool: Tool = {
       }
       ctx.setState([sev, $scope.value, $group.value, src].join("."));
       return fits;
-    }
+    };
 
     /* ---------------- filters ---------------- */
 
-    function applyFilters() {
-      const shown = new Set(
-        sevBoxes.filter((c) => c.checked).map((c) => c.value)
-      );
-      const scope = $scope.value;
-      const prodOnly = $group.value === "p";
+    const applyFilters = () => {
+      const filters: Filters = {
+        prodOnly: $group.value === "p",
+        scope: $scope.value,
+        shown: new Set(sevBoxes.filter((c) => c.checked).map((c) => c.value)),
+      };
       const fileIndex = $file.value;
       let visibleHits = 0;
       let visibleCards = 0;
@@ -387,65 +471,31 @@ const tool: Tool = {
         for (const card of lf.querySelectorAll(
           ".card"
         ) as NodeListOf<HTMLElement>) {
-          const cardScope = card.dataset.scope;
-          const groups = (card.dataset.groups ?? "").split(" ").filter(Boolean);
-          let ok =
-            !(scope === "d" && cardScope !== "direct") &&
-            !(scope === "t" && cardScope !== "transitive");
-          if (prodOnly && groups.includes("dev")) {
-            ok = false;
+          const visible = filterCard(card, filters);
+          for (const id of visible) {
+            lfIds.add(id);
           }
-          let cardHits = 0;
-          for (const adv of card.querySelectorAll(
-            ".advisory"
-          ) as NodeListOf<HTMLElement>) {
-            const on = ok && shown.has(adv.dataset.band ?? "unknown");
-            adv.hidden = !on;
-            if (on) {
-              cardHits += 1;
-              lfIds.add(adv.dataset.id ?? "");
-            }
-          }
-          card.hidden = cardHits === 0;
-          if (cardHits) {
+          if (visible.length) {
             lfCards += 1;
           }
         }
-        const total = lf.querySelectorAll(".card").length;
-        const allHidden = lf.querySelector(".all-hidden") as HTMLElement | null;
-        if (allHidden) {
-          allHidden.hidden = !(total > 0 && lfCards === 0);
-        }
-        const count = lf.querySelector(".count") as HTMLElement | null;
-        if (count && !lf.classList.contains("failed")) {
-          const pkgs = Number(lf.dataset.packages ?? 0);
-          count.textContent =
-            lfCards === total
-              ? `${plural(lfIds.size, "advisory")} in ${lfCards} of ${plural(
-                  pkgs,
-                  "package"
-                )}`
-              : `showing ${lfIds.size} of ${plural(
-                  Number(lf.dataset.advisories ?? 0),
-                  "advisory"
-                )}`;
-        }
+        showLockfileCounts(lf, lfCards, lfIds);
         if (!fileHidden) {
           visibleHits += lfIds.size;
           visibleCards += lfCards;
         }
       }
-      return { visibleHits, visibleCards };
-    }
+      return { visibleCards, visibleHits };
+    };
 
-    function onFilterChange() {
+    const onFilterChange = () => {
       applyFilters();
       publishState();
-    }
+    };
 
     /* ---------------- rendering ---------------- */
 
-    function renderResult(r: AuditResult, ms: number) {
+    const renderResult = (r: AuditResult, ms: number) => {
       result = r;
       $resultsTitle.innerHTML = `Advisories${
         source?.kind === "repo"
@@ -453,7 +503,7 @@ const tool: Tool = {
           : ""
       }`;
       $results.innerHTML = r.lockfiles.map(lockfileHtml).join("");
-      r.lockfiles.forEach((lf, i) => {
+      for (const [i, lf] of r.lockfiles.entries()) {
         const node = $results.querySelector(
           `.lockfile[data-file="${i}"]`
         ) as HTMLElement;
@@ -462,9 +512,12 @@ const tool: Tool = {
           new Set(lf.packages.flatMap((p) => p.hits.map((h) => h.advisory.id)))
             .size
         );
-      });
+      }
       $filters.hidden = false;
-      const readable = r.lockfiles.filter((lf) => lf.parsed);
+      const readable = r.lockfiles.filter(
+        (lf): lf is LockfileReport & { parsed: ParsedLockfile } =>
+          lf.parsed !== null
+      );
       $fileWrap.hidden = r.lockfiles.length < 2;
       $file.innerHTML = `<option value="">All</option>${r.lockfiles
         .map((lf, i) => `<option value="${i}">${esc(lf.name)}</option>`)
@@ -473,7 +526,7 @@ const tool: Tool = {
       $btnMarkdown.disabled = false;
       applyFilters();
       const packages = readable.reduce(
-        (n, lf) => n + lf.parsed!.packages.length,
+        (n, lf) => n + lf.parsed.packages.length,
         0
       );
       const affected = readable.reduce(
@@ -481,15 +534,8 @@ const tool: Tool = {
         0
       );
       const failedFiles = r.lockfiles.length - readable.length;
-      const worst = r.advisories[0]?.severity.band;
       setStatus(
-        failedFiles
-          ? "error"
-          : r.advisories.length
-            ? worst === "critical" || worst === "high"
-              ? "error"
-              : ""
-            : "ok",
+        resultTone(failedFiles, r),
         `${
           r.advisories.length
             ? `${plural(r.advisories.length, "advisory")} in ${plural(
@@ -510,11 +556,11 @@ const tool: Tool = {
             : ""
         } · OSV.dev · ${ms} ms`
       );
-    }
+    };
 
     /* ---------------- running ---------------- */
 
-    function begin(): AbortController {
+    const begin = (): AbortController => {
       inflight?.abort();
       const ctrl = new AbortController();
       inflight = ctrl;
@@ -522,9 +568,9 @@ const tool: Tool = {
         b.disabled = true;
       }
       return ctrl;
-    }
+    };
 
-    function finish(ctrl: AbortController) {
+    const finish = (ctrl: AbortController) => {
       if (inflight !== ctrl) {
         return;
       }
@@ -532,9 +578,9 @@ const tool: Tool = {
       for (const b of buttons) {
         b.disabled = false;
       }
-    }
+    };
 
-    function fail(ctrl: AbortController, e: unknown) {
+    const fail = (ctrl: AbortController, e: unknown) => {
       if (ctrl.signal.aborted) {
         return;
       }
@@ -545,9 +591,9 @@ const tool: Tool = {
       $btnMarkdown.disabled = true;
       result = null;
       setStatus("error", msg);
-    }
+    };
 
-    async function audit(ctrl: AbortController) {
+    const audit = async (ctrl: AbortController) => {
       const files = inputFiles();
       if (!files.length) {
         setStatus("error", "Paste or drop a lockfile first.");
@@ -570,9 +616,9 @@ const tool: Tool = {
       if (!fits) {
         $statusText.textContent += " · too large to keep in the URL";
       }
-    }
+    };
 
-    async function runAuditClick() {
+    const runAuditClick = async () => {
       const ctrl = begin();
       try {
         await audit(ctrl);
@@ -581,10 +627,37 @@ const tool: Tool = {
       } finally {
         finish(ctrl);
       }
-    }
+    };
+
+    /** GET a text file; null on 404 or a cross-origin refusal, which is what GitHub answers for anything private. */
+    const fetchText = async (
+      url: string,
+      signal: AbortSignal
+    ): Promise<string | null> => {
+      let res: Response;
+      try {
+        res = await fetch(url, { signal });
+      } catch (error) {
+        if (signal.aborted) {
+          throw error;
+        }
+        return null;
+      }
+      if (res.status === 404) {
+        return null;
+      }
+      if (!res.ok) {
+        throw new AuditError(
+          `HTTP ${res.status} from ${new URL(url).host} for ${url
+            .split("/")
+            .pop()}`
+        );
+      }
+      return res.text();
+    };
 
     /** Reads the Lockfiles at a source into `loaded`, replacing whatever was there, then audits. */
-    async function runFetch(src: Source) {
+    const runFetch = async (src: Source) => {
       const ctrl = begin();
       try {
         setStatus("", `Fetching lockfiles from ${sourceLabel(src)}…`);
@@ -638,36 +711,9 @@ const tool: Tool = {
       } finally {
         finish(ctrl);
       }
-    }
+    };
 
-    /** GET a text file; null on 404 or a cross-origin refusal, which is what GitHub answers for anything private. */
-    async function fetchText(
-      url: string,
-      signal: AbortSignal
-    ): Promise<string | null> {
-      let res: Response;
-      try {
-        res = await fetch(url, { signal });
-      } catch (error) {
-        if (signal.aborted) {
-          throw error;
-        }
-        return null;
-      }
-      if (res.status === 404) {
-        return null;
-      }
-      if (!res.ok) {
-        throw new AuditError(
-          `HTTP ${res.status} from ${new URL(url).host} for ${url
-            .split("/")
-            .pop()}`
-        );
-      }
-      return res.text();
-    }
-
-    function fetchClick() {
+    const fetchClick = () => {
       const src = parseSource($repo.value);
       if (!src) {
         setStatus(
@@ -679,53 +725,42 @@ const tool: Tool = {
       }
       $repo.value = sourceLabel(src);
       void runFetch(src);
-    }
+    };
 
     /* ---------------- input ---------------- */
 
-    function addFiles(files: FileList | File[]) {
+    /** Reads one dropped or chosen file into `loaded`, replacing a file of the same name. */
+    const readFile = async (f: File) => {
+      try {
+        const text = await f.text();
+        loaded = loaded.filter((x) => x.name !== f.name);
+        loaded.push({ name: f.name, text });
+      } catch {
+        setStatus("error", `Could not read ${f.name}.`);
+      }
+    };
+
+    const addFiles = async (files: FileList | File[]) => {
       const list = [...files];
       if (!list.length) {
         return;
       }
       source = null;
-      let pending = list.length;
-      for (const f of list) {
-        f.text()
-          .then(
-            (text) => {
-              loaded = loaded.filter((x) => x.name !== f.name);
-              loaded.push({ name: f.name, text });
-            },
-            () => {
-              setStatus("error", `Could not read ${f.name}.`);
-            }
-          )
-          .finally(() => {
-            if (--pending === 0) {
-              renderFiles();
-              publishState();
-              const bad = loaded.filter(
-                (x) => !detectKind(x.text, x.name).kind
-              );
-              setStatus(
-                bad.length ? "error" : "",
-                `${plural(loaded.length, "file")} loaded${
-                  bad.length
-                    ? ` · ${bad.map((x) => x.name).join(", ")}: ${
-                        (
-                          detectKind(bad[0]!.text, bad[0]!.name) as {
-                            refusal: string;
-                          }
-                        ).refusal
-                      }`
-                    : ""
-                }`
-              );
-            }
-          });
-      }
-    }
+      // Each file lands in `loaded` as soon as it is read; the summary waits for all of them.
+      await Promise.all(list.map((f) => readFile(f)));
+      renderFiles();
+      publishState();
+      const bad = loaded.filter((x) => !detectKind(x.text, x.name).kind);
+      const [firstBad] = bad;
+      setStatus(
+        firstBad ? "error" : "",
+        `${plural(loaded.length, "file")} loaded${
+          firstBad
+            ? ` · ${bad.map((x) => x.name).join(", ")}: ${refusalOf(firstBad)}`
+            : ""
+        }`
+      );
+    };
 
     let kindTimer: ReturnType<typeof setTimeout>;
     $src.addEventListener("input", () => {
@@ -734,7 +769,9 @@ const tool: Tool = {
       kindTimer = setTimeout(syncKindLabel, 120);
     });
 
-    $(".btn-audit").addEventListener("click", () => void runAuditClick());
+    $(".btn-audit").addEventListener("click", () => {
+      void runAuditClick();
+    });
     $(".btn-fetch").addEventListener("click", fetchClick);
     $repo.addEventListener("keydown", (e) => {
       if (e.key === "Enter") {
@@ -744,7 +781,7 @@ const tool: Tool = {
     $(".btn-choose").addEventListener("click", () => $fileInput.click());
     $fileInput.addEventListener("change", () => {
       if ($fileInput.files) {
-        addFiles($fileInput.files);
+        void addFiles($fileInput.files);
       }
       $fileInput.value = "";
     });
@@ -800,7 +837,8 @@ const tool: Tool = {
     });
     el.addEventListener("dragover", (e) => e.preventDefault());
     el.addEventListener("dragleave", () => {
-      if (--dragDepth <= 0) {
+      dragDepth -= 1;
+      if (dragDepth <= 0) {
         dragDepth = 0;
         el.classList.remove("dragging");
       }
@@ -810,7 +848,7 @@ const tool: Tool = {
       dragDepth = 0;
       el.classList.remove("dragging");
       if (e.dataTransfer?.files.length) {
-        addFiles(e.dataTransfer.files);
+        void addFiles(e.dataTransfer.files);
       }
     });
 
@@ -823,7 +861,7 @@ const tool: Tool = {
 
     /* ---------------- copying ---------------- */
 
-    async function copyText(text: string, btn: HTMLButtonElement) {
+    const copyText = async (text: string, btn: HTMLButtonElement) => {
       try {
         await navigator.clipboard.writeText(text);
       } catch {
@@ -839,7 +877,7 @@ const tool: Tool = {
       setTimeout(() => {
         btn.innerHTML = old;
       }, 1200);
-    }
+    };
 
     $btnMarkdown.addEventListener("click", () => {
       if (!result) {
@@ -875,13 +913,56 @@ const tool: Tool = {
 
     /* ---------------- deep link ---------------- */
 
+    /** Restores a `gh:` source: fetches the repository it names and audits. */
+    const restoreRepo = (encoded: string) => {
+      let label = "";
+      try {
+        label = decodeURIComponent(encoded);
+      } catch {
+        /* not ours */
+      }
+      const parsed = label ? parseSource(label) : null;
+      if (parsed) {
+        $repo.value = sourceLabel(parsed);
+        void runFetch(parsed);
+      }
+    };
+
+    /** Restores an `lz:` source: the compressed files go back into the inputs and are audited. */
+    const restoreFiles = (packed: string) => {
+      const text = LZString.decompressFromEncodedURIComponent(packed);
+      let files: [string, string][] = [];
+      try {
+        files = JSON.parse(text || "[]");
+      } catch {
+        /* not ours */
+      }
+      if (!Array.isArray(files) || !files.length) {
+        return;
+      }
+      loaded = [];
+      for (const [name, body] of files) {
+        if (typeof body !== "string") {
+          continue;
+        }
+        if (name) {
+          loaded.push({ name, text: body });
+        } else {
+          $src.value = body;
+        }
+      }
+      syncKindLabel();
+      renderFiles();
+      void runAuditClick();
+    };
+
     ctx.onRestore((payload) => {
       const [sev, scope, group, ...rest] = payload.split(".");
       const src = rest.join(".");
-      if (sev && /^[01]{5}$/.test(sev)) {
-        BANDS.forEach((b, i) => {
-          sevBoxes.find((c) => c.value === b)!.checked = sev[i] === "1";
-        });
+      if (sev && /^[01]{5}$/u.test(sev)) {
+        for (const [i, b] of BANDS.entries()) {
+          sevBox(b).checked = sev[i] === "1";
+        }
       }
       if (scope === "a" || scope === "d" || scope === "t") {
         $scope.value = scope;
@@ -890,44 +971,15 @@ const tool: Tool = {
         $group.value = group;
       }
       if (src.startsWith("gh:")) {
-        let label = "";
-        try {
-          label = decodeURIComponent(src.slice(3));
-        } catch {
-          /* not ours */
-        }
-        const parsed = label ? parseSource(label) : null;
-        if (parsed) {
-          $repo.value = sourceLabel(parsed);
-          void runFetch(parsed);
-        }
+        restoreRepo(src.slice(3));
       } else if (src.startsWith("lz:")) {
-        const text = LZString.decompressFromEncodedURIComponent(src.slice(3));
-        let files: [string, string][] = [];
-        try {
-          files = JSON.parse(text || "[]");
-        } catch {
-          /* not ours */
-        }
-        if (Array.isArray(files) && files.length) {
-          loaded = [];
-          for (const [name, body] of files) {
-            if (typeof body !== "string") {
-              continue;
-            }
-            if (name) {
-              loaded.push({ name, text: body });
-            } else {
-              $src.value = body;
-            }
-          }
-          syncKindLabel();
-          renderFiles();
-          void runAuditClick();
-        }
+        restoreFiles(src.slice(3));
       }
     });
   },
+  name: "Dependency Audit",
+  subtitle:
+    "Check every package in a lockfile against the OSV.dev vulnerability database.",
 };
 
 export default tool;

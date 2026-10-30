@@ -4,11 +4,11 @@
 // direct dependencies.
 import {
   LockfileError,
-  PackageSet,
   looksLikeVersion,
   nonRegistryReason,
 } from "./lockfiles";
 import type { ParsedLockfile } from "./lockfiles";
+import { PackageSet } from "./package-set";
 
 type Obj = Record<string, unknown>;
 
@@ -31,7 +31,9 @@ const ROOT_GROUPS: [string, string[]][] = [
   ["peerDependencies", ["peer"]],
 ];
 
-function flagGroups(e: Entry): string[] {
+const NODE_MODULES = "node_modules/";
+
+const flagGroups = (e: Entry): string[] => {
   const g: string[] = [];
   if (e.dev || e.devOptional) {
     g.push("dev");
@@ -43,19 +45,16 @@ function flagGroups(e: Entry): string[] {
     g.push("peer");
   }
   return g;
-}
+};
 
 /** The package name a "node_modules/…" path ends in, scope included. */
-export function nameFromPath(path: string): string {
-  const parts = path.split("node_modules/");
-  return parts.at(-1)!.replace(/\/$/, "");
-}
+export const nameFromPath = (path: string): string => {
+  const at = path.lastIndexOf(NODE_MODULES);
+  const tail = at === -1 ? path : path.slice(at + NODE_MODULES.length);
+  return tail.replace(/\/$/u, "");
+};
 
-export function parsePackageLock(doc: unknown): ParsedLockfile {
-  if (typeof doc !== "object" || doc === null || Array.isArray(doc)) {
-    throw new LockfileError("package-lock.json must be a JSON object.");
-  }
-  const lock = doc as Obj;
+const supportedVersion = (lock: Obj): number => {
   const version =
     typeof lock.lockfileVersion === "number"
       ? lock.lockfileVersion
@@ -67,37 +66,96 @@ export function parsePackageLock(doc: unknown): ParsedLockfile {
       )} is not supported; 1, 2, and 3 are.`
     );
   }
-  const set = new PackageSet("npm");
-  const label = `package-lock.json v${version}`;
+  return version;
+};
 
+/** v1: only the nested "dependencies" tree, which does not say what is direct. */
+const parseV1 = (lock: Obj, label: string): ParsedLockfile => {
+  const set = new PackageSet("npm");
+  const walk = (deps: Record<string, Entry> | undefined) => {
+    if (!deps) {
+      return;
+    }
+    for (const [name, e] of Object.entries(deps)) {
+      const v = e.version ?? "";
+      const reason =
+        nonRegistryReason(v) ??
+        (e.resolved ? nonRegistryReason(e.resolved) : null);
+      if (reason) {
+        set.skip(name, looksLikeVersion(v) ? v : "", reason, e.resolved ?? v);
+      } else if (looksLikeVersion(v)) {
+        set.add(name, v, null, flagGroups(e));
+      }
+      walk(e.dependencies);
+    }
+  };
+  walk(lock.dependencies as Record<string, Entry> | undefined);
+  return {
+    ecosystem: "npm",
+    kind: "package-lock",
+    knowsDirect: false,
+    knowsGroups: true,
+    label,
+    notChecked: set.notChecked,
+    packages: set.packages(),
+  };
+};
+
+/** The root's direct dependencies, each with the Groups its declaring fields give it. */
+const rootDirectGroups = (root: Entry): Map<string, string[]> => {
+  const directGroups = new Map<string, string[]>();
+  for (const [field, groups] of ROOT_GROUPS) {
+    const deps = (root as unknown as Obj)[field];
+    if (deps && typeof deps === "object") {
+      for (const name of Object.keys(deps as Obj)) {
+        directGroups.set(name, [...(directGroups.get(name) ?? []), ...groups]);
+      }
+    }
+  }
+  return directGroups;
+};
+
+/** One "packages" entry other than the root, added or skipped. */
+const addEntry = (
+  set: PackageSet,
+  path: string,
+  e: Entry,
+  directGroups: Map<string, string[]> | null
+) => {
+  if (!path.includes(NODE_MODULES)) {
+    set.skip(e.name ?? path, e.version ?? "", "workspace", path);
+    return;
+  }
+  const name = e.name ?? nameFromPath(path);
+  const v = e.version ?? "";
+  const reason =
+    (e.resolved ? nonRegistryReason(e.resolved) : null) ??
+    (looksLikeVersion(v) ? null : (nonRegistryReason(v) ?? "url"));
+  if (reason) {
+    set.skip(name, looksLikeVersion(v) ? v : "", reason, e.resolved ?? v);
+    return;
+  }
+  const topLevel = path === `${NODE_MODULES}${nameFromPath(path)}`;
+  const rootGroups = topLevel
+    ? directGroups?.get(nameFromPath(path))
+    : undefined;
+  set.add(
+    name,
+    v,
+    directGroups ? rootGroups !== undefined : null,
+    rootGroups ?? flagGroups(e)
+  );
+};
+
+export const parsePackageLock = (doc: unknown): ParsedLockfile => {
+  if (typeof doc !== "object" || doc === null || Array.isArray(doc)) {
+    throw new LockfileError("package-lock.json must be a JSON object.");
+  }
+  const lock = doc as Obj;
+  const version = supportedVersion(lock);
+  const label = `package-lock.json v${version}`;
   if (version === 1) {
-    const walk = (deps: Record<string, Entry> | undefined) => {
-      if (!deps) {
-        return;
-      }
-      for (const [name, e] of Object.entries(deps)) {
-        const v = e.version ?? "";
-        const reason =
-          nonRegistryReason(v) ??
-          (e.resolved ? nonRegistryReason(e.resolved) : null);
-        if (reason) {
-          set.skip(name, looksLikeVersion(v) ? v : "", reason, e.resolved ?? v);
-        } else if (looksLikeVersion(v)) {
-          set.add(name, v, null, flagGroups(e));
-        }
-        walk(e.dependencies);
-      }
-    };
-    walk(lock.dependencies as Record<string, Entry> | undefined);
-    return {
-      kind: "package-lock",
-      ecosystem: "npm",
-      label,
-      packages: set.packages(),
-      notChecked: set.notChecked,
-      knowsDirect: false,
-      knowsGroups: true,
-    };
+    return parseV1(lock, label);
   }
 
   const packages = lock.packages as Record<string, Entry> | undefined;
@@ -106,23 +164,12 @@ export function parsePackageLock(doc: unknown): ParsedLockfile {
       `package-lock.json v${version} has no "packages" map.`
     );
   }
+  const set = new PackageSet("npm");
   const root = packages[""];
-  const directGroups = new Map<string, string[]>();
-  if (root) {
-    for (const [field, groups] of ROOT_GROUPS) {
-      const deps = (root as unknown as Obj)[field];
-      if (deps && typeof deps === "object") {
-        for (const name of Object.keys(deps as Obj)) {
-          directGroups.set(name, [
-            ...(directGroups.get(name) ?? []),
-            ...groups,
-          ]);
-        }
-      }
-    }
-    if (typeof root.name === "string") {
-      set.skip(root.name, root.version ?? "", "root", "");
-    }
+  // Null when there is no root entry, and so no telling what is direct.
+  const directGroups = root ? rootDirectGroups(root) : null;
+  if (root && typeof root.name === "string") {
+    set.skip(root.name, root.version ?? "", "root", "");
   }
 
   for (const [path, e] of Object.entries(packages)) {
@@ -130,35 +177,18 @@ export function parsePackageLock(doc: unknown): ParsedLockfile {
       continue;
     }
     if (e.link) {
-      continue;
-    } // a symlink to a workspace package listed under its own path
-    if (!path.includes("node_modules/")) {
-      set.skip(e.name ?? path, e.version ?? "", "workspace", path);
+      // A symlink to a workspace package listed under its own path.
       continue;
     }
-    const name = e.name ?? nameFromPath(path);
-    const v = e.version ?? "";
-    const reason =
-      (e.resolved ? nonRegistryReason(e.resolved) : null) ??
-      (looksLikeVersion(v) ? null : (nonRegistryReason(v) ?? "url"));
-    if (reason) {
-      set.skip(name, looksLikeVersion(v) ? v : "", reason, e.resolved ?? v);
-      continue;
-    }
-    const topLevel = path === `node_modules/${nameFromPath(path)}`;
-    const direct = topLevel && directGroups.has(nameFromPath(path));
-    const groups = direct
-      ? directGroups.get(nameFromPath(path))!
-      : flagGroups(e);
-    set.add(name, v, root ? direct : null, groups);
+    addEntry(set, path, e, directGroups);
   }
   return {
-    kind: "package-lock",
     ecosystem: "npm",
-    label,
-    packages: set.packages(),
-    notChecked: set.notChecked,
+    kind: "package-lock",
     knowsDirect: root !== undefined,
     knowsGroups: true,
+    label,
+    notChecked: set.notChecked,
+    packages: set.packages(),
   };
-}
+};

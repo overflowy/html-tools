@@ -13,7 +13,12 @@ export const BATCH_LIMIT = 1000;
 export const REQUEST_TIMEOUT_MS = 20_000;
 
 /** Errors from the OSV helpers: a message fit to show as-is. */
-export class AuditError extends Error {}
+export class AuditError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "AuditError";
+  }
+}
 
 export interface JsonResponse {
   status: number;
@@ -27,7 +32,16 @@ export type JsonFetch = (
   signal: AbortSignal
 ) => Promise<JsonResponse>;
 
-function timeoutSignal(parent: AbortSignal, ms: number): AbortSignal {
+/** `items[i]`, for an index the caller knows is in range. */
+const itemAt = <T>(items: readonly T[], i: number): T => {
+  const item = items[i];
+  if (item === undefined) {
+    throw new RangeError(`Index ${i} is outside a list of ${items.length}.`);
+  }
+  return item;
+};
+
+const timeoutSignal = (parent: AbortSignal, ms: number): AbortSignal => {
   const ctrl = new AbortController();
   const timer = setTimeout(
     () =>
@@ -48,15 +62,15 @@ function timeoutSignal(parent: AbortSignal, ms: number): AbortSignal {
     once: true,
   });
   return ctrl.signal;
-}
+};
 
 export const browserFetch: JsonFetch = async (url, body, signal) => {
   let res: Response;
   try {
     res = await fetch(url, {
-      method: body === undefined ? "GET" : "POST",
-      headers: body === undefined ? {} : { "Content-Type": "application/json" },
       body: body === undefined ? undefined : JSON.stringify(body),
+      headers: body === undefined ? {} : { "Content-Type": "application/json" },
+      method: body === undefined ? "GET" : "POST",
       signal: timeoutSignal(signal, REQUEST_TIMEOUT_MS),
     });
   } catch (error) {
@@ -76,28 +90,28 @@ export const browserFetch: JsonFetch = async (url, body, signal) => {
   } catch {
     /* not JSON, status tells the story */
   }
-  return { status: res.status, json };
+  return { json, status: res.status };
 };
 
 /** Run `fn` over `items` with at most `limit` in flight, preserving order. */
-export async function pool<T, R>(
+export const pool = async <T, R>(
   items: T[],
   limit: number,
   fn: (item: T, index: number) => Promise<R>
-): Promise<R[]> {
+): Promise<R[]> => {
   const results: R[] = Array.from({ length: items.length });
-  let next = 0;
-  async function worker() {
-    while (next < items.length) {
-      const i = next++;
-      results[i] = await fn(items[i]!, i);
+  // One iterator shared by every worker, so each item is taken exactly once.
+  const queue = items.entries();
+  const worker = async () => {
+    for (const [i, item] of queue) {
+      results[i] = await fn(item, i);
     }
-  }
+  };
   await Promise.all(
     Array.from({ length: Math.min(limit, items.length) }, worker)
   );
   return results;
-}
+};
 
 /* ---------------- querybatch ---------------- */
 
@@ -107,26 +121,23 @@ export interface OsvQuery {
 }
 
 /** The name OSV knows a Package by: PyPI names normalized, npm names as they are. */
-export function queryFor(p: Package): OsvQuery {
-  return {
-    package: {
-      name: p.ecosystem === "PyPI" ? normalizePyPiName(p.name) : p.name,
-      ecosystem: p.ecosystem,
-    },
-    version: p.version,
-  };
-}
+export const queryFor = (p: Package): OsvQuery => ({
+  package: {
+    ecosystem: p.ecosystem,
+    name: p.ecosystem === "PyPI" ? normalizePyPiName(p.name) : p.name,
+  },
+  version: p.version,
+});
 
-export function queryKey(q: OsvQuery): string {
-  return `${q.package.ecosystem}:${q.package.name}@${q.version}`;
-}
+export const queryKey = (q: OsvQuery): string =>
+  `${q.package.ecosystem}:${q.package.name}@${q.version}`;
 
 interface BatchResult {
   vulns?: { id: string; modified?: string }[];
   next_page_token?: string;
 }
 
-function explainStatus(status: number, json: unknown): string {
+const explainStatus = (status: number, json: unknown): string => {
   const msg =
     json &&
     typeof json === "object" &&
@@ -134,45 +145,60 @@ function explainStatus(status: number, json: unknown): string {
       ? `: ${(json as { message: string }).message}`
       : "";
   return `OSV.dev answered HTTP ${status}${msg}`;
+};
+
+interface PendingQuery {
+  index: number;
+  pageToken?: string;
 }
+
+/** One querybatch call for `chunk`; the results line up with it. */
+const fetchChunk = async (
+  queries: OsvQuery[],
+  chunk: PendingQuery[],
+  fetcher: JsonFetch,
+  signal: AbortSignal
+): Promise<BatchResult[]> => {
+  const body = {
+    queries: chunk.map((p) => {
+      const q = itemAt(queries, p.index);
+      return p.pageToken ? { ...q, page_token: p.pageToken } : q;
+    }),
+  };
+  const res = await fetcher(`${OSV_API}/querybatch`, body, signal);
+  if (res.status !== 200) {
+    throw new AuditError(explainStatus(res.status, res.json));
+  }
+  const results = (res.json as { results?: BatchResult[] } | null)?.results;
+  if (!Array.isArray(results) || results.length !== chunk.length) {
+    throw new AuditError("OSV.dev returned an unexpected batch response.");
+  }
+  return results;
+};
 
 /**
  * Asks OSV which records affect each query, in chunks of BATCH_LIMIT, following
  * per-query page tokens. Returns one id list per query, in query order.
  */
-export async function queryBatch(
+export const queryBatch = async (
   queries: OsvQuery[],
   fetcher: JsonFetch,
   signal: AbortSignal,
   onProgress?: (done: number, total: number) => void
-): Promise<string[][]> {
+): Promise<string[][]> => {
   const ids: string[][] = queries.map(() => []);
-  let pending: { index: number; pageToken?: string }[] = queries.map(
-    (_, index) => ({ index })
-  );
+  let pending: PendingQuery[] = queries.map((_, index) => ({ index }));
   let done = 0;
   while (pending.length) {
     const chunk = pending.slice(0, BATCH_LIMIT);
     pending = pending.slice(BATCH_LIMIT);
-    const body = {
-      queries: chunk.map((p) => {
-        const q = queries[p.index]!;
-        return p.pageToken ? { ...q, page_token: p.pageToken } : q;
-      }),
-    };
-    const res = await fetcher(`${OSV_API}/querybatch`, body, signal);
-    if (res.status !== 200) {
-      throw new AuditError(explainStatus(res.status, res.json));
-    }
-    const results = (res.json as { results?: BatchResult[] } | null)?.results;
-    if (!Array.isArray(results) || results.length !== chunk.length) {
-      throw new AuditError("OSV.dev returned an unexpected batch response.");
-    }
-    results.forEach((r, k) => {
-      const { index } = chunk[k]!;
+    const results = await fetchChunk(queries, chunk, fetcher, signal);
+    for (const [k, r] of results.entries()) {
+      const { index } = itemAt(chunk, k);
+      const list = itemAt(ids, index);
       for (const v of r.vulns ?? []) {
         if (v && typeof v.id === "string") {
-          ids[index]!.push(v.id);
+          list.push(v.id);
         }
       }
       if (r.next_page_token) {
@@ -180,11 +206,11 @@ export async function queryBatch(
       } else {
         done += 1;
       }
-    });
+    }
     onProgress?.(done, queries.length);
   }
   return ids;
-}
+};
 
 /* ---------------- records ---------------- */
 
@@ -210,11 +236,11 @@ export interface OsvRecord {
   references?: { type?: string; url?: string }[];
 }
 
-export async function fetchRecord(
+export const fetchRecord = async (
   id: string,
   fetcher: JsonFetch,
   signal: AbortSignal
-): Promise<OsvRecord> {
+): Promise<OsvRecord> => {
   const res = await fetcher(
     `${OSV_API}/vulns/${encodeURIComponent(id)}`,
     undefined,
@@ -228,7 +254,7 @@ export async function fetchRecord(
     throw new AuditError(`OSV.dev returned an unexpected record for ${id}.`);
   }
   return rec;
-}
+};
 
 /* ---------------- advisories ---------------- */
 
@@ -261,20 +287,25 @@ export interface Advisory {
 
 const ID_RANK = ["GHSA", "CVE", "PYSEC", "RUSTSEC", "GO", "OSV", "MAL"];
 
-function idRank(id: string): number {
-  const prefix = id.split("-")[0]!.toUpperCase();
-  const r = ID_RANK.indexOf(prefix);
+const idRank = (id: string): number => {
+  const [prefix = ""] = id.split("-");
+  const r = ID_RANK.indexOf(prefix.toUpperCase());
   return r === -1 ? ID_RANK.length : r;
-}
+};
+
+const byIdRank = (a: string, b: string): number =>
+  idRank(a) - idRank(b) || a.localeCompare(b);
 
 /** Picks the id an Advisory is shown under: GHSA first (it carries the severity label), then by database rank. */
-export function displayId(ids: string[]): string {
-  return ids.toSorted(
-    (a, b) => idRank(a) - idRank(b) || a.localeCompare(b)
-  )[0]!;
-}
+export const displayId = (ids: string[]): string => {
+  const [first] = ids.toSorted(byIdRank);
+  if (first === undefined) {
+    throw new RangeError("An Advisory needs at least one id.");
+  }
+  return first;
+};
 
-export function severityOf(records: OsvRecord[]): Severity {
+export const severityOf = (records: OsvRecord[]): Severity => {
   // The database's own label wins, GHSA's in particular.
   for (const r of records.toSorted((a, b) => idRank(a.id) - idRank(b.id))) {
     const band = bandOfLabel(r.database_specific?.severity);
@@ -286,12 +317,13 @@ export function severityOf(records: OsvRecord[]): Severity {
       return {
         band,
         score: v3 ? cvss3BaseScore(v3) : null,
-        vector: v3,
         source: "label",
+        vector: v3,
       };
     }
   }
   let best: Severity | null = null;
+  let bestScore = 0;
   for (const r of records) {
     for (const s of r.severity ?? []) {
       if (typeof s.score !== "string") {
@@ -301,12 +333,13 @@ export function severityOf(records: OsvRecord[]): Severity {
       if (score === null) {
         continue;
       }
-      if (!best || score > best.score!) {
+      if (!best || score > bestScore) {
+        bestScore = score;
         best = {
           band: bandOfScore(score),
           score,
-          vector: s.score,
           source: "cvss3",
+          vector: s.score,
         };
       }
     }
@@ -319,27 +352,27 @@ export function severityOf(records: OsvRecord[]): Severity {
       .flatMap((r) => r.severity ?? [])
       .find((s) => s.type === "CVSS_V4" && typeof s.score === "string")
       ?.score ?? null;
-  return { band: "unknown", score: null, vector: v4, source: "none" };
-}
+  return { band: "unknown", score: null, source: "none", vector: v4 };
+};
 
-/** Groups records that alias each other (directly or through a shared CVE) into Advisories. */
-export function mergeAdvisories(
-  records: Map<string, OsvRecord | null>
-): Map<string, Advisory> {
-  // Union-find over every id and alias mentioned.
+/** Union-find over ids: `find` gives a group's representative, `union` joins two groups. */
+const disjointSets = () => {
   const parent = new Map<string, string>();
+  // Every id reached through `parent` was added by `find`, so the fallback never applies.
+  const parentOf = (x: string): string => parent.get(x) ?? x;
   const find = (x: string): string => {
     if (!parent.has(x)) {
       parent.set(x, x);
     }
     let r = x;
-    while (parent.get(r) !== r) {
-      r = parent.get(r)!;
+    while (parentOf(r) !== r) {
+      r = parentOf(r);
     }
-    while (parent.get(x) !== r) {
-      const next = parent.get(x)!;
-      parent.set(x, r);
-      x = next;
+    let node = x;
+    while (parentOf(node) !== r) {
+      const next = parentOf(node);
+      parent.set(node, r);
+      node = next;
     }
     return r;
   };
@@ -350,6 +383,12 @@ export function mergeAdvisories(
       parent.set(rb, ra);
     }
   };
+  return { find, union };
+};
+
+/** The ids in each group of records that alias each other, in first-seen order. */
+const aliasGroups = (records: Map<string, OsvRecord | null>): string[][] => {
+  const { find, union } = disjointSets();
   for (const [id, rec] of records) {
     find(id);
     for (const alias of rec?.aliases ?? []) {
@@ -361,72 +400,88 @@ export function mergeAdvisories(
     const root = find(id);
     groups.set(root, [...(groups.get(root) ?? []), id]);
   }
+  return [...groups.values()];
+};
+
+/** Aliases the records name that are not themselves among `ids`. */
+const outsideAliases = (recs: OsvRecord[], ids: string[]): string[] => {
+  const aliasSet = new Set<string>();
+  for (const r of recs) {
+    for (const a of r.aliases ?? []) {
+      if (!ids.includes(a)) {
+        aliasSet.add(a);
+      }
+    }
+  }
+  return [...aliasSet];
+};
+
+const referenceUrls = (recs: OsvRecord[]): string[] => {
+  const refs = new Set<string>();
+  for (const r of recs) {
+    for (const ref of r.references ?? []) {
+      if (ref.url) {
+        refs.add(ref.url);
+      }
+    }
+  }
+  return [...refs];
+};
+
+const presentStrings = (values: (string | undefined)[]): string[] =>
+  values.filter((p): p is string => typeof p === "string");
+
+/** One Advisory from a group of aliasing ids and whichever of their records were fetched. */
+const buildAdvisory = (
+  ids: string[],
+  records: Map<string, OsvRecord | null>
+): Advisory => {
+  const recs = ids
+    .map((id) => records.get(id))
+    .filter((r): r is OsvRecord => r !== null && r !== undefined);
+  const [primary] = recs.toSorted((a, b) => idRank(a.id) - idRank(b.id));
+  return {
+    aliases: outsideAliases(recs, ids).toSorted(byIdRank),
+    details: primary?.details ?? "",
+    failed: ids.filter((id) => !records.get(id)),
+    id: displayId(ids),
+    ids: ids.toSorted(byIdRank),
+    modified:
+      presentStrings(recs.map((r) => r.modified))
+        .toSorted()
+        .at(-1) ?? null,
+    published:
+      presentStrings(recs.map((r) => r.published)).toSorted()[0] ?? null,
+    records: recs,
+    references: referenceUrls(recs),
+    severity: severityOf(recs),
+    summary:
+      recs
+        .map((r) => r.summary)
+        .find((s): s is string => typeof s === "string" && s.length > 0) ??
+      primary?.details?.split("\n")[0] ??
+      "",
+    withdrawn:
+      recs.length > 0 && recs.every((r) => typeof r.withdrawn === "string"),
+  };
+};
+
+/** Groups records that alias each other (directly or through a shared CVE) into Advisories. */
+export const mergeAdvisories = (
+  records: Map<string, OsvRecord | null>
+): Map<string, Advisory> => {
   const out = new Map<string, Advisory>();
-  for (const ids of groups.values()) {
-    const recs = ids
-      .map((id) => records.get(id))
-      .filter((r): r is OsvRecord => r !== null && r !== undefined);
-    const failed = ids.filter((id) => !records.get(id));
-    const aliasSet = new Set<string>();
-    for (const r of recs) {
-      for (const a of r.aliases ?? []) {
-        if (!ids.includes(a)) {
-          aliasSet.add(a);
-        }
-      }
-    }
-    const primary = recs.toSorted((a, b) => idRank(a.id) - idRank(b.id))[0];
-    const refs = new Set<string>();
-    for (const r of recs) {
-      for (const ref of r.references ?? []) {
-        if (ref.url) {
-          refs.add(ref.url);
-        }
-      }
-    }
-    const advisory: Advisory = {
-      id: displayId(ids),
-      ids: ids.toSorted((a, b) => idRank(a) - idRank(b) || a.localeCompare(b)),
-      aliases: [...aliasSet].toSorted(
-        (a, b) => idRank(a) - idRank(b) || a.localeCompare(b)
-      ),
-      summary:
-        recs
-          .map((r) => r.summary)
-          .find((s): s is string => typeof s === "string" && s.length > 0) ??
-        primary?.details?.split("\n")[0] ??
-        "",
-      details: primary?.details ?? "",
-      severity: severityOf(recs),
-      withdrawn:
-        recs.length > 0 && recs.every((r) => typeof r.withdrawn === "string"),
-      published:
-        recs
-          .map((r) => r.published)
-          .filter((p): p is string => typeof p === "string")
-          .toSorted()[0] ?? null,
-      modified:
-        recs
-          .map((r) => r.modified)
-          .filter((p): p is string => typeof p === "string")
-          .toSorted()
-          .at(-1) ?? null,
-      references: [...refs],
-      records: recs,
-      failed,
-    };
+  for (const ids of aliasGroups(records)) {
+    const advisory = buildAdvisory(ids, records);
     for (const id of ids) {
       out.set(id, advisory);
     }
   }
   return out;
-}
+};
 
-export function compareSeverity(a: Severity, b: Severity): number {
-  return (
-    BAND_ORDER[b.band] - BAND_ORDER[a.band] || (b.score ?? 0) - (a.score ?? 0)
-  );
-}
+export const compareSeverity = (a: Severity, b: Severity): number =>
+  BAND_ORDER[b.band] - BAND_ORDER[a.band] || (b.score ?? 0) - (a.score ?? 0);
 
 /* ---------------- fixes ---------------- */
 
@@ -439,7 +494,7 @@ export interface FixInfo {
   unfixed: boolean;
 }
 
-function affectsPackage(a: OsvAffected, p: Package): boolean {
+const affectsPackage = (a: OsvAffected, p: Package): boolean => {
   if (a.package?.ecosystem !== p.ecosystem) {
     return false;
   }
@@ -447,12 +502,51 @@ function affectsPackage(a: OsvAffected, p: Package): boolean {
   return p.ecosystem === "PyPI"
     ? normalizePyPiName(name) === normalizePyPiName(p.name)
     : name === p.name;
+};
+
+interface FixState {
+  fixed: string | null;
+  introduced: string | null;
 }
 
+/** Walks one range's events for `version`, narrowing the best fix found so far in `state`. */
+const scanRange = (
+  events: Record<string, string>[],
+  version: string,
+  state: FixState
+): void => {
+  let intro: string | null = null;
+  let inRange = false;
+  for (const ev of events) {
+    if (typeof ev.introduced === "string") {
+      intro = ev.introduced;
+      inRange = intro === "0" || compareLoose(version, intro) >= 0;
+    } else if (typeof ev.fixed === "string") {
+      const fixedIn = ev.fixed;
+      if (
+        inRange &&
+        compareLoose(version, fixedIn) < 0 &&
+        (!state.fixed || compareLoose(fixedIn, state.fixed) < 0)
+      ) {
+        state.fixed = fixedIn;
+        state.introduced = intro;
+      }
+      inRange = false;
+    } else if (typeof ev.last_affected === "string") {
+      if (inRange && compareLoose(version, ev.last_affected) <= 0) {
+        state.introduced = intro;
+      }
+      inRange = false;
+    }
+  }
+  if (inRange && !state.fixed) {
+    state.introduced = intro;
+  }
+};
+
 /** What the records say about fixing `p`: the version to move to, from the range the installed version falls in. */
-export function fixFor(advisory: Advisory, p: Package): FixInfo {
-  let fixed: string | null = null;
-  let introduced: string | null = null;
+export const fixFor = (advisory: Advisory, p: Package): FixInfo => {
+  const state: FixState = { fixed: null, introduced: null };
   let anyRange = false;
   for (const rec of advisory.records) {
     for (const a of rec.affected ?? []) {
@@ -464,32 +558,13 @@ export function fixFor(advisory: Advisory, p: Package): FixInfo {
           continue;
         }
         anyRange = true;
-        let intro: string | null = null;
-        let inRange = false;
-        for (const ev of range.events ?? []) {
-          if (typeof ev.introduced === "string") {
-            intro = ev.introduced;
-            inRange = intro === "0" || compareLoose(p.version, intro) >= 0;
-          } else if (typeof ev.fixed === "string") {
-            if (inRange && compareLoose(p.version, ev.fixed) < 0) {
-              if (!fixed || compareLoose(ev.fixed, fixed) < 0) {
-                fixed = ev.fixed;
-                introduced = intro;
-              }
-            }
-            inRange = false;
-          } else if (typeof ev.last_affected === "string") {
-            if (inRange && compareLoose(p.version, ev.last_affected) <= 0) {
-              introduced = intro;
-            }
-            inRange = false;
-          }
-        }
-        if (inRange && !fixed) {
-          introduced = intro;
-        }
+        scanRange(range.events ?? [], p.version, state);
       }
     }
   }
-  return { fixed, introduced, unfixed: anyRange && fixed === null };
-}
+  return {
+    fixed: state.fixed,
+    introduced: state.introduced,
+    unfixed: anyRange && state.fixed === null,
+  };
+};
