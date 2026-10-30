@@ -71,53 +71,50 @@ interface EngineJson {
 }
 
 /** Room for the JSON the engine writes back: a 30 s Window is a few kilobytes. */
-const OUT_CAPACITY = 1 << 20;
+const OUT_CAPACITY = 2 ** 20;
 
 let needle: Needle | null = null;
 let out = 0;
-let ready = new Promise<Needle>(() => {
-  // Never settles: requests wait here until the init message replaces it.
-});
+// Never settles: requests wait here until the init message replaces it.
+let ready = Promise.withResolvers<Needle>().promise;
 
 // A dedicated worker has no targetOrigin to give.
 // oxlint-disable-next-line unicorn/require-post-message-target-origin
 const post = (msg: WorkerResponse) => self.postMessage(msg);
 
-function lastError(m: Needle) {
-  return m.UTF8ToString(m._needle_last_error()) || "unknown error";
-}
+const lastError = (m: Needle) =>
+  m.UTF8ToString(m._needle_last_error()) || "unknown error";
 
 /** Copy bytes into the engine's memory. The caller frees the pointer. */
-function put(m: Needle, bytes: Uint8Array): number {
+const put = (m: Needle, bytes: Uint8Array): number => {
   const p = m._malloc(bytes.length || 1);
   // Read the view after malloc: growing the memory replaces it.
   m.HEAPU8.set(bytes, p);
   return p;
-}
+};
 
 /** A NUL-terminated UTF-8 string in the engine's memory, or 0 for none. */
-function putString(m: Needle, s: string): number {
+const putString = (m: Needle, s: string): number => {
   if (!s) {
     return 0;
   }
   const bytes = new TextEncoder().encode(`${s}\0`);
   return put(m, bytes);
-}
+};
 
-function putPcm(m: Needle, pcm: Float32Array): number {
-  return put(m, new Uint8Array(pcm.buffer, pcm.byteOffset, pcm.byteLength));
-}
+const putPcm = (m: Needle, pcm: Float32Array): number =>
+  put(m, new Uint8Array(pcm.buffer, pcm.byteOffset, pcm.byteLength));
 
-function readJson(m: Needle, rc: number): EngineJson {
+const readJson = (m: Needle, rc: number): EngineJson => {
   if (rc < 0) {
     throw new Error(`The engine failed: ${lastError(m)}`);
   }
   return JSON.parse(m.UTF8ToString(out)) as EngineJson;
-}
+};
 
-async function load(
+const load = async (
   msg: Extract<WorkerRequest, { type: "load" }>
-): Promise<Needle> {
+): Promise<Needle> => {
   // The glue is a classic script defining createNeedle; a line at its end makes it a module.
   const mod = (await import(
     scriptDataUrl(`${msg.glue}\nexport default createNeedle;`, "needle.js")
@@ -133,17 +130,17 @@ async function load(
   }
   out = m._malloc(OUT_CAPACITY);
   return m;
-}
+};
 
 /** One pass over at most a Window of audio, starting `offset` samples in. */
-function pass(
+const pass = (
   m: Needle,
   pcm: Float32Array,
   offset: number,
   samples: number,
   language: string,
   keywords: string
-): EngineJson {
+): EngineJson => {
   const p = putPcm(m, pcm.subarray(offset, offset + samples));
   const lang = putString(m, language);
   const keys = putString(m, keywords);
@@ -161,7 +158,7 @@ function pass(
       m._free(keys);
     }
   }
-}
+};
 
 /**
  * A whole clip, one Window at a time, each posted as it is done so the Tool
@@ -169,12 +166,12 @@ function pass(
  * detection, the first Window that hears speech decides it for the rest, so
  * a clip is transcribed in one language throughout.
  */
-function transcribe(
+const transcribe = (
   m: Needle,
   pcm: Float32Array,
   language: string,
   keywords: string
-) {
+) => {
   const t0 = performance.now();
   const window = WINDOW_SECONDS * ENGINE_RATE;
   let offset = 0;
@@ -198,26 +195,26 @@ function transcribe(
     }
     offset = last ? pcm.length : offset + Math.round(advance * ENGINE_RATE);
     post({
+      done: offset / ENGINE_RATE,
+      language: detected,
       type: "window",
       words: keep.map((w) => ({
-        word: w.word,
-        start: w.start + at,
         end: w.end + at,
         probability: w.probability,
+        start: w.start + at,
+        word: w.word,
       })),
-      language: detected,
-      done: offset / ENGINE_RATE,
     });
   }
-  post({ type: "transcribed", language: detected, ms: performance.now() - t0 });
-}
+  post({ language: detected, ms: performance.now() - t0, type: "transcribed" });
+};
 
-function feed(
+const feed = (
   m: Needle,
   pcm: Float32Array,
   language: string,
   keywords: string
-) {
+) => {
   const p = putPcm(m, pcm);
   const lang = putString(m, language);
   const keys = putString(m, keywords);
@@ -234,10 +231,10 @@ function feed(
       )
     );
     post({
+      language: res.language ?? "",
+      pending: res.pending ?? "",
       type: "fed",
       words: res.words ?? [],
-      pending: res.pending ?? "",
-      language: res.language ?? "",
     });
   } finally {
     m._free(p);
@@ -248,16 +245,16 @@ function feed(
       m._free(keys);
     }
   }
-}
+};
 
-function finish(m: Needle) {
+const finish = (m: Needle) => {
   const res = readJson(m, m._needle_stream_transcribe_stop(out, OUT_CAPACITY));
   post({
+    language: res.language ?? "",
     type: "finished",
     words: res.words ?? [],
-    language: res.language ?? "",
   });
-}
+};
 
 self.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
   const msg = ev.data;
@@ -282,8 +279,8 @@ self.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
     }
   } catch (error) {
     post({
-      type: "error",
       message: error instanceof Error ? error.message : String(error),
+      type: "error",
     });
   }
 };

@@ -3,36 +3,35 @@ import { describe, expect, test } from "bun:test";
 
 import { Resampler } from "./resample";
 
-function sine(
+const sine = (
   rate: number,
   hz: number,
   seconds: number,
   amp = 0.5
-): Float32Array {
-  return Float32Array.from(
+): Float32Array =>
+  Float32Array.from(
     { length: Math.round(rate * seconds) },
     (_, i) => amp * Math.sin((2 * Math.PI * hz * i) / rate)
   );
-}
 
-function rms(x: Float32Array) {
+const rms = (x: Float32Array) => {
   let s = 0;
   for (const v of x) {
     s += v * v;
   }
   return Math.sqrt(s / x.length);
-}
+};
 
 /** Amplitude of one frequency in a signal, by correlation. */
-function tone(x: Float32Array, rate: number, hz: number) {
+const tone = (x: Float32Array, rate: number, hz: number) => {
   let re = 0;
   let im = 0;
-  for (let i = 0; i < x.length; i += 1) {
-    re += x[i]! * Math.cos((2 * Math.PI * hz * i) / rate);
-    im += x[i]! * Math.sin((2 * Math.PI * hz * i) / rate);
+  for (const [i, v] of x.entries()) {
+    re += v * Math.cos((2 * Math.PI * hz * i) / rate);
+    im += v * Math.sin((2 * Math.PI * hz * i) / rate);
   }
   return (2 * Math.hypot(re, im)) / x.length;
-}
+};
 
 describe("Resampler", () => {
   for (const rate of [48_000, 44_100, 16_000, 8000]) {
@@ -54,8 +53,8 @@ describe("Resampler", () => {
       parts.push(...r.push(x.subarray(i, i + 128)));
     }
     expect(parts.length).toBe(whole.length);
-    for (let i = 0; i < whole.length; i += 1) {
-      expect(parts[i]).toBeCloseTo(whole[i]!, 5);
+    for (const [i, v] of whole.entries()) {
+      expect(parts[i]).toBeCloseTo(v, 5);
     }
   });
 

@@ -14,13 +14,13 @@ const CUTOFF = 0.9;
 /** Kernel table entries per input sample; between two entries the kernel is interpolated linearly. */
 const PHASES = 256;
 
-function sinc(x: number) {
+const sinc = (x: number) => {
   if (x === 0) {
     return 1;
   }
   const px = Math.PI * x;
   return Math.sin(px) / px;
-}
+};
 
 export class Resampler {
   private readonly step: number;
@@ -62,12 +62,13 @@ export class Resampler {
       const base = Math.floor(this.pos);
       let sum = 0;
       let norm = 0;
+      // pos never falls below half - 1, so i and j stay inside joined and kernel.
       for (let i = base - half + 1; i <= base + half; i += 1) {
         const x = (this.pos - i + half) * PHASES;
         const j = Math.floor(x);
         const f = x - j;
-        const h = kernel[j]! + (kernel[j + 1]! - kernel[j]!) * f;
-        sum += joined[i]! * h;
+        const h = kernel[j] + (kernel[j + 1] - kernel[j]) * f;
+        sum += joined[i] * h;
         norm += h;
       }
       // Normalized per sample, so a constant signal comes out at exactly its level.

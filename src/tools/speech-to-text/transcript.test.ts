@@ -16,22 +16,21 @@ import {
 import type { Word } from "./transcript";
 
 /** Words from "text@start-end" specs, probability 1. */
-function words(...specs: string[]): Word[] {
-  return specs.map((s) => {
+const words = (...specs: string[]): Word[] =>
+  specs.map((s) => {
     const [word, times] = s.split("@") as [string, string];
     const [start, end] = times.split("-").map(Number) as [number, number];
-    return { word, start, end, probability: 1 };
+    return { end, probability: 1, start, word };
   });
-}
 
 describe("cutWindow", () => {
   test("keeps everything in the last Window", () => {
     const w = words("one@1-2", "two@28.5-29.9");
-    expect(cutWindow(w, 30, true)).toEqual({ keep: w, advance: 30 });
+    expect(cutWindow(w, 30, true)).toEqual({ advance: 30, keep: w });
   });
 
   test("an empty Window advances by its whole length", () => {
-    expect(cutWindow([], 30, false)).toEqual({ keep: [], advance: 30 });
+    expect(cutWindow([], 30, false)).toEqual({ advance: 30, keep: [] });
   });
 
   test("cuts at the last sentence end clear of the edge, halfway into the gap after it", () => {
@@ -69,7 +68,7 @@ describe("cutWindow", () => {
       "Then@25-26",
       "edge@29.5-30"
     );
-    expect(cutWindow(w, 30, false).keep.at(-1)!.word).toBe("“go.”");
+    expect(cutWindow(w, 30, false).keep.at(-1)?.word).toBe("“go.”");
   });
 
   test("speech only at the edge starts the next Window just before it", () => {
@@ -111,10 +110,10 @@ describe("toCues", () => {
 
   test("no Cue runs past seven seconds", () => {
     const w = Array.from({ length: 20 }, (_, i) => ({
-      word: `w${i}`,
-      start: i * 0.5,
       end: i * 0.5 + 0.4,
       probability: 1,
+      start: i * 0.5,
+      word: `w${i}`,
     }));
     for (const c of toCues(w)) {
       expect(c.end - c.start).toBeLessThanOrEqual(7);
@@ -125,10 +124,10 @@ describe("toCues", () => {
     const text =
       "If anything is unclear, ask in the team channel, thank you all, and have a great week.";
     const w = text.split(" ").map((word, i) => ({
-      word,
-      start: i * 0.35,
       end: i * 0.35 + 0.3,
       probability: 1,
+      start: i * 0.35,
+      word,
     }));
     const cues = toCues(w);
     expect(cues.map((c) => c.text)).toEqual([
@@ -140,20 +139,20 @@ describe("toCues", () => {
 
   test("without a comma, a long sentence is cut before the Word that would overflow", () => {
     const w = Array.from({ length: 12 }, (_, i) => ({
-      word: "abcdefghi",
-      start: i * 0.3,
       end: i * 0.3 + 0.2,
       probability: 1,
+      start: i * 0.3,
+      word: "abcdefghi",
     }));
     expect(toCues(w).map((c) => c.words.length)).toEqual([8, 4]);
   });
 
   test("no Cue runs past two subtitle lines", () => {
     const w = Array.from({ length: 30 }, (_, i) => ({
-      word: `word${i}`,
-      start: i * 0.2,
       end: i * 0.2 + 0.1,
       probability: 1,
+      start: i * 0.2,
+      word: `word${i}`,
     }));
     for (const c of toCues(w)) {
       expect(c.text.length).toBeLessThanOrEqual(84);
@@ -198,11 +197,33 @@ describe("exports", () => {
 
   test("JSON", () => {
     const parsed = JSON.parse(
-      toJson({ language: "en", duration: 4.51234, words: w })
+      toJson({ duration: 4.51234, language: "en", words: w })
     );
     expect(parsed.text).toBe("Hello there. Bye.");
     expect(parsed.duration).toBe(4.512);
     expect(parsed.words).toHaveLength(3);
+  });
+
+  test("JSON keeps its field order and two-space indent", () => {
+    expect(
+      toJson({ duration: 1, language: "en", words: words("Hi.@0-0.5") })
+    ).toBe(
+      `${[
+        "{",
+        '  "language": "en",',
+        '  "duration": 1,',
+        '  "text": "Hi.",',
+        '  "words": [',
+        "    {",
+        '      "word": "Hi.",',
+        '      "start": 0,',
+        '      "end": 0.5,',
+        '      "probability": 1',
+        "    }",
+        "  ]",
+        "}",
+      ].join("\n")}\n`
+    );
   });
 
   test("a long line is split in two at the space nearest the middle", () => {

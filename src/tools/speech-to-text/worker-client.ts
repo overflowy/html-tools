@@ -29,7 +29,7 @@ export class SpeechWorker {
       { type: "module" }
     );
     this.worker.onmessage = (ev: MessageEvent<WorkerResponse>) => {
-      const head = this.queue[0];
+      const [head] = this.queue;
       if (!head) {
         return;
       }
@@ -62,25 +62,36 @@ export class SpeechWorker {
     take: (msg: WorkerResponse, resolve: (v: T) => void) => boolean,
     transfer: Transferable[] = []
   ): Promise<T> {
-    return new Promise<T>((resolve, reject) => {
-      if (this.dead) {
-        return reject(new Error(CANCELLED));
-      }
-      this.queue.push({ take: (m) => take(m, resolve), fail: reject });
+    const { promise, resolve, reject } = Promise.withResolvers<T>();
+    if (this.dead) {
+      reject(new Error(CANCELLED));
+      return promise;
+    }
+    this.queue.push({ fail: reject, take: (m) => take(m, resolve) });
+    try {
       this.worker.postMessage(msg, transfer);
-    });
+    } catch (error) {
+      // As a Promise executor would: a message that cannot be sent rejects.
+      reject(error);
+    }
+    return promise;
   }
 
   /** Hand the engine to the worker. Idempotent. */
   load(glue: string, wasm: ArrayBuffer, model: ArrayBuffer): Promise<void> {
     // Copies: the cache's buffers must survive for the next worker.
-    this.loading ??= this.ask<void>(
-      { type: "load", glue, wasm: wasm.slice(0), model: model.slice(0) },
+    this.loading ??= this.ask<undefined>(
+      {
+        glue,
+        model: structuredClone(model),
+        type: "load",
+        wasm: structuredClone(wasm),
+      },
       (m, resolve) => {
         if (m.type !== "loaded") {
           return false;
         }
-        resolve();
+        resolve(undefined);
         return true;
       }
     );
@@ -94,9 +105,9 @@ export class SpeechWorker {
     keywords: string,
     onWindow: (words: Word[], language: string, done: number) => void
   ): Promise<{ language: string; ms: number }> {
-    const copy = pcm.slice();
+    const copy = new Float32Array(pcm);
     return this.ask(
-      { type: "transcribe", pcm: copy, language, keywords },
+      { keywords, language, pcm: copy, type: "transcribe" },
       (m, resolve) => {
         if (m.type === "window") {
           onWindow(m.words, m.language, m.done);
@@ -119,12 +130,12 @@ export class SpeechWorker {
     keywords: string
   ): Promise<{ words: Word[]; pending: string; language: string }> {
     return this.ask(
-      { type: "feed", pcm, language, keywords },
+      { keywords, language, pcm, type: "feed" },
       (m, resolve) => {
         if (m.type !== "fed") {
           return false;
         }
-        resolve({ words: m.words, pending: m.pending, language: m.language });
+        resolve({ language: m.language, pending: m.pending, words: m.words });
         return true;
       },
       [pcm.buffer]
@@ -137,7 +148,7 @@ export class SpeechWorker {
       if (m.type !== "finished") {
         return false;
       }
-      resolve({ words: m.words, language: m.language });
+      resolve({ language: m.language, words: m.words });
       return true;
     });
   }

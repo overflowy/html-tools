@@ -38,9 +38,8 @@ export const LANGUAGES = [
   { code: "pl", name: "Polish" },
 ] as const;
 
-export function languageName(code: string): string {
-  return LANGUAGES.find((l) => l.code === code)?.name ?? code;
-}
+export const languageName = (code: string): string =>
+  LANGUAGES.find((l) => l.code === code)?.name ?? code;
 
 /* ---------------- windows ---------------- */
 
@@ -51,11 +50,9 @@ const EDGE = 1;
 /** A cut earlier than this into a Window would make too little progress when a later one exists. */
 const MIN_ADVANCE = 10;
 
-const SENTENCE_END = /[.!?…]["'»”’)\]]*$/;
+const SENTENCE_END = /[.!?…]["'»”’)\]]*$/u;
 
-export function endsSentence(w: Word): boolean {
-  return SENTENCE_END.test(w.word);
-}
+export const endsSentence = (w: Word): boolean => SENTENCE_END.test(w.word);
 
 /**
  * Which Words of a Window to keep, and how far into it the next Window
@@ -66,48 +63,48 @@ export function endsSentence(w: Word): boolean {
  * `seconds` is the Window's length, and `last` says it reaches the end of
  * the audio, where everything is kept.
  */
-export function cutWindow(
+export const cutWindow = (
   words: Word[],
   seconds: number,
   last: boolean
-): { keep: Word[]; advance: number } {
+): { keep: Word[]; advance: number } => {
+  const [firstWord] = words;
   if (last) {
-    return { keep: words, advance: seconds };
+    return { advance: seconds, keep: words };
   }
-  if (words.length === 0) {
-    return { keep: [], advance: seconds };
+  if (!firstWord) {
+    return { advance: seconds, keep: [] };
   }
   let safe = 0;
-  while (safe < words.length && words[safe]!.end <= seconds - EDGE) {
+  while (safe < words.length && words[safe].end <= seconds - EDGE) {
     safe += 1;
   }
   if (safe === 0) {
     // Speech only at the very edge: start the next Window just before it.
     return {
+      advance: Math.max(1, Math.min(seconds - EDGE, firstWord.start - 0.1)),
       keep: [],
-      advance: Math.max(1, Math.min(seconds - EDGE, words[0]!.start - 0.1)),
     };
   }
-  let k = -1;
+  let k = safe - 1;
   for (let i = safe - 1; i >= 0; i -= 1) {
-    if (words[i]!.end < MIN_ADVANCE) {
+    const w = words[i];
+    if (w.end < MIN_ADVANCE) {
       break;
     }
-    if (endsSentence(words[i]!)) {
+    if (endsSentence(w)) {
       k = i;
       break;
     }
   }
-  if (k < 0) {
-    k = safe - 1;
-  }
+  const kept = words[k];
   const next = words[k + 1];
   // Halfway into the gap after the kept Word, so neither Word's edge is clipped.
   const advance = next
-    ? (words[k]!.end + next.start) / 2
-    : Math.min(words[k]!.end + 0.5, seconds - EDGE);
-  return { keep: words.slice(0, k + 1), advance: Math.max(1, advance) };
-}
+    ? (kept.end + next.start) / 2
+    : Math.min(kept.end + 0.5, seconds - EDGE);
+  return { advance: Math.max(1, advance), keep: words.slice(0, k + 1) };
+};
 
 /* ---------------- cues ---------------- */
 
@@ -119,7 +116,7 @@ const CUE_GAP = 1.5;
 /** Silence this long after a sentence starts a new paragraph in the text export. */
 const PARAGRAPH_GAP = 2;
 
-const CLAUSE_END = /[,;:–—]["'»”’)\]]*$/;
+const CLAUSE_END = /[,;:–—]["'»”’)\]]*$/u;
 
 const textOf = (ws: Word[]) => ws.map((w) => w.word).join(" ");
 
@@ -130,17 +127,22 @@ const textOf = (ws: Word[]) => ws.map((w) => w.word).join(" ");
  * colon, dash) where it has one, so no Cue ends mid-clause with a stray word
  * carried into the next.
  */
-export function toCues(words: Word[]): Cue[] {
+export const toCues = (words: Word[]): Cue[] => {
   const cues: Cue[] = [];
   let cur: Word[] = [];
   let first = 0;
   const emit = (ws: Word[], at: number) => {
+    const head = ws.at(0);
+    const tail = ws.at(-1);
+    if (!head || !tail) {
+      throw new Error("A Cue needs at least one Word.");
+    }
     cues.push({
-      start: ws[0]!.start,
-      end: ws.at(-1)!.end,
+      end: tail.end,
       first: at,
-      words: ws,
+      start: head.start,
       text: textOf(ws),
+      words: ws,
     });
   };
   const flush = () => {
@@ -149,16 +151,18 @@ export function toCues(words: Word[]): Cue[] {
     }
     cur = [];
   };
+  // Only asked while the Cue has Words.
   const overflows = (w: Word) =>
     textOf(cur).length + 1 + w.word.length > CUE_MAX_CHARS ||
-    w.end - cur[0]!.start > CUE_MAX_SECONDS;
-  words.forEach((w, i) => {
-    if (cur.length && w.start - cur.at(-1)!.end > CUE_GAP) {
+    w.end - cur[0].start > CUE_MAX_SECONDS;
+  for (const [i, w] of words.entries()) {
+    const prev = cur.at(-1);
+    if (prev && w.start - prev.end > CUE_GAP) {
       flush();
-    } else if (cur.length && overflows(w)) {
+    } else if (prev && overflows(w)) {
       // The last clause end, leaving at least two Words before it and one after.
       let cut = cur.length - 2;
-      while (cut >= 1 && !CLAUSE_END.test(cur[cut]!.word)) {
+      while (cut >= 1 && !CLAUSE_END.test(cur[cut].word)) {
         cut -= 1;
       }
       if (cut >= 1) {
@@ -177,38 +181,38 @@ export function toCues(words: Word[]): Cue[] {
     if (endsSentence(w)) {
       flush();
     }
-  });
+  }
   flush();
   return cues;
-}
+};
 
 /* ---------------- time ---------------- */
 
 /** `m:ss`, or `h:mm:ss` from an hour on: how the Tool shows a time. */
-export function clock(seconds: number): string {
+export const clock = (seconds: number): string => {
   const s = Math.max(0, Math.floor(seconds));
   const h = Math.floor(s / 3600);
   const m = Math.floor((s % 3600) / 60);
   const ss = String(s % 60).padStart(2, "0");
   return h ? `${h}:${String(m).padStart(2, "0")}:${ss}` : `${m}:${ss}`;
-}
+};
 
 /** `hh:mm:ss,mmm` (SRT) or `hh:mm:ss.mmm` (WebVTT). */
-export function timestamp(seconds: number, sep: "," | "."): string {
+export const timestamp = (seconds: number, sep: "," | "."): string => {
   const ms = Math.max(0, Math.round(seconds * 1000));
   const h = Math.floor(ms / 3_600_000);
   const m = Math.floor((ms % 3_600_000) / 60_000);
   const s = Math.floor((ms % 60_000) / 1000);
   const pad = (n: number, w = 2) => String(n).padStart(w, "0");
   return `${pad(h)}:${pad(m)}:${pad(s)}${sep}${pad(ms % 1000, 3)}`;
-}
+};
 
 /* ---------------- exports ---------------- */
 
 const LINE_CHARS = 42;
 
 /** A Cue's text on one subtitle line, or two split at the space nearest the middle. */
-export function subtitleLines(text: string): string {
+export const subtitleLines = (text: string): string => {
   if (text.length <= LINE_CHARS) {
     return text;
   }
@@ -220,31 +224,29 @@ export function subtitleLines(text: string): string {
     }
   }
   return best < 0 ? text : `${text.slice(0, best)}\n${text.slice(best + 1)}`;
-}
+};
 
-export function toSrt(cues: Cue[]): string {
-  return cues
+export const toSrt = (cues: Cue[]): string =>
+  cues
     .map(
       (c, i) =>
         `${i + 1}\n${timestamp(c.start, ",")} --> ${timestamp(c.end, ",")}\n${subtitleLines(c.text)}\n`
     )
     .join("\n");
-}
 
-export function toVtt(cues: Cue[]): string {
-  return `WEBVTT\n\n${cues
+export const toVtt = (cues: Cue[]): string =>
+  `WEBVTT\n\n${cues
     .map(
       (c) =>
         `${timestamp(c.start, ".")} --> ${timestamp(c.end, ".")}\n${subtitleLines(c.text)}\n`
     )
     .join("\n")}`;
-}
 
 /** What was said, as prose: Words joined by spaces, a new paragraph after a sentence followed by a long pause. */
-export function toText(words: Word[]): string {
+export const toText = (words: Word[]): string => {
   let out = "";
-  words.forEach((w, i) => {
-    const prev = words[i - 1];
+  let prev: Word | undefined;
+  for (const w of words) {
     if (prev) {
       out +=
         endsSentence(prev) && w.start - prev.end >= PARAGRAPH_GAP
@@ -252,34 +254,49 @@ export function toText(words: Word[]): string {
           : " ";
     }
     out += w.word;
-  });
+    prev = w;
+  }
   return out ? `${out}\n` : "";
-}
+};
 
-export function toJson(t: Transcript): string {
+/**
+ * The JSON export's fields, in the order they are written: the Transcript's,
+ * then each Word's. Passed to JSON.stringify, the list also sets that order.
+ */
+const JSON_FIELDS = [
+  "language",
+  "duration",
+  "text",
+  "words",
+  "word",
+  "start",
+  "end",
+  "probability",
+];
+
+export const toJson = (t: Transcript): string => {
   const round = (n: number) => Math.round(n * 1000) / 1000;
   return `${JSON.stringify(
     {
-      language: t.language,
       duration: round(t.duration),
+      language: t.language,
       text: t.words.map((w) => w.word).join(" "),
       words: t.words.map((w) => ({
-        word: w.word,
-        start: round(w.start),
         end: round(w.end),
         probability: round(w.probability),
+        start: round(w.start),
+        word: w.word,
       })),
     },
-    null,
+    JSON_FIELDS,
     2
   )}\n`;
-}
+};
 
 /** The Keywords field as the engine wants them: one per line, blanks dropped. */
-export function keywordLines(field: string): string {
-  return field
+export const keywordLines = (field: string): string =>
+  field
     .split(",")
     .map((k) => k.trim())
     .filter(Boolean)
     .join("\n");
-}

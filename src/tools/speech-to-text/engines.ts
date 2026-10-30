@@ -25,24 +25,24 @@ const HF = "https://huggingface.co/Cactus-Compute/";
 
 export const ENGINES = {
   needleJs: {
+    approxBytes: 62_000,
     id: "needle-js",
     label: "Needle glue",
-    version: NEEDLE_REVISION.slice(0, 12),
     url: `${HF}needle3/resolve/${NEEDLE_REVISION}/wasm/needle.js`,
-    approxBytes: 62_000,
+    version: NEEDLE_REVISION.slice(0, 12),
   },
   needleWasm: {
+    approxBytes: 930_000,
     id: "needle-wasm",
     label: "Needle runtime",
-    version: NEEDLE_REVISION.slice(0, 12),
     url: `${HF}needle3/resolve/${NEEDLE_REVISION}/wasm/needle.wasm`,
-    approxBytes: 930_000,
+    version: NEEDLE_REVISION.slice(0, 12),
   },
   whistle: {
+    approxBytes: 16_919_407,
     id: "whistle",
     label: "Whistle model",
-    version: WHISTLE_REVISION.slice(0, 12),
     url: `${HF}whistle/resolve/${WHISTLE_REVISION}/whistle.cact`,
-    approxBytes: 16_919_407,
+    version: WHISTLE_REVISION.slice(0, 12),
   },
 } satisfies Record<string, EngineAsset>;

@@ -8,7 +8,7 @@ import { ENGINE_RATE, Resampler } from "./resample";
  * Decode an audio or video file to 16 kHz mono. An OfflineAudioContext at
  * 16 kHz resamples as it decodes; the channels are averaged into one.
  */
-export async function decodeFile(bytes: ArrayBuffer): Promise<Float32Array> {
+export const decodeFile = async (bytes: ArrayBuffer): Promise<Float32Array> => {
   let buffer: AudioBuffer;
   try {
     buffer = await new OfflineAudioContext(1, 1, ENGINE_RATE).decodeAudioData(
@@ -27,19 +27,20 @@ export async function decodeFile(bytes: ArrayBuffer): Promise<Float32Array> {
   for (let c = 0; c < buffer.numberOfChannels; c += 1) {
     const ch = buffer.getChannelData(c);
     for (let i = 0; i < ch.length; i += 1) {
-      mono[i]! += ch[i]! / buffer.numberOfChannels;
+      mono[i] += ch[i] / buffer.numberOfChannels;
     }
   }
   return mono;
-}
+};
 
 /** 16 kHz mono PCM as a 16-bit WAV file, for playing a Recording back. */
-export function encodeWav(pcm: Float32Array): Blob {
+export const encodeWav = (pcm: Float32Array): Blob => {
   const data = pcm.length * 2;
   const view = new DataView(new ArrayBuffer(44 + data));
+  // The chunk tags are ASCII, one byte per character.
   const text = (at: number, s: string) => {
-    for (let i = 0; i < s.length; i += 1) {
-      view.setUint8(at + i, s.charCodeAt(i));
+    for (const [i, byte] of new TextEncoder().encode(s).entries()) {
+      view.setUint8(at + i, byte);
     }
   };
   text(0, "RIFF");
@@ -56,11 +57,11 @@ export function encodeWav(pcm: Float32Array): Blob {
   text(36, "data");
   view.setUint32(40, data, true);
   for (let i = 0; i < pcm.length; i += 1) {
-    const s = Math.max(-1, Math.min(1, pcm[i]!));
+    const s = Math.max(-1, Math.min(1, pcm[i]));
     view.setInt16(44 + i * 2, s < 0 ? s * 0x80_00 : s * 0x7f_ff, true);
   }
   return new Blob([view.buffer], { type: "audio/wav" });
-}
+};
 
 // The worklet gathers the 128-frame render quanta into blocks of about 85 ms
 // before posting, so the main thread is not woken 375 times a second. It has
@@ -135,10 +136,10 @@ export class Microphone {
     );
     const resampler = new Resampler(ctx.sampleRate);
     const node = new AudioWorkletNode(ctx, "capture", {
-      numberOfInputs: 1,
-      numberOfOutputs: 0,
       channelCount: 1,
       channelCountMode: "explicit",
+      numberOfInputs: 1,
+      numberOfOutputs: 0,
     });
     node.port.onmessage = (ev: MessageEvent<Float32Array>) => {
       let peak = 0;
