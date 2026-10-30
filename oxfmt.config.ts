@@ -9,5 +9,7 @@ export default defineConfig({
     "src/tools/dependency-audit/fixtures/**",
     // License text is kept exactly as published.
     "**/LICENSE*",
+    // Third-party builds kept exactly as published.
+    "vendor/**",
   ],
 });

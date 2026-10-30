@@ -7,7 +7,12 @@ export default defineConfig({
     es2022: true,
   },
   extends: [core],
-  ignorePatterns: [...(core.ignorePatterns ?? []), "index.html"],
+  ignorePatterns: [
+    ...(core.ignorePatterns ?? []),
+    "index.html",
+    // Third-party builds kept exactly as published.
+    "vendor/**",
+  ],
   overrides: [
     {
       files: ["build.ts", "smoke.ts"],
