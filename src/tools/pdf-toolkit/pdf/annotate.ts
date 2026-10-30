@@ -225,7 +225,7 @@ export const annotate = (
         create(doc.loadPage(a.page), a, font);
       }
     }
-    return savePdf(doc);
+    return savePdf(env, doc);
   } finally {
     doc.destroy();
   }

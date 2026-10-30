@@ -150,7 +150,7 @@ export const editAttachments = (
       );
       doc.insertEmbeddedFile(name, spec);
     }
-    return savePdf(doc);
+    return savePdf(env, doc);
   } finally {
     doc.destroy();
   }

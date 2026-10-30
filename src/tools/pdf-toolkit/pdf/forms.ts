@@ -135,7 +135,7 @@ export const fillFields = (
     if (o.flatten) {
       doc.bake(false, true);
     }
-    return savePdf(doc);
+    return savePdf(env, doc);
   } finally {
     doc.destroy();
   }
@@ -314,7 +314,7 @@ export const addFields = (
         }
       }
     }
-    return savePdf(doc);
+    return savePdf(env, doc);
   } finally {
     doc.destroy();
   }
@@ -333,7 +333,7 @@ export const flatten = (
   const doc = openPdf(env, bytes);
   try {
     doc.bake(o.annotations, o.forms);
-    return savePdf(doc);
+    return savePdf(env, doc);
   } finally {
     doc.destroy();
   }

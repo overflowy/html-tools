@@ -46,7 +46,7 @@ export const addTextLayers = (
         ocr.destroy();
       }
     }
-    return savePdf(doc);
+    return savePdf(env, doc);
   } finally {
     doc.destroy();
   }

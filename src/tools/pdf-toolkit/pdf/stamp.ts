@@ -38,7 +38,7 @@ const eachPage = (
     for (const [at, { page }] of chosen.entries()) {
       body(new Painter(doc, page, fonts), page, at, chosen.length, doc);
     }
-    return savePdf(doc, { subset: true });
+    return savePdf(env, doc, { subset: true });
   } finally {
     doc.destroy();
   }

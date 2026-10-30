@@ -46,8 +46,17 @@ export interface SaveOptions {
   extra?: string[];
 }
 
-/** A full rewrite: unused objects dropped, new streams compressed. */
+/**
+ * A full rewrite: unused objects dropped, new streams compressed.
+ *
+ * In two passes. MuPDF (1.28.1) loses the data of a stream it has read in
+ * when its dictionary refers to another object (an image's
+ * `/DecodeParms 12 0 R`) and the save renumbers objects: the image is left a
+ * dictionary, and every reader fails on it. Saved first as it is, with
+ * nothing renumbered, then opened afresh, nothing has been read in yet.
+ */
 export const savePdf = (
+  env: Env,
   doc: PDFDocument,
   opts: SaveOptions = {}
 ): Uint8Array => {
@@ -62,10 +71,15 @@ export const savePdf = (
   for (const o of opts.extra ?? []) {
     options.set(o.split("=")[0] ?? o, o);
   }
-  // A copy: the buffer's memory belongs to MuPDF and goes with it.
-  return new Uint8Array(
-    doc.saveToBuffer([...options.values()].join(",")).asUint8Array()
-  );
+  const fresh = openPdf(env, doc.saveToBuffer("").asUint8Array());
+  try {
+    // A copy: the buffer's memory belongs to MuPDF and goes with it.
+    return new Uint8Array(
+      fresh.saveToBuffer([...options.values()].join(",")).asUint8Array()
+    );
+  } finally {
+    fresh.destroy();
+  }
 };
 
 /** Each page of the document (or each of `only`), loaded, with its 0-based index. */
@@ -93,7 +107,7 @@ export const transform = (
   const doc = openPdf(env, bytes);
   try {
     body(doc);
-    return savePdf(doc, opts);
+    return savePdf(env, doc, opts);
   } finally {
     doc.destroy();
   }

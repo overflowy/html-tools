@@ -143,7 +143,7 @@ export const assemble = (
   const doc = openPdf(env, bytes);
   try {
     writeOutline(doc, outline);
-    return savePdf(doc);
+    return savePdf(env, doc);
   } finally {
     doc.destroy();
   }

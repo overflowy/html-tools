@@ -144,7 +144,7 @@ export const redact = (
       );
     }
     // Everything removed goes from the file too, not just from the pages.
-    return savePdf(doc, { extra: ["garbage=deduplicate"] });
+    return savePdf(env, doc, { extra: ["garbage=deduplicate"] });
   } finally {
     doc.destroy();
   }
@@ -349,7 +349,10 @@ export const sanitize = (
       sanitizePage(doc.loadPage(i), o, report);
     }
     // What was cut loose goes from the file too: a full rewrite keeps only what is still referenced.
-    return { bytes: savePdf(doc, { extra: ["garbage=deduplicate"] }), report };
+    return {
+      bytes: savePdf(env, doc, { extra: ["garbage=deduplicate"] }),
+      report,
+    };
   } finally {
     doc.destroy();
   }
@@ -427,7 +430,10 @@ export const removeSignatures = (
     // The document-level marks of a certified or signed document.
     drop(root, "Perms");
     drop(form.isDictionary() ? form : null, "SigFlags");
-    return { bytes: savePdf(doc, { extra: ["garbage=deduplicate"] }), count };
+    return {
+      bytes: savePdf(env, doc, { extra: ["garbage=deduplicate"] }),
+      count,
+    };
   } finally {
     doc.destroy();
   }

@@ -4,7 +4,6 @@
 // checked.
 
 import type { AttachmentInfo } from "../../pdf/attachments";
-import type { ImageInfo } from "../../pdf/images";
 import type { InfoReport, Metadata } from "../../pdf/inspect";
 import { parsePdfDate } from "../../pdf/inspect";
 import type { Bookmark } from "../../pdf/outline";
@@ -762,9 +761,21 @@ const images = transformPanel({
   options: (v) => ({ minSide: Number(v.minSide) }),
   report: (r) => {
     const files = r.files ?? [];
-    const list: ImageInfo[] = r.report;
+    const { images: list, unreadable } = r.report;
+    // Images found but too broken to read: said, not silently missing.
+    const broken = unreadable.length
+      ? el("p", {
+          class: "hint warn",
+          text: `${count(unreadable.length, "image", "images")} could not be read, on ${unreadable.length === 1 ? "page" : "pages"} ${[...new Set(unreadable)].join(", ")}: ${unreadable.length === 1 ? "its" : "their"} data is missing or damaged in the file.`,
+        })
+      : "";
     if (!files.length) {
-      return el("p", { class: "sel-info", text: "No images." });
+      return el(
+        "div",
+        {},
+        el("p", { class: "sel-info", text: "No images." }),
+        broken
+      );
     }
     const grid = el("div", { class: "gallery" });
     for (const [i, info] of list.entries()) {
@@ -801,6 +812,7 @@ const images = transformPanel({
         class: "sel-info",
         text: `${count(files.length, "image", "images")}. Click one to save it; Download saves them all.`,
       }),
+      broken,
       grid
     );
   },

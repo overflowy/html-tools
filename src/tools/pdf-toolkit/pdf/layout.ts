@@ -84,7 +84,7 @@ const compose = (
     if (dst.countPages() === 0) {
       throw new Error("Nothing came out: there are no pages to lay out.");
     }
-    return savePdf(dst, { subset: true });
+    return savePdf(env, dst, { subset: true });
   } finally {
     src.destroy();
     dst.destroy();
@@ -560,7 +560,7 @@ export const splitSpreads = (
         at += 1;
       }
     }
-    return savePdf(doc);
+    return savePdf(env, doc);
   } finally {
     doc.destroy();
   }
@@ -691,7 +691,7 @@ export const crop = (
         page.setPageBox("CropBox", kept);
       }
     }
-    return savePdf(doc);
+    return savePdf(env, doc);
   } finally {
     doc.destroy();
   }

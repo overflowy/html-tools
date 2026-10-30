@@ -351,7 +351,7 @@ export const writeMetadata = (
     }
     // An XMP packet would contradict the new values; readers prefer it when present.
     root.delete("Metadata");
-    return savePdf(doc);
+    return savePdf(env, doc);
   } finally {
     doc.destroy();
   }
@@ -416,7 +416,7 @@ export const repair = (
   try {
     const repaired = doc.wasRepaired();
     return {
-      bytes: savePdf(doc),
+      bytes: savePdf(env, doc),
       repaired,
       warnings: [...new Set(env.warnings)],
     };

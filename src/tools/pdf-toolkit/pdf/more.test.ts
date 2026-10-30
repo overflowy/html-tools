@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { deflateSync } from "node:zlib";
 
 import * as mupdf from "mupdf";
 
@@ -273,6 +274,99 @@ test("images go into pages, come back out, and shrink when recompressed", async 
   });
   expect(report.images).toBe(1);
   expect(report.after).toBeLessThan(report.before / 2);
+});
+
+/**
+ * A page with a logo as some generators write one: a Flate image whose
+ * `/DecodeParms` is an object of its own, with a soft mask.
+ */
+const logoPdf = (): Uint8Array => {
+  const doc = new mupdf.PDFDocument();
+  const [w, h] = [600, 400];
+  const plane = (n: number, value: number) =>
+    deflateSync(new Uint8Array(w * h * n).fill(value));
+  const image = (n: number, colors: string, value: number) => {
+    const dict = doc.newDictionary();
+    dict.put("Type", doc.newName("XObject"));
+    dict.put("Subtype", doc.newName("Image"));
+    dict.put("Width", doc.newInteger(w));
+    dict.put("Height", doc.newInteger(h));
+    dict.put("BitsPerComponent", doc.newInteger(8));
+    dict.put("ColorSpace", doc.newName(colors));
+    dict.put("Filter", doc.newName("FlateDecode"));
+    const parms = doc.newDictionary();
+    parms.put("Columns", doc.newInteger(w));
+    parms.put("Colors", doc.newInteger(n));
+    dict.put("DecodeParms", doc.addObject(parms));
+    return { dict, stream: () => doc.addRawStream(plane(n, value), dict) };
+  };
+  const logo = image(3, "DeviceRGB", 90);
+  logo.dict.put("SMask", image(1, "DeviceGray", 200).stream());
+  const resources = doc.newDictionary();
+  const xobjects = doc.newDictionary();
+  xobjects.put("Logo", logo.stream());
+  resources.put("XObject", xobjects);
+  doc.insertPage(
+    -1,
+    doc.addPage(
+      [0, 0, 595, 842],
+      0,
+      resources,
+      "q 300 0 0 200 100 500 cm /Logo Do Q"
+    )
+  );
+  return new Uint8Array(doc.saveToBuffer("").asUint8Array());
+};
+
+test("an image read before saving keeps its data: compressed, it still extracts and shows", async () => {
+  const env = await testEnv();
+  const pdf = logoPdf();
+  for (const images of ["keep", "high"] as const) {
+    const { bytes } = compress(env, pdf, {
+      images,
+      objectStreams: false,
+      subsetFonts: false,
+    });
+    const logo = openTest(bytes)
+      .loadPage(0)
+      .getObject()
+      .getInheritable("Resources")
+      .get("XObject")
+      .get("Logo");
+    expect([
+      images,
+      logo.isStream(),
+      logo.resolve().get("SMask").isStream(),
+    ]).toEqual([images, true, true]);
+    const { images: found } = extractImages(env, bytes, { minSide: 8 });
+    expect(found.map((i) => [i.format, i.width, i.height])).toEqual([
+      ["PNG", 600, 400],
+    ]);
+  }
+});
+
+test("an image whose data is missing is reported, and the others are still saved", async () => {
+  const env = await testEnv();
+  const doc = openTest(logoPdf());
+  const page = doc.loadPage(0).getObject();
+  // An image that is only a dictionary: what a damaged file leaves of one.
+  const husk = doc.newDictionary();
+  husk.put("Type", doc.newName("XObject"));
+  husk.put("Subtype", doc.newName("Image"));
+  husk.put("Width", doc.newInteger(50));
+  husk.put("Height", doc.newInteger(50));
+  husk.put("BitsPerComponent", doc.newInteger(8));
+  husk.put("ColorSpace", doc.newName("DeviceRGB"));
+  page
+    .getInheritable("Resources")
+    .get("XObject")
+    .put("Husk", doc.addObject(husk));
+  const damaged = new Uint8Array(doc.saveToBuffer("").asUint8Array());
+  const { images, unreadable } = extractImages(env, damaged, { minSide: 8 });
+  expect(images.map((i) => [i.name, i.width])).toEqual([
+    ["page-1-image-01.png", 600],
+  ]);
+  expect(unreadable).toEqual([1]);
 });
 
 test("malformed EXIF reads as no orientation, not an error", () => {

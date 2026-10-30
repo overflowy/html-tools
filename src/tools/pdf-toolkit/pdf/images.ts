@@ -101,6 +101,14 @@ export interface ImageInfo {
   bytes: number;
 }
 
+/** What could be found of the document's images. */
+export interface ExtractedImages {
+  files: OutFile[];
+  images: ImageInfo[];
+  /** Pages (1-based, a page once per image) of images too broken to read: the others are saved all the same. */
+  unreadable: number[];
+}
+
 export interface ExtractImagesOptions {
   /** Skip images smaller than this many pixels on either side: icons, rules, spacers. */
   minSide: number;
@@ -120,19 +128,55 @@ const pngReady = (env: Env, pix: Pixmap): Pixmap => {
   );
 };
 
+/** One image saved out: as stored for JPEG and JPEG 2000, else as PNG. */
+const imageFile = (
+  env: Env,
+  doc: PDFDocument,
+  ref: PDFObject,
+  stem: string
+): { file: OutFile; format: ImageInfo["format"] } => {
+  const obj = ref.resolve();
+  const filters = filtersOf(obj);
+  const only = filters.length === 1 ? filters[0] : null;
+  const plain = [1, 3].includes(components(obj)) && obj.get("Decode").isNull();
+  if (only === "DCTDecode" && plain) {
+    const bytes = new Uint8Array(ref.readRawStream().asUint8Array());
+    return {
+      file: { bytes, mime: "image/jpeg", name: `${stem}.jpg` },
+      format: "JPEG",
+    };
+  }
+  if (only === "JPXDecode") {
+    const bytes = new Uint8Array(ref.readRawStream().asUint8Array());
+    return {
+      file: { bytes, mime: "image/jp2", name: `${stem}.jp2` },
+      format: "JPEG 2000",
+    };
+  }
+  const pix = pngReady(env, doc.loadImage(ref).toPixmap());
+  return {
+    file: {
+      bytes: new Uint8Array(pix.asPNG()),
+      mime: "image/png",
+      name: `${stem}.png`,
+    },
+    format: "PNG",
+  };
+};
+
 export const extractImages = (
   env: Env,
   bytes: Uint8Array,
   o: ExtractImagesOptions
-): { files: OutFile[]; images: ImageInfo[] } => {
+): ExtractedImages => {
   const doc = openPdf(env, bytes);
   try {
     const files: OutFile[] = [];
     const images: ImageInfo[] = [];
-    const list = allImages(doc);
+    const unreadable: number[] = [];
     const width = String(doc.countPages()).length;
     const perPage = new Map<number, number>();
-    for (const { ref, page } of list) {
+    for (const { ref, page } of allImages(doc)) {
       const obj = ref.resolve();
       const w = obj.get("Width").asNumber();
       const h = obj.get("Height").asNumber();
@@ -140,49 +184,27 @@ export const extractImages = (
         continue;
       }
       const k = (perPage.get(page) ?? 0) + 1;
-      perPage.set(page, k);
       const stem = `page-${pad(page + 1, width)}-image-${pad(k, 2)}`;
-      const filters = filtersOf(obj);
-      const only = filters.length === 1 ? filters[0] : null;
-      const plain =
-        [1, 3].includes(components(obj)) && obj.get("Decode").isNull();
-      let file: OutFile;
-      let format: ImageInfo["format"];
-      if (only === "DCTDecode" && plain) {
-        file = {
-          bytes: new Uint8Array(ref.readRawStream().asUint8Array()),
-          mime: "image/jpeg",
-          name: `${stem}.jpg`,
-        };
-        format = "JPEG";
-      } else if (only === "JPXDecode") {
-        file = {
-          bytes: new Uint8Array(ref.readRawStream().asUint8Array()),
-          mime: "image/jp2",
-          name: `${stem}.jp2`,
-        };
-        format = "JPEG 2000";
-      } else {
-        const image = doc.loadImage(ref);
-        const pix = pngReady(env, image.toPixmap());
-        file = {
-          bytes: new Uint8Array(pix.asPNG()),
-          mime: "image/png",
-          name: `${stem}.png`,
-        };
-        format = "PNG";
+      let made: ReturnType<typeof imageFile>;
+      try {
+        made = imageFile(env, doc, ref, stem);
+      } catch {
+        // A broken image (its data gone, a filter MuPDF cannot undo) costs only itself.
+        unreadable.push(page + 1);
+        continue;
       }
-      files.push(file);
+      perPage.set(page, k);
+      files.push(made.file);
       images.push({
-        bytes: file.bytes.length,
-        format,
+        bytes: made.file.bytes.length,
+        format: made.format,
         height: h,
-        name: file.name,
+        name: made.file.name,
         page: page + 1,
         width: w,
       });
     }
-    return { files, images };
+    return { files, images, unreadable };
   } finally {
     doc.destroy();
   }
@@ -329,7 +351,7 @@ export const compress = (
     if (o.objectStreams) {
       extra.push("objstms");
     }
-    let out = savePdf(doc, { extra, subset: o.subsetFonts });
+    let out = savePdf(env, doc, { extra, subset: o.subsetFonts });
     // Nothing gained is no reason to hand back a different file.
     if (out.length >= bytes.length) {
       out = bytes;
@@ -489,7 +511,7 @@ export const imagesToPdf = (
       });
       painter.apply();
     }
-    return savePdf(doc);
+    return savePdf(env, doc);
   } finally {
     doc.destroy();
   }

@@ -12,7 +12,7 @@ import {
   listAttachments,
 } from "./pdf/attachments";
 import type { AttachOptions } from "./pdf/attachments";
-import { openPdf } from "./pdf/doc";
+import { openPdf, savePdf } from "./pdf/doc";
 import type { Env, OutFile } from "./pdf/doc";
 import { addFields, fillFields, flatten, readFields } from "./pdf/forms";
 import type { FillOptions, FlattenOptions, NewField } from "./pdf/forms";
@@ -132,8 +132,8 @@ export const OPS = {
     files: extractAttachments(env, b, o.keys),
   }),
   extractImages: (env: Env, b: Uint8Array, o: ExtractImagesOptions) => {
-    const { files, images } = extractImages(env, b, o);
-    return { files, report: images };
+    const { files, images, unreadable } = extractImages(env, b, o);
+    return { files, report: { images, unreadable } };
   },
   fields: (env: Env, b: Uint8Array, _o: NoOptions) => ({
     report: reading(env, b, readFields),
@@ -245,11 +245,7 @@ export const OPS = {
     const doc = openPdf(env, b);
     try {
       writeOutline(doc, o.items);
-      return pdf(
-        new Uint8Array(
-          doc.saveToBuffer("garbage=compact,compress").asUint8Array()
-        )
-      );
+      return pdf(savePdf(env, doc));
     } finally {
       doc.destroy();
     }
