@@ -3691,7 +3691,7 @@ const tool: Tool = {
               <button type="button" class="run-btn primary" title="Run the current file (${MOD}Enter)">${I.ICON_RUN}<span>Run</span></button>
               <button type="button" class="stop-btn" title="Stop the program" hidden>${I.ICON_STOP}<span>Stop</span></button>
               <button type="button" class="icon restart-btn" title="Restart the interpreter">${I.ICON_RESTART}</button>
-              <button type="button" class="icon format-btn" title="Format with Ruff (Shift+Alt+F)">${I.ICON_FORMAT}</button>
+              <button type="button" class="icon format-btn" title="Sort imports and format with Ruff (Shift+Alt+F)">${I.ICON_FORMAT}</button>
               <button type="button" class="icon inlay-hints-btn" title="Inlay hints" aria-pressed="false">${I.ICON_INLAY_HINTS}</button>
               <button type="button" class="icon stdin-btn" title="Stdin: text for input() to read first" aria-pressed="false">${I.ICON_STDIN}</button>
               <span class="spacer"></span>

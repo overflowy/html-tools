@@ -4131,6 +4131,53 @@ await page.waitForFunction(
   { timeout: 30_000 }
 );
 check("ide: Ruff and Pyright both report on the file", true);
+// Format sorts the imports first, as `ruff check --select I --fix` would.
+await page.evaluate(() => {
+  const { monaco } = globalThis as unknown as {
+    monaco: {
+      editor: {
+        getModels: () => {
+          uri: { path: string };
+          setValue: (v: string) => void;
+        }[];
+      };
+    };
+  };
+  monaco.editor
+    .getModels()
+    .find((m) => m.uri.path.endsWith("main.py"))
+    ?.setValue("import sys\nimport os\nprint(os.sep+sys.platform)\n");
+});
+await page.locator(`${ide}.format-btn`).click();
+const ideFormatted = await page
+  .waitForFunction(
+    () => {
+      const { monaco } = globalThis as unknown as {
+        monaco: {
+          editor: {
+            getModels: () => {
+              uri: { path: string };
+              getValue: () => string;
+            }[];
+          };
+        };
+      };
+      const text = monaco.editor
+        .getModels()
+        .find((m) => m.uri.path.endsWith("main.py"))
+        ?.getValue();
+      return text?.startsWith("import os") ? text : false;
+    },
+    null,
+    { timeout: 30_000 }
+  )
+  .then((h) => h.jsonValue())
+  .catch(() => "");
+check(
+  "ide: Format sorts the imports, then formats",
+  ideFormatted === "import os\nimport sys\n\nprint(os.sep + sys.platform)\n",
+  JSON.stringify(ideFormatted)
+);
 await page.locator(`${ide}.terminal-host`).click();
 await page.keyboard.type("6 * 7");
 await page.keyboard.press("Enter");
