@@ -1,4 +1,3 @@
-/* oxlint-disable unicorn/require-post-message-target-origin -- dedicated workers take no targetOrigin */
 // The Checker: basedpyright in its browser build, driving Monaco through
 // Monaco's own LSP client. basedpyright wants two workers (it asks for the
 // second one with a `browser/newWorker` message, handing over a port), a
@@ -12,6 +11,7 @@
 import type * as Monaco from "monaco-editor";
 
 import { scriptBlobUrl, scriptDataUrl } from "../../shared/script-url";
+import { capturingClient } from "./checker-client";
 
 type Json = Record<string, unknown>;
 
@@ -27,11 +27,11 @@ interface Message {
 type Listener = (message: Message) => void;
 
 /** Server-to-client requests answered here rather than by Monaco's client. */
-const ANSWERED: Record<string, (params: unknown) => unknown> = {
-  "workspace/configuration": () => [],
-  "window/workDoneProgress/create": () => null,
-  "workspace/diagnostic/refresh": () => null,
-};
+const ANSWERED = new Map<string, (params: unknown) => unknown>([
+  ["workspace/configuration", () => []],
+  ["window/workDoneProgress/create", () => null],
+  ["workspace/diagnostic/refresh", () => null],
+]);
 
 /** Notifications Monaco's client has no use for. */
 const DROPPED = new Set([
@@ -44,7 +44,7 @@ const DROPPED = new Set([
   "pyright/endProgress",
 ]);
 
-const PYTHON_FILE = /\.pyi?$/i;
+const PYTHON_FILE = /\.pyi?$/iu;
 
 /** JSON-RPC's code for a failure inside the server, as opposed to a request it refuses. */
 const LSP_INTERNAL_ERROR = -32_603;
@@ -108,29 +108,27 @@ export class Checker {
     { uri: string; line: number; character: number }
   >();
   private initId: number | string | null = null;
-  private resolveReady: (() => void) | null = null;
+  private readonly whenReady = Promise.withResolvers<undefined>();
   /** Resolves when the server answered `initialize`. */
-  readonly ready = new Promise<void>(
-    (resolve) => (this.resolveReady = resolve)
-  );
+  readonly ready: Promise<undefined> = this.whenReady.promise;
   isReady = false;
   /** Resolves on the foreground worker's first message: its script has been evaluated. */
-  private started: Promise<void>;
-  private resolveStarted: (() => void) | null = null;
+  private readonly whenStarted = Promise.withResolvers<undefined>();
   /**
    * The URI Monaco's client uses for a file (`Uri.toString(true)`: spaces
    * and non-ASCII raw, lowercased) to the one Pyright wants (fully encoded,
    * the case as it is). Answers travel the other way through `clientUri`.
    */
   private realUris = new Map<string, string>();
+  private monaco: typeof Monaco;
+  private script: string;
+  private options: CheckerOptions;
 
   /** `script` is the worker script's URL, blob: or data: (see loadPyrightScript). */
-  constructor(
-    private monaco: typeof Monaco,
-    private script: string,
-    private options: CheckerOptions
-  ) {
-    this.started = new Promise((resolve) => (this.resolveStarted = resolve));
+  constructor(monaco: typeof Monaco, script: string, options: CheckerOptions) {
+    this.monaco = monaco;
+    this.script = script;
+    this.options = options;
   }
 
   start() {
@@ -138,21 +136,13 @@ export class Checker {
     foreground.addEventListener("message", (ev: MessageEvent) =>
       this.receive(foreground, ev.data)
     );
-    foreground.postMessage({ type: "browser/boot", mode: "foreground" });
+    foreground.postMessage({ mode: "foreground", type: "browser/boot" }, []);
 
     for (const path of Object.keys(this.options.files)) {
       this.remember(path);
     }
 
     const transport = {
-      state: {
-        value: { state: "open" as const },
-        onChange: () => ({
-          dispose() {
-            // The state never changes, so no listener was registered.
-          },
-        }),
-      },
       send: (message: Message) => {
         this.send(foreground, message);
         return Promise.resolve();
@@ -160,22 +150,21 @@ export class Checker {
       setListener: (listener: Listener | undefined) => {
         this.listener = listener;
       },
+      state: {
+        onChange: () => ({
+          dispose() {
+            // The state never changes, so no listener was registered.
+          },
+        }),
+        value: { state: "open" as const },
+      },
       toString: () => "basedpyright",
     };
 
     const Base = this.monaco.lsp.MonacoLspClient;
-    // The client registers its Monaco providers in the constructor and keeps
-    // no handle on them; a restart would register a second set. Catch the
-    // disposable on the way past.
-    const capture = (features: { dispose: () => void }) =>
-      (this.features = features);
-    class Client extends Base {
-      protected override createFeatures() {
-        const features = super.createFeatures();
-        capture(features);
-        return features;
-      }
-    }
+    const Client = capturingClient(Base, (features) => {
+      this.features = features;
+    });
     this.client = new Client(
       transport as unknown as ConstructorParameters<typeof Base>[0]
     );
@@ -184,11 +173,12 @@ export class Checker {
   private spawn(name: string): Worker {
     let url = BOOTSTRAP_DATA_URL;
     if (this.script.startsWith("blob:")) {
-      url = bootstrapBlobUrl ||= scriptBlobUrl(BOOTSTRAP);
+      bootstrapBlobUrl ||= scriptBlobUrl(BOOTSTRAP);
+      url = bootstrapBlobUrl;
     }
-    const worker = new Worker(url, { type: "module", name });
+    const worker = new Worker(url, { name, type: "module" });
     this.workers.push(worker);
-    worker.postMessage({ load: this.script });
+    worker.postMessage({ load: this.script }, []);
     return worker;
   }
 
@@ -248,7 +238,7 @@ export class Checker {
   }
 
   private receive(foreground: Worker, data: unknown) {
-    this.resolveStarted?.();
+    this.whenStarted.resolve(undefined);
     if (this.closed || !data || typeof data !== "object") {
       return;
     }
@@ -269,10 +259,10 @@ export class Checker {
       );
       background.postMessage(
         {
-          type: "browser/boot",
-          mode: "background",
           initialData: msg.initialData,
+          mode: "background",
           port: msg.port,
+          type: "browser/boot",
         },
         [msg.port as MessagePort]
       );
@@ -282,133 +272,157 @@ export class Checker {
       return;
     }
     if (msg.method === undefined) {
-      if (
-        msg.id !== undefined &&
-        msg.id !== null &&
-        this.locating.has(msg.id)
-      ) {
-        this.locating.delete(msg.id);
-        this.ensureModels(msg.result);
-      } else if (
-        msg.id !== undefined &&
-        msg.id !== null &&
-        this.completing.has(msg.id)
-      ) {
-        this.giveCompletionsRanges(msg.result, this.completing.get(msg.id)!);
-        this.completing.delete(msg.id);
-      } else if (msg.id !== undefined && msg.id === this.initId) {
-        this.isReady = true;
-        this.resolveReady?.();
-      }
-      this.toClient(msg.result);
-    } else {
-      if (msg.id !== undefined && msg.method in ANSWERED) {
-        foreground.postMessage({
-          jsonrpc: "2.0",
-          id: msg.id,
-          result: ANSWERED[msg.method]!(msg.params),
-        });
-        return;
-      }
-      if (msg.id === undefined && DROPPED.has(msg.method)) {
-        return;
-      }
-      this.toClient(msg.params);
+      this.fromAnswer(msg);
+    } else if (!this.fromServer(foreground, msg, msg.method)) {
+      return;
     }
-    if (msg.id !== undefined && msg.id !== null && this.about.has(msg.id)) {
-      const uri = this.about.get(msg.id)!;
-      this.about.delete(msg.id);
-      const error = msg.error as
-        | { code?: number; message?: string }
-        | undefined;
-      // Monaco's client cannot place an answer about a model that was disposed
-      // meanwhile (a file moved or deleted with a request in flight) and throws;
-      // it gets nothing instead. The same for Pyright failing inside itself on
-      // a request made while the Project changed under it: a code action or a
-      // hover that is not there is what the client can take, an exception is not.
-      if (
-        !this.monaco.editor.getModel(this.monaco.Uri.parse(uri)) ||
-        error?.code === LSP_INTERNAL_ERROR
-      ) {
-        if (error) {
-          console.warn(
-            `Pyright: ${error.message ?? "internal error"} (${uri})`
-          );
-        }
-        delete msg.error;
-        msg.result = null;
-      }
-    }
+    this.dropIfStale(msg);
     this.listener?.(msg);
   }
 
-  private send(foreground: Worker, message: Message) {
+  /** An answer from Pyright: models for the files it points at, ranges for completions, readiness. */
+  private fromAnswer(msg: Message) {
+    const id = msg.id ?? null;
+    const at = id === null ? undefined : this.completing.get(id);
+    if (id !== null && this.locating.has(id)) {
+      this.locating.delete(id);
+      this.ensureModels(msg.result);
+    } else if (id !== null && at) {
+      this.giveCompletionsRanges(msg.result, at);
+      this.completing.delete(id);
+    } else if (msg.id !== undefined && msg.id === this.initId) {
+      this.isReady = true;
+      this.whenReady.resolve(undefined);
+    }
+    this.toClient(msg.result);
+  }
+
+  /** A request or notification from Pyright; false when it goes no further than here. */
+  private fromServer(foreground: Worker, msg: Message, method: string) {
+    const answer = ANSWERED.get(method);
+    if (msg.id !== undefined && answer) {
+      foreground.postMessage(
+        { id: msg.id, jsonrpc: "2.0", result: answer(msg.params) },
+        []
+      );
+      return false;
+    }
+    if (msg.id === undefined && DROPPED.has(method)) {
+      return false;
+    }
+    this.toClient(msg.params);
+    return true;
+  }
+
+  /**
+   * Monaco's client cannot place an answer about a model that was disposed
+   * meanwhile (a file moved or deleted with a request in flight) and throws;
+   * it gets nothing instead. The same for Pyright failing inside itself on
+   * a request made while the Project changed under it: a code action or a
+   * hover that is not there is what the client can take, an exception is not.
+   */
+  private dropIfStale(msg: Message) {
+    if (msg.id === undefined || msg.id === null) {
+      return;
+    }
+    const uri = this.about.get(msg.id);
+    if (uri === undefined) {
+      return;
+    }
+    this.about.delete(msg.id);
+    const error = msg.error as { code?: number; message?: string } | undefined;
+    if (
+      !this.monaco.editor.getModel(this.monaco.Uri.parse(uri)) ||
+      error?.code === LSP_INTERNAL_ERROR
+    ) {
+      if (error) {
+        console.warn(`Pyright: ${error.message ?? "internal error"} (${uri})`);
+      }
+      delete msg.error;
+      msg.result = null;
+    }
+  }
+
+  private send(foreground: Worker, original: Message) {
     if (this.closed) {
       return;
     }
     // The client keeps its request's textDocument and uses that URI to place
     // returned ranges. Pyright needs another URI form, so only the copy sent
     // to its worker may be rewritten.
-    message = structuredClone(message);
+    const message = structuredClone(original);
     if (message.method === "initialize") {
-      const params = (message.params ?? {}) as Json;
-      params.rootUri = PROJECT_URI;
-      params.rootPath = "/project";
-      params.workspaceFolders = [{ uri: PROJECT_URI, name: "project" }];
-      params.initializationOptions = {
-        files: {
-          ...this.options.files,
-          "/project/pyrightconfig.json": JSON.stringify(this.options.config),
-        },
-      };
-      // With pull diagnostics offered, basedpyright answers the pulls only
-      // once its background analysis settles, which it never reports here;
-      // without them it publishes diagnostics as they come, which is what we want.
-      const textDocument = (
-        params.capabilities as { textDocument?: Json } | undefined
-      )?.textDocument;
-      if (textDocument) {
-        delete textDocument.diagnostic;
-      }
-      message.params = params;
-      this.initId = message.id ?? null;
-    } else if (message.method?.startsWith("textDocument/")) {
-      const params = message.params as
-        | { textDocument?: { uri?: string; languageId?: string } }
-        | undefined;
-      const doc = params?.textDocument;
-      if (doc?.uri) {
-        // Only Python reaches Pyright; the Project's other text files are Monaco's alone.
-        const real = this.realUris.get(doc.uri) ?? doc.uri;
-        if (!PYTHON_FILE.test(real)) {
-          // Answer a request about a non-Python file ourselves, so the client is not left waiting.
-          if (message.id !== undefined) {
-            queueMicrotask(() =>
-              this.listener?.({ jsonrpc: "2.0", id: message.id, result: null })
-            );
-          }
-          return;
+      this.prepareInitialize(message);
+    } else if (
+      message.method?.startsWith("textDocument/") &&
+      !this.prepareDocumentMessage(message, message.method)
+    ) {
+      return;
+    }
+    foreground.postMessage(message, []);
+  }
+
+  private prepareInitialize(message: Message) {
+    const params = (message.params ?? {}) as Json;
+    params.rootUri = PROJECT_URI;
+    params.rootPath = "/project";
+    params.workspaceFolders = [{ name: "project", uri: PROJECT_URI }];
+    params.initializationOptions = {
+      files: {
+        ...this.options.files,
+        "/project/pyrightconfig.json": JSON.stringify(this.options.config),
+      },
+    };
+    // With pull diagnostics offered, basedpyright answers the pulls only
+    // once its background analysis settles, which it never reports here;
+    // without them it publishes diagnostics as they come, which is what we want.
+    const textDocument = (
+      params.capabilities as { textDocument?: Json } | undefined
+    )?.textDocument;
+    if (textDocument) {
+      delete textDocument.diagnostic;
+    }
+    message.params = params;
+    this.initId = message.id ?? null;
+  }
+
+  /** Rewrites a textDocument message for Pyright; false when it is answered here instead. */
+  private prepareDocumentMessage(message: Message, method: string): boolean {
+    const params = message.params as
+      | { textDocument?: { uri?: string; languageId?: string } }
+      | undefined;
+    const doc = params?.textDocument;
+    if (doc?.uri) {
+      // Only Python reaches Pyright; the Project's other text files are Monaco's alone.
+      const real = this.realUris.get(doc.uri) ?? doc.uri;
+      if (!PYTHON_FILE.test(real)) {
+        // Answer a request about a non-Python file ourselves, so the client is not left waiting.
+        if (message.id !== undefined) {
+          queueMicrotask(() =>
+            this.listener?.({ id: message.id, jsonrpc: "2.0", result: null })
+          );
         }
-        this.rewriteUris(message.params);
-        if (message.id !== undefined && message.id !== null) {
-          this.about.set(message.id, real);
-          const { position } = params as {
-            position?: { line: number; character: number };
-          };
-          if (message.method === "textDocument/completion" && position) {
-            this.completing.set(message.id, { uri: real, ...position });
-          }
-        }
+        return false;
       }
-      if (
-        message.id !== undefined &&
-        message.id !== null &&
-        LOCATING.has(message.method)
-      ) {
-        this.locating.add(message.id);
+      this.rewriteUris(message.params);
+      if (message.id !== undefined && message.id !== null) {
+        this.about.set(message.id, real);
+        const { position } = params as {
+          position?: { line: number; character: number };
+        };
+        if (method === "textDocument/completion" && position) {
+          this.completing.set(message.id, { uri: real, ...position });
+        }
       }
     }
-    foreground.postMessage(message);
+    if (
+      message.id !== undefined &&
+      message.id !== null &&
+      LOCATING.has(method)
+    ) {
+      this.locating.add(message.id);
+    }
+    return true;
   }
 
   private rewriteUris(value: unknown) {
@@ -461,12 +475,12 @@ export class Checker {
         return;
       }
       const word = model.getWordUntilPosition({
-        lineNumber: at.line + 1,
         column: at.character + 1,
+        lineNumber: at.line + 1,
       });
       range = {
-        start: { line: at.line, character: word.startColumn - 1 },
-        end: { line: at.line, character: at.character },
+        end: { character: at.character, line: at.line },
+        start: { character: word.startColumn - 1, line: at.line },
       };
     }
     for (const item of items) {
@@ -474,11 +488,11 @@ export class Checker {
         continue;
       }
       item.textEdit = {
-        range,
         newText:
           typeof item.insertText === "string"
             ? item.insertText
             : (item.textEditText ?? item.label),
+        range,
       };
     }
   }
@@ -495,7 +509,10 @@ export class Checker {
         return;
       }
       if (Array.isArray(value)) {
-        return value.forEach(walk);
+        for (const v of value) {
+          walk(v);
+        }
+        return;
       }
       for (const [key, v] of Object.entries(value as Json)) {
         if ((key === "uri" || key === "targetUri") && typeof v === "string") {
@@ -553,7 +570,7 @@ export class Checker {
     this.client = null;
     const { workers } = this;
     this.workers = [];
-    const foreground = workers[0];
+    const [foreground] = workers;
     if (!foreground) {
       return;
     }
@@ -570,21 +587,21 @@ export class Checker {
     foreground.addEventListener("message", (ev: MessageEvent) => {
       const msg = ev.data as Message | undefined;
       if (msg?.jsonrpc === "2.0" && msg.id === "shutdown") {
-        foreground.postMessage({ jsonrpc: "2.0", method: "exit" });
+        foreground.postMessage({ jsonrpc: "2.0", method: "exit" }, []);
         // The background worker may still be compiling; give both time to wind down.
         setTimeout(finish, 2000);
       }
     });
-    void Promise.race([
-      this.started,
-      new Promise((r) => setTimeout(r, 10_000)),
-    ]).then(() => {
-      foreground.postMessage({
-        jsonrpc: "2.0",
-        id: "shutdown",
-        method: "shutdown",
-      });
+    const shutdown = async () => {
+      const patience = Promise.withResolvers<undefined>();
+      setTimeout(() => patience.resolve(undefined), 10_000);
+      await Promise.race([this.whenStarted.promise, patience.promise]);
+      foreground.postMessage(
+        { id: "shutdown", jsonrpc: "2.0", method: "shutdown" },
+        []
+      );
       setTimeout(finish, 5000);
-    });
+    };
+    void shutdown();
   }
 }

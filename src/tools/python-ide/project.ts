@@ -91,13 +91,13 @@ export const DEFAULT_PYRIGHT = { typeCheckingMode: "standard" };
 const DEFAULT_IDE: IdeSettings = {
   args: [],
   env: {},
-  tabSize: 4,
   formatOnRun: false,
   minimap: false,
+  tabSize: 4,
   wordWrap: false,
 };
 
-export function isTextPath(path: string): boolean {
+export const isTextPath = (path: string): boolean => {
   const name = path.slice(path.lastIndexOf("/") + 1);
   if (TEXT_NAMES.has(name)) {
     return true;
@@ -107,10 +107,10 @@ export function isTextPath(path: string): boolean {
     return false;
   }
   return TEXT_EXTENSIONS.has(name.slice(dot + 1).toLowerCase());
-}
+};
 
 /** Whether bytes read as text: no NUL in the first 8 KB and valid UTF-8. */
-export function looksLikeText(bytes: Uint8Array): boolean {
+export const looksLikeText = (bytes: Uint8Array): boolean => {
   const head = bytes.subarray(0, 8192);
   for (const b of head) {
     if (b === 0) {
@@ -123,9 +123,9 @@ export function looksLikeText(bytes: Uint8Array): boolean {
   } catch {
     return false;
   }
-}
+};
 
-export function languageFor(path: string): string {
+export const languageFor = (path: string): string => {
   const name = path.slice(path.lastIndexOf("/") + 1).toLowerCase();
   const ext = name.slice(name.lastIndexOf(".") + 1);
   switch (ext) {
@@ -162,23 +162,39 @@ export function languageFor(path: string): string {
       return "plaintext";
     }
   }
-}
+};
 
-export function defaultPyproject(name: string): string {
-  return stringify({
-    project: { name, dependencies: [] },
-    tool: {
-      ruff: DEFAULT_RUFF,
-      basedpyright: DEFAULT_PYRIGHT,
-      "python-ide": {
-        args: [],
-        env: {},
-        "tab-size": 4,
-        "format-on-run": false,
-      },
-    },
-  });
-}
+/** A TOML table whose keys are written in the order given. */
+const table = (entries: [string, unknown][]) => Object.fromEntries(entries);
+
+export const defaultPyproject = (name: string): string =>
+  stringify(
+    table([
+      [
+        "project",
+        table([
+          ["name", name],
+          ["dependencies", []],
+        ]),
+      ],
+      [
+        "tool",
+        table([
+          ["ruff", DEFAULT_RUFF],
+          ["basedpyright", DEFAULT_PYRIGHT],
+          [
+            "python-ide",
+            table([
+              ["args", []],
+              ["env", {}],
+              ["tab-size", 4],
+              ["format-on-run", false],
+            ]),
+          ],
+        ]),
+      ],
+    ])
+  );
 
 export const DEFAULT_MAIN = `def main() -> None:
     print("Hello from Python!")
@@ -188,21 +204,17 @@ if __name__ == "__main__":
     main()
 `;
 
-function isTable(v: unknown): v is Record<string, unknown> {
-  return typeof v === "object" && v !== null && !Array.isArray(v);
-}
+const isTable = (v: unknown): v is Record<string, unknown> =>
+  typeof v === "object" && v !== null && !Array.isArray(v);
 
-function strings(v: unknown): string[] {
-  return Array.isArray(v)
-    ? v.filter((x): x is string => typeof x === "string")
-    : [];
-}
+const strings = (v: unknown): string[] =>
+  Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
 
 /** Reads the settings out of a pyproject.toml. Throws on a TOML error. */
-export function parseSettings(
+export const parseSettings = (
   text: string,
   fallbackName: string
-): ProjectSettings {
+): ProjectSettings => {
   const doc = parse(text) as Record<string, unknown>;
   const project = isTable(doc.project) ? doc.project : {};
   const tool = isTable(doc.tool) ? doc.tool : {};
@@ -214,33 +226,33 @@ export function parseSettings(
     }
   }
   return {
-    name: typeof project.name === "string" ? project.name : fallbackName,
     dependencies: strings(project.dependencies),
-    ruff: isTable(tool.ruff) ? tool.ruff : DEFAULT_RUFF,
-    pyright: isTable(tool.basedpyright) ? tool.basedpyright : DEFAULT_PYRIGHT,
     ide: {
       args: strings(ideTable.args),
       env,
+      formatOnRun: ideTable["format-on-run"] === true,
+      minimap: ideTable.minimap === true,
       tabSize:
         typeof ideTable["tab-size"] === "number"
           ? ideTable["tab-size"]
           : DEFAULT_IDE.tabSize,
-      formatOnRun: ideTable["format-on-run"] === true,
-      minimap: ideTable.minimap === true,
       wordWrap: ideTable["word-wrap"] === true,
     },
+    name: typeof project.name === "string" ? project.name : fallbackName,
+    pyright: isTable(tool.basedpyright) ? tool.basedpyright : DEFAULT_PYRIGHT,
+    ruff: isTable(tool.ruff) ? tool.ruff : DEFAULT_RUFF,
   };
-}
+};
 
 /**
  * Rewrites one table of a pyproject.toml, keeping everything else. TOML has
  * no comment-preserving round trip in reach, so the file is re-emitted from
  * its parsed form; comments in it do not survive an edit made through the UI.
  */
-export function updatePyproject(
+export const updatePyproject = (
   text: string,
   update: (doc: Record<string, unknown>) => void
-): string {
+): string => {
   let doc: Record<string, unknown>;
   try {
     doc = parse(text) as Record<string, unknown>;
@@ -249,14 +261,14 @@ export function updatePyproject(
   }
   update(doc);
   return stringify(doc);
-}
+};
 
-export function tomlErrorMessage(e: unknown): string {
+export const tomlErrorMessage = (e: unknown): string => {
   if (e instanceof TomlError) {
     return e.message.split("\n")[0] ?? "invalid TOML";
   }
   return e instanceof Error ? e.message : String(e);
-}
+};
 
 /* ---------------- files ---------------- */
 
@@ -267,11 +279,10 @@ export interface ProjectFile {
   mtime: number;
 }
 
-export function isText(f: ProjectFile): f is ProjectFile & { text: string } {
-  return f.text !== undefined;
-}
+export const isText = (f: ProjectFile): f is ProjectFile & { text: string } =>
+  f.text !== undefined;
 
-export function normalizePath(path: string): string {
+export const normalizePath = (path: string): string => {
   const parts: string[] = [];
   for (const seg of path.replaceAll("\\", "/").split("/")) {
     if (seg === "" || seg === ".") {
@@ -284,16 +295,15 @@ export function normalizePath(path: string): string {
     }
   }
   return parts.join("/");
-}
+};
 
-export function dirname(path: string): string {
+export const dirname = (path: string): string => {
   const i = path.lastIndexOf("/");
   return i === -1 ? "" : path.slice(0, i);
-}
+};
 
-export function basename(path: string): string {
-  return path.slice(path.lastIndexOf("/") + 1);
-}
+export const basename = (path: string): string =>
+  path.slice(path.lastIndexOf("/") + 1);
 
 export class Project {
   readonly files = new Map<string, ProjectFile>();
@@ -301,10 +311,10 @@ export class Project {
   /** Why the Project File could not be read, or null while it parses. */
   settingsError: string | null = null;
 
-  private constructor(
-    public record: ProjectRecord,
-    files: ProjectFile[]
-  ) {
+  record: ProjectRecord;
+
+  private constructor(record: ProjectRecord, files: ProjectFile[]) {
+    this.record = record;
     for (const f of files) {
       this.files.set(f.path, f);
     }
@@ -321,10 +331,10 @@ export class Project {
     return new Project(
       record,
       rows.map((r) => ({
-        path: r.path,
-        text: r.text,
         bytes: r.bytes,
         mtime: r.mtime,
+        path: r.path,
+        text: r.text,
       }))
     );
   }
@@ -332,26 +342,26 @@ export class Project {
   static async create(name: string, files?: ProjectFile[]): Promise<Project> {
     const now = Date.now();
     const record: ProjectRecord = {
-      id: crypto.randomUUID(),
-      name,
-      createdAt: now,
-      updatedAt: now,
-      openTabs: [],
       activeFile: null,
+      createdAt: now,
+      folders: [],
+      id: crypto.randomUUID(),
       lock: null,
       lockPyodide: null,
+      name,
+      openTabs: [],
       packages: [],
-      folders: [],
+      updatedAt: now,
     };
     const initial = files ?? [
-      { path: ENTRY_FILE, text: DEFAULT_MAIN, mtime: now },
-      { path: PROJECT_FILE, text: defaultPyproject(name), mtime: now },
+      { mtime: now, path: ENTRY_FILE, text: DEFAULT_MAIN },
+      { mtime: now, path: PROJECT_FILE, text: defaultPyproject(name) },
     ];
     if (!initial.some((f) => f.path === PROJECT_FILE)) {
       initial.push({
+        mtime: now,
         path: PROJECT_FILE,
         text: defaultPyproject(name),
-        mtime: now,
       });
     }
     record.activeFile =
@@ -418,8 +428,8 @@ export class Project {
   async write(path: string, data: string | ArrayBuffer): Promise<boolean> {
     const file: ProjectFile =
       typeof data === "string"
-        ? { path, text: data, mtime: Date.now() }
-        : { path, bytes: data, mtime: Date.now() };
+        ? { mtime: Date.now(), path, text: data }
+        : { bytes: data, mtime: Date.now(), path };
     this.files.set(path, file);
     await putFiles([{ projectId: this.id, ...file }]);
     if (path !== PROJECT_FILE) {
@@ -470,7 +480,10 @@ export class Project {
     const pairs = this.movePairs(from, to);
     const moved: ProjectFile[] = [];
     for (const [a, b] of pairs) {
-      const f = this.files.get(a)!;
+      const f = this.files.get(a);
+      if (!f) {
+        throw new Error(`The Project has no file ${a} to move.`);
+      }
       this.files.delete(a);
       const nf = { ...f, path: b };
       this.files.set(b, nf);
@@ -506,7 +519,7 @@ export class Project {
   checkerFiles(): Record<string, string> {
     const out: Record<string, string> = {};
     for (const f of this.files.values()) {
-      if (isText(f) && /\.pyi?$/i.test(f.path)) {
+      if (isText(f) && /\.pyi?$/iu.test(f.path)) {
         out[`/project/${f.path}`] = f.text;
       }
     }

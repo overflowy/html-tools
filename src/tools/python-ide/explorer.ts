@@ -2,6 +2,7 @@
 // the Packages section. Pure rendering: the Tool hands them data and
 // callbacks and re-renders on change.
 
+import { required } from "./dom";
 import { fileIcon, ICON_FOLDER, ICON_FOLDER_OPEN } from "./file-icons";
 import { ICON_CHEVRON, ICON_TRASH } from "./icons";
 import { basename, dirname } from "./project";
@@ -20,8 +21,8 @@ interface Node {
   files: string[];
 }
 
-function buildTree(files: Iterable<string>, folders: Set<string>): Node {
-  const root: Node = { name: "", path: "", folders: [], files: [] };
+const buildTree = (files: Iterable<string>, folders: Set<string>): Node => {
+  const root: Node = { files: [], folders: [], name: "", path: "" };
   const byPath = new Map<string, Node>([["", root]]);
   const ensure = (dir: string): Node => {
     let node = byPath.get(dir);
@@ -29,7 +30,7 @@ function buildTree(files: Iterable<string>, folders: Set<string>): Node {
       return node;
     }
     const parent = ensure(dirname(dir));
-    node = { name: basename(dir), path: dir, folders: [], files: [] };
+    node = { files: [], folders: [], name: basename(dir), path: dir };
     parent.folders.push(node);
     byPath.set(dir, node);
     return node;
@@ -43,72 +44,19 @@ function buildTree(files: Iterable<string>, folders: Set<string>): Node {
   const sort = (n: Node) => {
     n.folders.sort((a, b) => a.name.localeCompare(b.name));
     n.files.sort((a, b) => basename(a).localeCompare(basename(b)));
-    n.folders.forEach(sort);
+    for (const f of n.folders) {
+      sort(f);
+    }
   };
   sort(root);
   return root;
-}
+};
 
-export function renderTree(
-  container: HTMLElement,
-  files: Iterable<string>,
-  folders: Set<string>,
-  expanded: Set<string>,
-  active: string | null,
-  cb: TreeCallbacks
-) {
-  const root = buildTree(files, folders);
-  container.replaceChildren();
-  const frag = document.createDocumentFragment();
-  const render = (node: Node, depth: number) => {
-    for (const child of node.folders) {
-      const open = expanded.has(child.path);
-      const row = document.createElement("div");
-      row.className = `tree-row folder${open ? " open" : ""}`;
-      row.style.setProperty("--depth", String(depth));
-      row.dataset.path = child.path;
-      row.innerHTML = `<span class="chev">${ICON_CHEVRON}</span><span class="icon">${open ? ICON_FOLDER_OPEN : ICON_FOLDER}</span><span class="name"></span>`;
-      row.querySelector(".name")!.textContent = child.name;
-      row.addEventListener("click", () => cb.onToggle(child.path));
-      row.addEventListener("contextmenu", (e) => {
-        e.preventDefault();
-        cb.onMenu(child.path, true, e.clientX, e.clientY);
-      });
-      bindDrop(row, child.path, cb);
-      row.draggable = true;
-      row.addEventListener("dragstart", (e) =>
-        e.dataTransfer?.setData("text/x-pyide-path", child.path)
-      );
-      frag.append(row);
-      if (open) {
-        render(child, depth + 1);
-      }
-    }
-    for (const path of node.files) {
-      const row = document.createElement("div");
-      row.className = `tree-row file${path === active ? " active" : ""}`;
-      row.style.setProperty("--depth", String(depth));
-      row.dataset.path = path;
-      row.innerHTML = `<span class="chev"></span><span class="icon">${fileIcon(path)}</span><span class="name"></span>`;
-      row.querySelector(".name")!.textContent = basename(path);
-      row.addEventListener("click", () => cb.onOpen(path));
-      row.addEventListener("contextmenu", (e) => {
-        e.preventDefault();
-        cb.onMenu(path, false, e.clientX, e.clientY);
-      });
-      row.draggable = true;
-      row.addEventListener("dragstart", (e) =>
-        e.dataTransfer?.setData("text/x-pyide-path", path)
-      );
-      frag.append(row);
-    }
-  };
-  render(root, 0);
-  container.append(frag);
-  bindDrop(container, "", cb);
-}
-
-function bindDrop(el: HTMLElement, folder: string, cb: TreeCallbacks) {
+const bindDrop = (
+  el: HTMLElement,
+  folder: string,
+  callbacks: TreeCallbacks
+) => {
   el.addEventListener("dragover", (e) => {
     if (e.dataTransfer?.types.includes("text/x-pyide-path")) {
       e.preventDefault();
@@ -125,9 +73,68 @@ function bindDrop(el: HTMLElement, folder: string, cb: TreeCallbacks) {
     }
     e.preventDefault();
     e.stopPropagation();
-    cb.onDrop([path], folder);
+    callbacks.onDrop([path], folder);
   });
-}
+};
+
+export const renderTree = (
+  container: HTMLElement,
+  files: Iterable<string>,
+  folders: Set<string>,
+  expanded: Set<string>,
+  active: string | null,
+  callbacks: TreeCallbacks
+) => {
+  const root = buildTree(files, folders);
+  container.replaceChildren();
+  const frag = document.createDocumentFragment();
+  const render = (node: Node, depth: number) => {
+    for (const child of node.folders) {
+      const open = expanded.has(child.path);
+      const row = document.createElement("div");
+      row.className = `tree-row folder${open ? " open" : ""}`;
+      row.style.setProperty("--depth", String(depth));
+      row.dataset.path = child.path;
+      row.innerHTML = `<span class="chev">${ICON_CHEVRON}</span><span class="icon">${open ? ICON_FOLDER_OPEN : ICON_FOLDER}</span><span class="name"></span>`;
+      required(row, ".name").textContent = child.name;
+      row.addEventListener("click", () => callbacks.onToggle(child.path));
+      row.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        callbacks.onMenu(child.path, true, e.clientX, e.clientY);
+      });
+      bindDrop(row, child.path, callbacks);
+      row.draggable = true;
+      row.addEventListener("dragstart", (e) =>
+        e.dataTransfer?.setData("text/x-pyide-path", child.path)
+      );
+      frag.append(row);
+      if (open) {
+        render(child, depth + 1);
+      }
+    }
+    for (const path of node.files) {
+      const row = document.createElement("div");
+      row.className = `tree-row file${path === active ? " active" : ""}`;
+      row.style.setProperty("--depth", String(depth));
+      row.dataset.path = path;
+      row.innerHTML = `<span class="chev"></span><span class="icon">${fileIcon(path)}</span><span class="name"></span>`;
+      required(row, ".name").textContent = basename(path);
+      row.addEventListener("click", () => callbacks.onOpen(path));
+      row.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        callbacks.onMenu(path, false, e.clientX, e.clientY);
+      });
+      row.draggable = true;
+      row.addEventListener("dragstart", (e) =>
+        e.dataTransfer?.setData("text/x-pyide-path", path)
+      );
+      frag.append(row);
+    }
+  };
+  render(root, 0);
+  container.append(frag);
+  bindDrop(container, "", callbacks);
+};
 
 /* ---------------- packages ---------------- */
 
@@ -144,18 +151,18 @@ export interface PackagesCallbacks {
 }
 
 /** The distribution name a spec names: `requests==2.33` gives `requests`. */
-export function specName(spec: string): string {
-  const m = /^\s*([A-Za-z0-9][A-Za-z0-9._-]*)/.exec(spec);
-  return (m?.[1] ?? spec).toLowerCase().replaceAll(/[-_.]+/g, "-");
-}
+export const specName = (spec: string): string => {
+  const m = /^\s*(?<name>[A-Za-z0-9][A-Za-z0-9._-]*)/u.exec(spec);
+  return (m?.groups?.name ?? spec).toLowerCase().replaceAll(/[-_.]+/gu, "-");
+};
 
-export function renderPackages(
+export const renderPackages = (
   direct: HTMLElement,
   transitive: HTMLElement,
   specs: string[],
   installed: PackageRow[],
-  cb: PackagesCallbacks
-) {
+  callbacks: PackagesCallbacks
+) => {
   const byName = new Map(installed.map((p) => [specName(p.name), p]));
   direct.replaceChildren();
   const directNames = new Set<string>();
@@ -167,20 +174,18 @@ export function renderPackages(
     row.className = `pkg-row${p ? "" : " pending"}`;
     // The badge and the remove button share one slot: hovering the row swaps them, and nothing shifts.
     row.innerHTML = `<span class="pkg-name"></span><span class="pkg-version"></span><span class="pkg-end"><span class="pkg-origin"></span><button type="button" class="icon pkg-remove" title="Remove from the project">${ICON_TRASH}</button></span>`;
-    row.querySelector(".pkg-name")!.textContent = spec;
-    row.querySelector(".pkg-version")!.textContent = p
-      ? p.version
-      : "not installed";
-    const origin = row.querySelector(".pkg-origin")!;
+    required(row, ".pkg-name").textContent = spec;
+    required(row, ".pkg-version").textContent = p ? p.version : "not installed";
+    const origin = required(row, ".pkg-origin");
     origin.textContent = p
       ? { catalog: "prebuilt", pypi: "PyPI", wasm: "PyPI wasm" }[p.origin]
       : "";
-    row
-      .querySelector(".pkg-remove")!
-      .addEventListener("click", () => cb.onRemove(spec));
+    required(row, ".pkg-remove").addEventListener("click", () =>
+      callbacks.onRemove(spec)
+    );
     row.addEventListener("contextmenu", (e) => {
       e.preventDefault();
-      cb.onMenu(spec, e.clientX, e.clientY);
+      callbacks.onMenu(spec, e.clientX, e.clientY);
     });
     direct.append(row);
   }
@@ -198,8 +203,8 @@ export function renderPackages(
     const row = document.createElement("div");
     row.className = "pkg-row transitive";
     row.innerHTML = `<span class="pkg-name"></span><span class="pkg-version"></span>`;
-    row.querySelector(".pkg-name")!.textContent = p.name;
-    row.querySelector(".pkg-version")!.textContent = p.version;
+    required(row, ".pkg-name").textContent = p.name;
+    required(row, ".pkg-version").textContent = p.version;
     transitive.append(row);
   }
   const summary = transitive.parentElement?.querySelector("summary");
@@ -208,4 +213,4 @@ export function renderPackages(
       ? `${rest.length} dependencies of dependencies`
       : "No dependencies of dependencies";
   }
-}
+};

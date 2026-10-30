@@ -27,7 +27,7 @@ export class Linter {
   constructor() {
     this.worker = new Worker(
       scriptDataUrl(PYIDE_RUFF_WORKER_SRC, "ruff-worker.js"),
-      { type: "module", name: "ruff" }
+      { name: "ruff", type: "module" }
     );
     this.worker.onmessage = (ev: MessageEvent<RuffResponse>) =>
       this.receive(ev.data);
@@ -76,16 +76,17 @@ export class Linter {
     }
     this.loading = (async () => {
       const { glue, wasm } = await loadRuffAssets(onProgress);
-      const copy = wasm.slice(0);
-      return new Promise<string>((resolve, reject) => {
-        this.onLoaded = { resolve: () => resolve(this.version), reject };
-        // A dedicated worker takes no targetOrigin.
-        // oxlint-disable-next-line unicorn/require-post-message-target-origin
-        this.worker.postMessage(
-          { type: "load", glue, wasm: copy } satisfies RuffRequest,
-          [copy]
-        );
-      });
+      const copy = structuredClone(wasm);
+      const loaded = Promise.withResolvers<string>();
+      this.onLoaded = {
+        reject: loaded.reject,
+        resolve: () => loaded.resolve(this.version),
+      };
+      this.worker.postMessage(
+        { glue, type: "load", wasm: copy } satisfies RuffRequest,
+        [copy]
+      );
+      return loaded.promise;
     })();
     this.loading.catch(() => (this.loading = null));
     return this.loading;
@@ -94,17 +95,23 @@ export class Linter {
   private ask(
     msg: Extract<RuffRequest, { id: number }>
   ): Promise<RuffResponse> {
-    return new Promise((resolve, reject) => {
-      this.pending.set(msg.id, { resolve, reject });
-      // oxlint-disable-next-line unicorn/require-post-message-target-origin
-      this.worker.postMessage(msg);
-    });
+    const { promise, resolve, reject } = Promise.withResolvers<RuffResponse>();
+    this.pending.set(msg.id, { reject, resolve });
+    this.worker.postMessage(msg, []);
+    return promise;
+  }
+
+  /** A fresh request id. */
+  private takeId(): number {
+    const id = this.nextId;
+    this.nextId += 1;
+    return id;
   }
 
   async configure(options: unknown): Promise<void> {
     const p = (async () => {
       await this.load();
-      await this.ask({ type: "configure", id: this.nextId++, options });
+      await this.ask({ id: this.takeId(), options, type: "configure" });
     })();
     this.configured = p;
     p.catch(() => {
@@ -125,13 +132,13 @@ export class Linter {
 
   async format(source: string): Promise<string> {
     await this.ready();
-    const r = await this.ask({ type: "format", id: this.nextId++, source });
+    const r = await this.ask({ id: this.takeId(), source, type: "format" });
     return (r as Extract<RuffResponse, { type: "format" }>).formatted;
   }
 
   async check(source: string): Promise<RuffDiagnostic[]> {
     await this.ready();
-    const r = await this.ask({ type: "check", id: this.nextId++, source });
+    const r = await this.ask({ id: this.takeId(), source, type: "check" });
     return (r as Extract<RuffResponse, { type: "check" }>).diagnostics;
   }
 

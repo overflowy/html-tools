@@ -3,6 +3,7 @@ import type * as Monaco from "monaco-editor";
 
 import type { Tool, ToolContext } from "../../shell/types";
 import { Checker } from "./checker";
+import { required } from "./dom";
 import {
   configureJson,
   createEditor,
@@ -36,7 +37,7 @@ import {
   updatePyproject,
 } from "./project";
 import type { ProjectFile } from "./project";
-import type { FileEntry, RunResult } from "./py-worker";
+import type { FileEntry, ReplResult, RunOptions, RunResult } from "./py-worker";
 import { Linter } from "./ruff";
 import {
   clearWheels,
@@ -67,7 +68,7 @@ interface PendingEdit {
   text: string;
 }
 
-const isMac = /Mac|iPhone|iPad/.test(navigator.platform || "");
+const isMac = /Mac|iPhone|iPad/u.test(navigator.platform || "");
 const MOD = isMac ? "⌘" : "Ctrl+";
 
 /** Pyright's view of the `js` module Pyodide exposes: anything goes. */
@@ -117,23 +118,23 @@ interface Session {
   checkerKey: string;
 }
 
-function read(key: string): string | null {
+const read = (key: string): string | null => {
   try {
     return localStorage.getItem(key);
   } catch {
     return null;
   }
-}
+};
 
-function write(key: string, value: string) {
+const write = (key: string, value: string) => {
   try {
     localStorage.setItem(key, value);
   } catch {
     // storage unavailable: the visit still works
   }
-}
+};
 
-function saveBlob(blob: Blob, name: string) {
+const saveBlob = (blob: Blob, name: string) => {
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
   a.download = name;
@@ -141,9 +142,73 @@ function saveBlob(blob: Blob, name: string) {
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 2000);
-}
+};
 
-function formatBytes(n: number): string {
+/** Resolves after `ms`. */
+const delay = (ms: number): Promise<undefined> => {
+  const { promise, resolve } = Promise.withResolvers<undefined>();
+  setTimeout(() => resolve(undefined), ms);
+  return promise;
+};
+
+const dropPending = () => {
+  try {
+    localStorage.removeItem(PENDING_KEY);
+  } catch {
+    // storage unavailable: nothing was journaled either
+  }
+};
+
+/** Writes the edits a page went away with; see `journalPending`. */
+const replayPending = async () => {
+  const raw = read(PENDING_KEY);
+  if (!raw) {
+    return;
+  }
+  dropPending();
+  try {
+    const entries = JSON.parse(raw) as PendingEdit[];
+    const now = Date.now();
+    await putFiles(
+      entries.map((e) => ({
+        mtime: now,
+        path: e.path,
+        projectId: e.projectId,
+        text: e.text,
+      }))
+    );
+  } catch {
+    // a journal that cannot be read is a journal of nothing
+  }
+};
+
+const isPython = (path: string | null): boolean =>
+  !!path && /\.py$/iu.test(path);
+
+/** A Python source or stub file, which the Checker hears about. */
+const isPythonSource = (path: string): boolean => /\.pyi?$/iu.test(path);
+
+/** A file's contents for the Interpreter: its text, or a copy of its bytes to transfer. */
+const fileData = (f: ProjectFile): string | ArrayBuffer =>
+  f.text ?? structuredClone(f.bytes ?? new ArrayBuffer(0));
+
+/** Where an installed package came from, for its badge. */
+const originOf = (source: string): PackageRow["origin"] => {
+  if (source === "pyodide") {
+    return "catalog";
+  }
+  return /wasm32|emscripten/u.test(source) ? "wasm" : "pypi";
+};
+
+/** A marker's code as text: Monaco allows a string or a `{ value, target }` link. */
+const markerCode = (code: Monaco.editor.IMarker["code"]): string => {
+  if (!code) {
+    return "";
+  }
+  return typeof code === "string" ? code : code.value;
+};
+
+const formatBytes = (n: number): string => {
   if (n < 1024) {
     return `${n} B`;
   }
@@ -151,11 +216,11 @@ function formatBytes(n: number): string {
     return `${(n / 1024).toFixed(0)} KB`;
   }
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
-}
+};
 
 /** The Editor and the Terminal measure their character cell once, when
  *  created, so the monospace faces they draw in have to be in by then. */
-function monoFontsLoaded(): Promise<unknown> {
+const monoFontsLoaded = (): Promise<unknown> => {
   const mono = getComputedStyle(document.documentElement)
     .getPropertyValue("--mono")
     .trim();
@@ -164,127 +229,68 @@ function monoFontsLoaded(): Promise<unknown> {
       document.fonts.load(`${s} ${mono}`)
     )
   );
-}
-
-const tool: Tool = {
-  id: "python-ide",
-  name: "Python IDE",
-  subtitle:
-    "Write and run Python in the browser, checked by Pyright and formatted by Ruff, with packages per project.",
-  keywords: [
-    "python",
-    "ide",
-    "pyodide",
-    "pyright",
-    "ruff",
-    "editor",
-    "repl",
-    "terminal",
-    "pip",
-    "notebook",
-    "matplotlib",
-  ],
-  fullHeight: true,
-  mount(el, ctx) {
-    el.innerHTML = `
-      <div class="ide">
-        <div class="ide-body">
-          <aside class="explorer">
-            <div class="explorer-head">
-              <select class="project-select" aria-label="Project"></select>
-              <button type="button" class="icon project-menu-btn" title="Project actions" aria-label="Project actions">${I.ICON_MORE}</button>
-            </div>
-            <div class="section files">
-              <div class="section-head">
-                <span>Files</span>
-                <span class="spacer"></span>
-                <button type="button" class="icon new-file-btn" title="New file">${I.ICON_NEW_FILE}</button>
-                <button type="button" class="icon new-folder-btn" title="New folder">${I.ICON_NEW_FOLDER}</button>
-                <button type="button" class="icon upload-btn" title="Upload files">${I.ICON_UPLOAD}</button>
-              </div>
-              <div class="tree" role="tree"></div>
-            </div>
-            <div class="section packages">
-              <div class="section-head"><span>Packages</span></div>
-              <form class="install-row">
-                <input class="install-input" placeholder="Add a package" title="A name, or a pinned spec like requests==2.33" spellcheck="false" autocomplete="off" aria-label="Package to install" role="combobox" aria-expanded="false" aria-autocomplete="list">
-                <button type="submit" class="install-btn">Add</button>
-                <div class="catalog-list" role="listbox" hidden></div>
-              </form>
-              <div class="pkg-direct"></div>
-              <details class="pkg-transitive-wrap"><summary>Dependencies of dependencies</summary><div class="pkg-transitive"></div></details>
-            </div>
-          </aside>
-          <div class="explorer-resizer" role="separator" aria-orientation="vertical"></div>
-          <div class="workbench">
-            <div class="runbar">
-              <button type="button" class="run-btn primary" title="Run the current file (${MOD}Enter)">${I.ICON_RUN}<span>Run</span></button>
-              <button type="button" class="stop-btn" title="Stop the program" hidden>${I.ICON_STOP}<span>Stop</span></button>
-              <button type="button" class="icon restart-btn" title="Restart the interpreter">${I.ICON_RESTART}</button>
-              <button type="button" class="icon format-btn" title="Format with Ruff (Shift+Alt+F)">${I.ICON_FORMAT}</button>
-              <button type="button" class="icon inlay-hints-btn" title="Inlay hints" aria-pressed="false">${I.ICON_INLAY_HINTS}</button>
-              <button type="button" class="icon stdin-btn" title="Stdin: text for input() to read first" aria-pressed="false">${I.ICON_STDIN}</button>
-              <span class="spacer"></span>
-              <button type="button" class="icon sidebar-btn" title="Hide sidebar" aria-label="Hide sidebar" aria-pressed="true">${I.ICON_SIDEBAR}</button>
-              <button type="button" class="icon panel-btn" title="Terminal and Problems (${MOD}J)" aria-pressed="true">${I.ICON_PANEL}</button>
-              <button type="button" class="icon quickopen-btn" title="Open a file by name (${MOD}P)">${I.ICON_SEARCH}</button>
-              <button type="button" class="icon settings-btn" title="Project settings">${I.ICON_SETTINGS}</button>
-            </div>
-            <div class="stdin-row" hidden>
-              <textarea class="stdin" rows="3" placeholder="Lines for input() to read before it asks the terminal" spellcheck="false" aria-label="Stdin"></textarea>
-            </div>
-            <div class="tabs" role="tablist"></div>
-            <div class="editor-host"></div>
-            <div class="editor-empty">No file open. Pick one in the Explorer, or press ${MOD}P.</div>
-            <div class="panel-resizer" role="separator" aria-orientation="horizontal"></div>
-            <div class="panel">
-              <div class="panel-head" role="tablist">
-                <button type="button" class="panel-tab" role="tab" data-panel="terminal" aria-selected="true">Terminal</button>
-                <button type="button" class="panel-tab" role="tab" data-panel="problems" aria-selected="false">Problems<span class="badge problems-count" hidden></span></button>
-                <span class="spacer"></span>
-                <button type="button" class="icon figures-btn" title="Show or hide the Figures" aria-pressed="false" hidden>${I.ICON_FIGURE}<span class="badge"></span></button>
-                <button type="button" class="icon terminal-copy" title="Copy the terminal's output" disabled>${I.ICON_COPY}</button>
-                <button type="button" class="icon terminal-clear" title="Clear the terminal">${I.ICON_CLEAR}</button>
-                <button type="button" class="icon terminal-close" title="Close the panel (${MOD}J)">${I.ICON_CLOSE}</button>
-              </div>
-              <div class="panel-body" data-panel="terminal">
-                <div class="terminal-host"></div>
-                <div class="figures-resizer" role="separator" aria-orientation="vertical" hidden></div>
-                <div class="figures" hidden>
-                  <div class="figures-head"><span>Figures</span><span class="spacer"></span><button type="button" class="icon figures-prev" title="Previous figure">${I.ICON_PREVIOUS}</button><span class="figures-count"></span><button type="button" class="icon figures-next" title="Next figure">${I.ICON_NEXT}</button><button type="button" class="icon figures-clear" title="Clear figures">${I.ICON_CLOSE}</button></div>
-                  <figure class="figure"><img alt="" title="Open at full size"><figcaption><span class="figure-name"></span><span class="spacer"></span><a download title="Download">${I.ICON_DOWNLOAD}</a></figcaption></figure>
-                </div>
-                <div class="problems" role="list"></div>
-              </div>
-            </div>
-          </div>
-        </div>
-        <div class="statusbar">
-          <span class="st-python">Python</span>
-          <span class="st-interp">Starting</span>
-          <span class="st-checker">Pyright</span>
-          <span class="st-engine"></span>
-          <span class="spacer"></span>
-          <span class="st-message"></span>
-          <span class="st-cursor"></span>
-          <span class="st-lang"></span>
-        </div>
-        <div class="context-menu" hidden></div>
-        <div class="quickopen" hidden><input class="quickopen-input" placeholder="Open file" spellcheck="false" autocomplete="off" aria-label="Open file"><div class="quickopen-list"></div></div>
-      </div>
-      <div class="narrow-message">The Python IDE needs a wider window: at least 768px.</div>
-      <div class="drop-overlay"><div class="card">Drop files into the project<div class="sub">Files and folders. Nothing leaves your browser.</div></div></div>
-      <input type="file" class="file-input" multiple hidden>
-      <input type="file" class="zip-input" accept=".zip,application/zip" hidden>
-      <dialog class="settings-dialog"></dialog>
-      <dialog class="figure-dialog"><img alt=""><div class="figure-dialog-bar"><button type="button" class="icon figure-dialog-prev" title="Previous figure (←)">${I.ICON_PREVIOUS}</button><span class="figure-dialog-name"></span><button type="button" class="icon figure-dialog-next" title="Next figure (→)">${I.ICON_NEXT}</button><span class="spacer"></span><a download title="Download">${I.ICON_DOWNLOAD}</a><button type="button" class="icon figure-dialog-close" title="Close (Esc)">${I.ICON_CLOSE}</button></div></dialog>
-      <dialog class="prompt-dialog"><form method="dialog"><label class="prompt-label"></label><input class="prompt-input" spellcheck="false" autocomplete="off"><div class="prompt-actions"><button type="button" class="prompt-cancel">Cancel</button><button type="submit" class="primary prompt-ok">OK</button></div></form></dialog>`;
-    // The instance lives on through the listeners it binds to `el`.
-    void new Ide(el, ctx);
-  },
 };
 
-export default tool;
+/**
+ * The empty folders under a moved folder move with it (by name: `to` may
+ * lie under `from`), and so does their being expanded. Returns the empty
+ * folders now at the new place.
+ */
+const moveEmptyFolders = (s: Session, from: string, to: string): string[] => {
+  const movedFolders: string[] = [];
+  const under = (set: Set<string>) =>
+    [...set]
+      .filter((f) => f === from || f.startsWith(`${from}/`))
+      .map((f): [string, string] => [f, to + f.slice(from.length)]);
+  for (const [a, b] of under(s.extraFolders)) {
+    s.extraFolders.delete(a);
+    s.extraFolders.add(b);
+    movedFolders.push(b);
+  }
+  for (const [a, b] of under(s.expanded)) {
+    s.expanded.delete(a);
+    s.expanded.add(b);
+  }
+  if (
+    !s.extraFolders.has(to) &&
+    !s.project.folders().has(to) &&
+    !s.project.movePairs(from, to).length
+  ) {
+    s.extraFolders.add(to);
+    movedFolders.push(to);
+  }
+  return movedFolders;
+};
+
+/** The files a Run wrote, as Project files; one changed meanwhile in the Tree is left out. */
+const runFiles = (s: Session, result: RunResult): ProjectFile[] => {
+  const now = Date.now();
+  const files: ProjectFile[] = [];
+  for (const c of result.changed) {
+    // A file added or changed while the program ran is newer than what the program saw or wrote; it stays, and reaches the filesystem next.
+    if (s.dirty.has(c.path) && s.project.files.has(c.path)) {
+      continue;
+    }
+    const bytes = c.data;
+    if (isTextPath(c.path) && looksLikeText(bytes)) {
+      files.push({
+        mtime: now,
+        path: c.path,
+        text: new TextDecoder().decode(bytes),
+      });
+    } else {
+      files.push({
+        bytes: bytes.buffer.slice(
+          bytes.byteOffset,
+          bytes.byteOffset + bytes.byteLength
+        ) as ArrayBuffer,
+        mtime: now,
+        path: c.path,
+      });
+    }
+  }
+  return files;
+};
 
 class Ide {
   private $: (sel: string) => HTMLElement;
@@ -302,42 +308,66 @@ class Ide {
   private editorReady: Promise<void>;
   private terminalReady: Promise<void>;
   private pendingRestore: { id: string; path: string } | null = null;
+  private el: HTMLElement;
+  private ctx: ToolContext;
 
-  constructor(
-    private el: HTMLElement,
-    private ctx: ToolContext
-  ) {
+  constructor(el: HTMLElement, ctx: ToolContext) {
+    this.el = el;
+    this.ctx = ctx;
     this.$ = (sel) => el.querySelector(sel) as HTMLElement;
     this.bindUi();
     this.editorReady = this.setupEditor();
     this.terminalReady = this.setupTerminal();
-    void this.linter
-      .load(this.progress("Ruff"))
-      .then(() => this.flash(`Ruff ${this.linter.version} ready`))
-      .catch((error) => this.message(`Ruff failed: ${error.message}`));
-    void loadPyrightScript(this.progress("Pyright"))
-      .then((url) => {
-        this.pyrightUrl = url;
-        // A Project opened before Pyright arrived is waiting for it; one still opening starts it itself.
-        if (this.session?.opened && !this.session.checker) {
-          this.restartChecker();
-        }
-      })
-      .catch((error) => this.message(`Pyright failed: ${error.message}`));
-    void loadPyodideAssets(this.progress("Pyodide"))
-      .then((assets) => this.readCatalog(assets.lock))
-      .catch(() => {
-        // The interpreter loads the same assets and reports the failure when it starts.
-      });
+    void this.loadRuff();
+    void this.loadPyright();
+    void this.loadCatalog();
     ctx.onRestore((payload) => this.restore(payload));
     window.addEventListener("pagehide", () => this.journalPending());
     // Back from the back/forward cache, the page is alive and saves as usual; a journal left from its pagehide would be stale.
     window.addEventListener("pageshow", (e) => {
       if (e.persisted) {
-        this.dropPending();
+        dropPending();
       }
     });
     void this.start();
+  }
+
+  private async loadRuff() {
+    try {
+      await this.linter.load(this.progress("Ruff"));
+      this.flash(`Ruff ${this.linter.version} ready`);
+    } catch (error) {
+      this.message(`Ruff failed: ${(error as Error).message}`);
+    }
+  }
+
+  private async loadPyright() {
+    try {
+      this.pyrightUrl = await loadPyrightScript(this.progress("Pyright"));
+      // A Project opened before Pyright arrived is waiting for it; one still opening starts it itself.
+      if (this.session?.opened && !this.session.checker) {
+        this.restartChecker();
+      }
+    } catch (error) {
+      this.message(`Pyright failed: ${(error as Error).message}`);
+    }
+  }
+
+  private async loadCatalog() {
+    try {
+      const assets = await loadPyodideAssets(this.progress("Pyodide"));
+      this.readCatalog(assets.lock);
+    } catch {
+      // The interpreter loads the same assets and reports the failure when it starts.
+    }
+  }
+
+  /** The open Project's session, where a caller runs only while one is open. */
+  private currentSession(): Session {
+    if (!this.session) {
+      throw new Error("No Project is open.");
+    }
+    return this.session;
   }
 
   /**
@@ -354,42 +384,12 @@ class Ide {
     for (const path of this.saveTimers.keys()) {
       const model = s.models.get(path);
       if (model && !model.isDisposed()) {
-        entries.push({ projectId: s.project.id, path, text: model.getValue() });
+        entries.push({ path, projectId: s.project.id, text: model.getValue() });
       }
     }
     void this.flushSaves();
     if (entries.length) {
       write(PENDING_KEY, JSON.stringify(entries));
-    }
-  }
-
-  private dropPending() {
-    try {
-      localStorage.removeItem(PENDING_KEY);
-    } catch {
-      // storage unavailable: nothing was journaled either
-    }
-  }
-
-  private async replayPending() {
-    const raw = read(PENDING_KEY);
-    if (!raw) {
-      return;
-    }
-    this.dropPending();
-    try {
-      const entries = JSON.parse(raw) as PendingEdit[];
-      const now = Date.now();
-      await putFiles(
-        entries.map((e) => ({
-          projectId: e.projectId,
-          path: e.path,
-          text: e.text,
-          mtime: now,
-        }))
-      );
-    } catch {
-      // a journal that cannot be read is a journal of nothing
     }
   }
 
@@ -411,7 +411,7 @@ class Ide {
       await clearWheels();
       write(WHEELS_KEY, PYODIDE_VERSION);
     }
-    await this.replayPending();
+    await replayPending();
     await this.refreshProjects();
     const wanted = this.pendingRestore;
     this.pendingRestore = null;
@@ -422,7 +422,7 @@ class Ide {
     if (!id) {
       const p = await Project.create("new-project");
       await this.refreshProjects();
-      id = p.id;
+      ({ id } = p);
     }
     await this.openProject(id, wanted?.path);
   }
@@ -438,22 +438,23 @@ class Ide {
     configureJson(monaco);
     this.editor = createEditor(monaco, this.$(".editor-host"), 4);
     this.setInlayHints(read(INLAY_HINTS_KEY) === "on");
-    this.editor.addCommand(
-      monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter,
-      () => void this.run()
-    );
-    this.editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyP, () =>
+    // A keybinding is its key code plus its modifier flags, which sit in
+    // bits above every key code: adding them is what OR-ing them would be.
+    this.editor.addCommand(monaco.KeyMod.CtrlCmd + monaco.KeyCode.Enter, () => {
+      void this.run();
+    });
+    this.editor.addCommand(monaco.KeyMod.CtrlCmd + monaco.KeyCode.KeyP, () =>
       this.openQuickOpen()
     );
-    this.editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyJ, () =>
+    this.editor.addCommand(monaco.KeyMod.CtrlCmd + monaco.KeyCode.KeyJ, () =>
       this.togglePanel()
     );
     this.editor.addCommand(
-      monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyM,
+      monaco.KeyMod.CtrlCmd + monaco.KeyMod.Shift + monaco.KeyCode.KeyM,
       () => this.showPanelTab("problems")
     );
     monaco.editor.onDidChangeMarkers(() => this.scheduleProblems());
-    this.editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
+    this.editor.addCommand(monaco.KeyMod.CtrlCmd + monaco.KeyCode.KeyS, () => {
       // Every edit is saved as it happens; the browser's own save dialog would only confuse.
     });
     this.editor.onDidChangeCursorPosition((e) => {
@@ -476,12 +477,14 @@ class Ide {
       monoFontsLoaded(),
     ]);
     this.terminal = new IdeTerminal(api, this.$(".terminal-host"), {
-      onLine: (line, mode) => this.onTerminalLine(line, mode),
-      onInterrupt: () => void this.stop(),
       onComplete: (source) =>
         this.session?.interpreter && this.session.state === "ready"
           ? this.session.interpreter.complete(source)
           : Promise.resolve({ completions: [], start: 0 }),
+      onInterrupt: () => {
+        void this.stop();
+      },
+      onLine: (line, mode) => this.onTerminalLine(line, mode),
       onResize: (cols, rows) => this.session?.interpreter?.resize(cols, rows),
     });
     this.terminal.term.onWriteParsed(() => this.syncTerminalCopy());
@@ -515,6 +518,11 @@ class Ide {
     const list = this.$(".catalog-list");
     let cursor = -1;
     let matches: { name: string; version: string }[] = [];
+    const choose = (name: string) => {
+      input.value = name;
+      this.hideCatalog();
+      input.focus();
+    };
     const render = () => {
       const q = specName(input.value.trim());
       const raw = input.value.trim().toLowerCase();
@@ -530,7 +538,7 @@ class Ide {
         matches = [];
         return;
       }
-      if (/[=<>!~\s]/.test(raw)) {
+      if (/[=<>!~\s]/u.test(raw)) {
         return this.hideCatalog();
       }
       const starts = this.catalog.filter((p) =>
@@ -547,26 +555,21 @@ class Ide {
       }
       cursor = Math.min(cursor, matches.length - 1);
       list.replaceChildren();
-      matches.forEach((p, i) => {
+      for (const [i, p] of matches.entries()) {
         const row = document.createElement("div");
         row.className = `catalog-row${i === cursor ? " cursor" : ""}`;
         row.setAttribute("role", "option");
         row.innerHTML = `<span class="catalog-name"></span><span class="catalog-version"></span>`;
-        row.querySelector(".catalog-name")!.textContent = p.name;
-        row.querySelector(".catalog-version")!.textContent = p.version;
+        required(row, ".catalog-name").textContent = p.name;
+        required(row, ".catalog-version").textContent = p.version;
         row.addEventListener("mousedown", (e) => {
           e.preventDefault();
           choose(p.name);
         });
         list.append(row);
-      });
+      }
       list.hidden = false;
       input.setAttribute("aria-expanded", "true");
-    };
-    const choose = (name: string) => {
-      input.value = name;
-      this.hideCatalog();
-      input.focus();
     };
     input.addEventListener("input", () => {
       cursor = -1;
@@ -583,6 +586,7 @@ class Ide {
         }
         return;
       }
+      const picked = cursor >= 0 ? matches[cursor] : undefined;
       if (e.key === "ArrowDown") {
         cursor = Math.min(cursor + 1, matches.length - 1);
         render();
@@ -591,8 +595,8 @@ class Ide {
         cursor = Math.max(cursor - 1, -1);
         render();
         e.preventDefault();
-      } else if (e.key === "Enter" && cursor >= 0) {
-        choose(matches[cursor]!.name);
+      } else if (e.key === "Enter" && picked) {
+        choose(picked.name);
         e.preventDefault();
       } else if (e.key === "Escape") {
         this.hideCatalog();
@@ -658,12 +662,12 @@ class Ide {
     }
     s.state = state;
     const labels: Record<InterpState, string> = {
-      off: "Interpreter off",
       booting: "Booting",
-      ready: "Ready",
-      running: "Running",
       installing: "Installing",
+      off: "Interpreter off",
+      ready: "Ready",
       rebooting: "Restarting",
+      running: "Running",
     };
     this.$(".st-interp").textContent = labels[state];
     this.$(".st-interp").dataset.state = state;
@@ -674,7 +678,7 @@ class Ide {
     (this.$(".run-btn") as HTMLButtonElement).hidden = running;
     (this.$(".stop-btn") as HTMLButtonElement).hidden = !running;
     (this.$(".run-btn") as HTMLButtonElement).disabled =
-      state !== "ready" || !this.isPython(s.active);
+      state !== "ready" || !isPython(s.active);
     (this.$(".restart-btn") as HTMLButtonElement).disabled =
       state === "booting" || state === "rebooting";
     (this.$(".install-btn") as HTMLButtonElement).disabled = state !== "ready";
@@ -684,22 +688,19 @@ class Ide {
   /** The Checker's state in the Status Bar: what it is doing while it is not ready, nothing once it is. */
   private setCheckerStatus(state: "starting" | "reading" | "ready") {
     const labels = {
-      starting: "Pyright starting",
       reading: "Pyright reading packages",
       ready: "",
+      starting: "Pyright starting",
     };
     this.$(".st-checker").textContent = labels[state];
     this.$(".st-checker").dataset.state = state;
   }
 
-  private isPython(path: string | null): boolean {
-    return !!path && /\.py$/i.test(path);
-  }
-
   /* ---------------- projects ---------------- */
 
   private async refreshProjects() {
-    this.projects = (await listProjects()).map((p) => ({
+    const records = await listProjects();
+    this.projects = records.map((p) => ({
       id: p.id,
       name: p.name,
     }));
@@ -720,15 +721,18 @@ class Ide {
 
   /** Opens a Project, after any open already in progress: two at once would race for the editor. */
   private openProject(id: string, path?: string): Promise<void> {
-    this.opening = this.opening
-      .then(() => this.doOpenProject(id, path))
-      .catch((error) =>
+    const open = async () => {
+      try {
+        await this.doOpenProject(id, path);
+      } catch (error) {
         this.message(
           `Could not open the project: ${
             error instanceof Error ? error.message : String(error)
           }`
-        )
-      );
+        );
+      }
+    };
+    this.opening = this.opening.then(open);
     return this.opening;
   }
 
@@ -745,28 +749,28 @@ class Ide {
       return;
     }
     const session: Session = {
-      project,
-      interpreter: null,
-      state: "off",
-      booted: false,
-      python: "",
-      jspi: false,
-      checker: null,
-      mirror: null,
-      models: new Map(),
-      viewStates: new Map(),
-      tabs: [],
       active: null,
+      booted: false,
+      checker: null,
+      checkerKey: "",
+      checkerRestartPending: false,
+      dirty: new Set(),
       expanded: new Set(project.folders()),
       extraFolders: new Set(project.record.folders),
-      dirty: new Set(),
-      pendingInput: null,
-      figures: [],
       figureIndex: 0,
+      figures: [],
       generation: 0,
+      interpreter: null,
+      jspi: false,
+      mirror: null,
+      models: new Map(),
       opened: false,
-      checkerRestartPending: false,
-      checkerKey: "",
+      pendingInput: null,
+      project,
+      python: "",
+      state: "off",
+      tabs: [],
+      viewStates: new Map(),
     };
     this.session = session;
     write(LAST_PROJECT_KEY, id);
@@ -788,31 +792,17 @@ class Ide {
       }
     }
     this.applyEditorOptions();
-    // A tab is a text file's; a file a Run has since made binary has none.
-    const isTextFile = (p: string | null) => !!p && session.models.has(p);
-    for (const t of project.record.openTabs) {
-      if (isTextFile(t)) {
-        session.tabs.push(t);
-      }
+    this.restoreTabs(session, path);
+    try {
+      await this.linter.configure(project.settings.ruff);
+    } catch (error) {
+      this.message(`Ruff settings: ${(error as Error).message}`);
     }
-    const first = isTextFile(path ?? null)
-      ? path!
-      : isTextFile(project.record.activeFile)
-        ? project.record.activeFile!
-        : (session.tabs[0] ?? null);
-    if (first) {
-      this.openFile(first);
-    } else {
-      this.showActive();
-    }
-    await this.linter
-      .configure(project.settings.ruff)
-      .catch((error) => this.message(`Ruff settings: ${error.message}`));
     this.linterBinding?.invalidate(session.models.values());
     if (project.record.lock) {
       const stored = await getMirror(project.id);
       if (stored && stored.key === project.environmentKey) {
-        session.mirror = { key: stored.key, files: stored.files };
+        session.mirror = { files: stored.files, key: stored.key };
       }
     }
     if (this.session !== session) {
@@ -826,6 +816,27 @@ class Ide {
     }
     this.terminal?.reset();
     void this.bootInterpreter();
+  }
+
+  /** Reopens the Project's tabs and shows `path`, else the file last active, else the first tab. */
+  private restoreTabs(session: Session, path?: string) {
+    const { project } = session;
+    // A tab is a text file's; a file a Run has since made binary has none.
+    const isTextFile = (p: string | null) => !!p && session.models.has(p);
+    for (const t of project.record.openTabs) {
+      if (isTextFile(t)) {
+        session.tabs.push(t);
+      }
+    }
+    const first =
+      [path ?? null, project.record.activeFile].find(isTextFile) ??
+      session.tabs[0] ??
+      null;
+    if (first) {
+      this.openFile(first);
+    } else {
+      this.showActive();
+    }
   }
 
   private closeProject() {
@@ -899,20 +910,20 @@ class Ide {
     await this.flushSaves();
     const files: ProjectFile[] = [...s.project.files.values()].map((f) => ({
       ...f,
-      bytes: f.bytes?.slice(0),
+      bytes: f.bytes === undefined ? undefined : structuredClone(f.bytes),
     }));
     const p = await Project.create(name.trim(), files);
     await p.saveRecord({
+      folders: [...s.extraFolders].toSorted(),
       lock: s.project.record.lock,
       lockPyodide: s.project.record.lockPyodide,
       packages: [...s.project.record.packages],
-      folders: [...s.extraFolders].toSorted(),
     });
     if (s.mirror) {
       await putMirror({
-        projectId: p.id,
-        key: s.mirror.key,
         files: s.mirror.files,
+        key: s.mirror.key,
+        projectId: p.id,
       });
     }
     await this.refreshProjects();
@@ -925,9 +936,9 @@ class Ide {
       return;
     }
     if (
-      !confirm(
+      !(await this.confirmAction(
         `Delete the project "${s.project.name}" and all its files? This cannot be undone.`
-      )
+      ))
     ) {
       return;
     }
@@ -936,11 +947,7 @@ class Ide {
     await Project.delete(id);
     await this.refreshProjects();
     const next = this.projects[0]?.id;
-    if (next) {
-      await this.openProject(next);
-    } else {
-      await this.start();
-    }
+    await (next ? this.openProject(next) : this.start());
   }
 
   private async exportProject() {
@@ -950,13 +957,13 @@ class Ide {
     }
     await this.flushSaves();
     const encoder = new TextEncoder();
-    const prefix = `${s.project.name.replaceAll(/[^\w.-]+/g, "_")}/`;
+    const prefix = `${s.project.name.replaceAll(/[^\w.-]+/gu, "_")}/`;
     const entries = [...s.project.files.values()].map((f) => ({
-      path: prefix + f.path,
       data:
         f.text === undefined
           ? new Uint8Array(f.bytes ?? new ArrayBuffer(0))
           : encoder.encode(f.text),
+      path: prefix + f.path,
     }));
     saveBlob(writeZip(entries), `${prefix.slice(0, -1)}.zip`);
   }
@@ -973,9 +980,10 @@ class Ide {
     }
     // A zip made of one top-level folder is that folder.
     const tops = new Set(entries.map((e) => e.path.split("/")[0]));
+    const [top = ""] = tops;
     const strip =
       tops.size === 1 && entries.every((e) => e.path.includes("/"))
-        ? [...tops][0]!.length + 1
+        ? top.length + 1
         : 0;
     const now = Date.now();
     const files: ProjectFile[] = [];
@@ -989,18 +997,18 @@ class Ide {
       }
       if (isTextPath(path) && looksLikeText(e.data)) {
         files.push({
+          mtime: now,
           path,
           text: new TextDecoder().decode(e.data),
-          mtime: now,
         });
       } else {
         files.push({
-          path,
           bytes: e.data.buffer.slice(
             e.data.byteOffset,
             e.data.byteOffset + e.data.byteLength
           ) as ArrayBuffer,
           mtime: now,
+          path,
         });
       }
     }
@@ -1009,7 +1017,7 @@ class Ide {
       return;
     }
     const name =
-      (strip ? [...tops][0]! : file.name.replace(/\.zip$/i, "")) || "imported";
+      (strip ? top : file.name.replace(/\.zip$/iu, "")) || "imported";
     const p = await Project.create(name, files);
     await this.refreshProjects();
     await this.openProject(p.id);
@@ -1035,7 +1043,7 @@ class Ide {
   }
 
   private ensureModel(path: string, text: string): Monaco.editor.ITextModel {
-    const s = this.session!;
+    const s = this.currentSession();
     let model = s.models.get(path);
     if (model) {
       return model;
@@ -1050,8 +1058,8 @@ class Ide {
       this.uriFor(path)
     );
     model.updateOptions({
-      tabSize: s.project.settings.ide.tabSize,
       insertSpaces: true,
+      tabSize: s.project.settings.ide.tabSize,
     });
     s.models.set(path, model);
     model.onDidChangeContent(() => this.onModelChange(path));
@@ -1071,7 +1079,9 @@ class Ide {
     }
     this.saveTimers.set(
       path,
-      window.setTimeout(() => void this.saveModel(path), 300)
+      window.setTimeout(() => {
+        void this.saveModel(path);
+      }, 300)
     );
     const model = s.models.get(path);
     if (model) {
@@ -1095,7 +1105,7 @@ class Ide {
       return;
     }
     const settingsChanged = await s.project.write(path, text);
-    await this.syncFiles([{ path, data: text }]);
+    await this.syncFiles([{ data: text, path }]);
     if (settingsChanged) {
       this.applySettings();
     }
@@ -1142,12 +1152,10 @@ class Ide {
       return;
     }
     const sent = s.state === "running" ? [] : files;
-    if (
-      sent.length === 0 &&
-      removed.length === 0 &&
-      folders.length === 0 &&
-      removedFolders.length === 0
-    ) {
+    const nothing = [sent, removed, folders, removedFolders].every(
+      (list) => list.length === 0
+    );
+    if (nothing) {
       return;
     }
     for (const f of sent) {
@@ -1181,10 +1189,7 @@ class Ide {
       if (!f) {
         continue;
       }
-      files.push({
-        path,
-        data: f.text === undefined ? f.bytes!.slice(0) : f.text,
-      });
+      files.push({ data: fileData(f), path });
     }
     s.dirty.clear();
     await this.syncFiles(files);
@@ -1217,15 +1222,15 @@ class Ide {
       this.fileAdded(path);
     }
     this.ensureModel(path, text);
-    void this.syncFiles([{ path, data: text }]);
+    void this.syncFiles([{ data: text, path }]);
     if (settingsChanged) {
       this.applySettings();
     }
   }
 
   private fileAdded(path: string) {
-    const s = this.session!;
-    if (/\.pyi?$/i.test(path)) {
+    const s = this.currentSession();
+    if (isPythonSource(path)) {
       s.checker?.fileCreated(`/project/${path}`);
     }
     this.renderTree();
@@ -1262,7 +1267,7 @@ class Ide {
     }
     s.active = path;
     this.showActive();
-    void s.project.saveRecord({ openTabs: [...s.tabs], activeFile: path });
+    void s.project.saveRecord({ activeFile: path, openTabs: [...s.tabs] });
   }
 
   /** Shows the active file, and everything that names it: tabs, Tree, Deep Link. */
@@ -1323,14 +1328,14 @@ class Ide {
       tab.setAttribute("role", "tab");
       tab.title = path;
       tab.innerHTML = `<span class="tab-name"></span><button type="button" class="tab-close" title="Close">${I.ICON_CLOSE}</button>`;
-      tab.querySelector(".tab-name")!.textContent = basename(path);
+      required(tab, ".tab-name").textContent = basename(path);
       tab.addEventListener("click", () => this.activate(path));
       tab.addEventListener("auxclick", (e) => {
         if (e.button === 1) {
           this.closeTab(path);
         }
       });
-      tab.querySelector(".tab-close")!.addEventListener("click", (e) => {
+      required(tab, ".tab-close").addEventListener("click", (e) => {
         e.stopPropagation();
         this.closeTab(path);
       });
@@ -1347,6 +1352,15 @@ class Ide {
     }
     const folders = new Set([...s.project.folders(), ...s.extraFolders]);
     renderTree(tree, s.project.files.keys(), folders, s.expanded, s.active, {
+      onDrop: (paths, into) => {
+        for (const p of paths) {
+          const target = (into ? `${into}/` : "") + basename(p);
+          if (target !== p && !`${into}/`.startsWith(`${p}/`)) {
+            void this.movePath(p, target);
+          }
+        }
+      },
+      onMenu: (path, isFolder, x, y) => this.showMenu(path, isFolder, x, y),
       onOpen: (path) => this.openFile(path),
       onToggle: (folder) => {
         if (s.expanded.has(folder)) {
@@ -1355,15 +1369,6 @@ class Ide {
           s.expanded.add(folder);
         }
         this.renderTree();
-      },
-      onMenu: (path, isFolder, x, y) => this.showMenu(path, isFolder, x, y),
-      onDrop: (paths, into) => {
-        for (const p of paths) {
-          const target = (into ? `${into}/` : "") + basename(p);
-          if (target !== p && !`${into}/`.startsWith(`${p}/`)) {
-            void this.movePath(p, target);
-          }
-        }
       },
     });
   }
@@ -1405,38 +1410,61 @@ class Ide {
 
   /* ---------------- file operations ---------------- */
 
-  private async ask(label: string, initial: string): Promise<string | null> {
+  /**
+   * The prompt dialog: the text entered, or null when cancelled. Without
+   * `initial` it asks for OK or Cancel alone, and OK gives "".
+   */
+  private dialog(
+    label: string,
+    initial: string | null
+  ): Promise<string | null> {
     const dialog = this.$(".prompt-dialog") as HTMLDialogElement;
-    const input = dialog.querySelector(".prompt-input") as HTMLInputElement;
-    dialog.querySelector(".prompt-label")!.textContent = label;
-    input.value = initial;
-    return new Promise((resolve) => {
-      // Whether the form was submitted, tracked here: browsers disagree about
-      // what a method="dialog" submit leaves in returnValue.
-      let accepted = false;
-      const finish = (value: string | null) => {
-        dialog.removeEventListener("close", onClose);
-        cancel.removeEventListener("click", onCancel);
-        if (dialog.open) {
-          dialog.close();
-        }
-        resolve(value);
-      };
-      const onClose = () => finish(accepted ? input.value : null);
-      const onCancel = () => finish(null);
-      const cancel = dialog.querySelector(
-        ".prompt-cancel"
-      ) as HTMLButtonElement;
-      dialog.addEventListener("close", onClose);
-      cancel.addEventListener("click", onCancel);
-      (dialog.querySelector("form") as HTMLFormElement).onsubmit = () => {
-        accepted = true;
-      };
-      dialog.showModal();
+    const input = required<HTMLInputElement>(dialog, ".prompt-input");
+    const cancel = required<HTMLButtonElement>(dialog, ".prompt-cancel");
+    required(dialog, ".prompt-label").textContent = label;
+    input.hidden = initial === null;
+    input.value = initial ?? "";
+    const { promise, resolve } = Promise.withResolvers<string | null>();
+    // Whether the form was submitted, tracked here: browsers disagree about
+    // what a method="dialog" submit leaves in returnValue.
+    let accepted = false;
+    const listening = new AbortController();
+    const finish = (value: string | null) => {
+      listening.abort();
+      if (dialog.open) {
+        dialog.close();
+      }
+      resolve(value);
+    };
+    dialog.addEventListener(
+      "close",
+      () => finish(accepted ? input.value : null),
+      { signal: listening.signal }
+    );
+    cancel.addEventListener("click", () => finish(null), {
+      signal: listening.signal,
+    });
+    required<HTMLFormElement>(dialog, "form").onsubmit = () => {
+      accepted = true;
+    };
+    dialog.showModal();
+    if (initial === null) {
+      required(dialog, ".prompt-ok").focus();
+    } else {
       input.focus();
       const dot = initial.lastIndexOf(".");
       input.setSelectionRange(0, dot > 0 ? dot : initial.length);
-    });
+    }
+    return promise;
+  }
+
+  private ask(label: string, initial: string): Promise<string | null> {
+    return this.dialog(label, initial);
+  }
+
+  /** Whether the user confirms `question`: OK, rather than Cancel or Escape. */
+  private async confirmAction(question: string): Promise<boolean> {
+    return (await this.dialog(question, null)) !== null;
   }
 
   /** The session once its Project is fully open; the Tree is not edited before the editor is there to show the result. */
@@ -1456,7 +1484,7 @@ class Ide {
     isFolder: boolean,
     ignore?: (p: string) => boolean
   ): string | null {
-    const s = this.session!;
+    const s = this.currentSession();
     for (const f of s.project.files.keys()) {
       if (ignore?.(f)) {
         continue;
@@ -1568,7 +1596,7 @@ class Ide {
    * Folders under `gone` (folders removed outright) are not kept.
    */
   private keepEmptied(paths: string[], gone: string[] = []) {
-    const s = this.session!;
+    const s = this.currentSession();
     const implied = s.project.folders();
     for (const p of [...paths, ...gone]) {
       for (let dir = dirname(p); dir; dir = dirname(dir)) {
@@ -1609,76 +1637,16 @@ class Ide {
       return;
     }
     const isFolder = !s.project.files.has(from);
-    const leaving = (p: string) => p === from || p.startsWith(`${from}/`);
-    let why = this.obstacle(to, isFolder, leaving);
-    if (isFolder) {
-      for (const [, b] of s.project.movePairs(from, to)) {
-        why ??= this.obstacle(b, false, leaving);
-      }
-    }
+    const why = this.moveObstacle(s, from, to, isFolder);
     if (why) {
       this.message(`Cannot move ${from} to ${to}: ${why}.`);
       return;
     }
-    // The empty folders under a moved folder move with it (by name: `to` may lie under `from`).
-    const movedFolders: string[] = [];
-    if (isFolder) {
-      const under = (set: Set<string>) =>
-        [...set]
-          .filter((f) => f === from || f.startsWith(`${from}/`))
-          .map((f): [string, string] => [f, to + f.slice(from.length)]);
-      for (const [a, b] of under(s.extraFolders)) {
-        s.extraFolders.delete(a);
-        s.extraFolders.add(b);
-        movedFolders.push(b);
-      }
-      for (const [a, b] of under(s.expanded)) {
-        s.expanded.delete(a);
-        s.expanded.add(b);
-      }
-      if (
-        !s.extraFolders.has(to) &&
-        !s.project.folders().has(to) &&
-        !s.project.movePairs(from, to).length
-      ) {
-        s.extraFolders.add(to);
-        movedFolders.push(to);
-      }
-    }
+    const movedFolders = isFolder ? moveEmptyFolders(s, from, to) : [];
     await this.flushSaves();
     const pairs = await s.project.move(from, to);
     for (const [a, b] of pairs) {
-      const model = s.models.get(a);
-      const text = model?.getValue();
-      // The model of a file overwritten at `b` goes too, so the new one is not mistaken for it.
-      for (const m of [model, s.models.get(b)]) {
-        if (!m) {
-          continue;
-        }
-        this.disposeModel(m);
-      }
-      s.models.delete(a);
-      s.models.delete(b);
-      if (/\.pyi?$/i.test(a)) {
-        s.checker?.fileDeleted(`/project/${a}`);
-      }
-      if (/\.pyi?$/i.test(b)) {
-        s.checker?.fileCreated(`/project/${b}`);
-      }
-      if (text !== undefined) {
-        this.ensureModel(b, text);
-      }
-      const i = s.tabs.indexOf(a);
-      if (i !== -1) {
-        if (s.tabs.includes(b)) {
-          s.tabs.splice(i, 1);
-        } else {
-          s.tabs[i] = b;
-        }
-      }
-      if (s.active === a) {
-        s.active = b;
-      }
+      this.moveModel(s, a, b);
     }
     // A binary file moved onto a text file leaves no model, so no tab.
     s.tabs = s.tabs.filter((t) => s.models.has(t));
@@ -1690,12 +1658,9 @@ class Ide {
       isFolder ? [from] : []
     );
     void this.saveFolders();
-    const files = pairs.map(([, b]) => {
-      const f = s.project.files.get(b)!;
-      return {
-        path: b,
-        data: f.text === undefined ? f.bytes!.slice(0) : f.text,
-      };
+    const files = pairs.flatMap(([, b]) => {
+      const f = s.project.files.get(b);
+      return f ? [{ data: fileData(f), path: b }] : [];
     });
     void this.syncFiles(
       files,
@@ -1708,9 +1673,61 @@ class Ide {
     }
     this.showActive();
     void s.project.saveRecord({
-      openTabs: [...s.tabs],
       activeFile: s.active,
+      openTabs: [...s.tabs],
     });
+  }
+
+  /** Why `from` cannot move to `to`, or null when it can. */
+  private moveObstacle(
+    s: Session,
+    from: string,
+    to: string,
+    isFolder: boolean
+  ): string | null {
+    const leaving = (p: string) => p === from || p.startsWith(`${from}/`);
+    let why = this.obstacle(to, isFolder, leaving);
+    if (isFolder) {
+      for (const [, b] of s.project.movePairs(from, to)) {
+        why ??= this.obstacle(b, false, leaving);
+      }
+    }
+    return why;
+  }
+
+  /** A file moved from `a` to `b`: its model, tab, and the Checker follow it. */
+  private moveModel(s: Session, a: string, b: string) {
+    const model = s.models.get(a);
+    const text = model?.getValue();
+    // The model of a file overwritten at `b` goes too, so the new one is not mistaken for it.
+    for (const m of [model, s.models.get(b)]) {
+      if (!m) {
+        continue;
+      }
+      this.disposeModel(m);
+    }
+    s.models.delete(a);
+    s.models.delete(b);
+    if (isPythonSource(a)) {
+      s.checker?.fileDeleted(`/project/${a}`);
+    }
+    if (isPythonSource(b)) {
+      s.checker?.fileCreated(`/project/${b}`);
+    }
+    if (text !== undefined) {
+      this.ensureModel(b, text);
+    }
+    const i = s.tabs.indexOf(a);
+    if (i !== -1) {
+      if (s.tabs.includes(b)) {
+        s.tabs.splice(i, 1);
+      } else {
+        s.tabs[i] = b;
+      }
+    }
+    if (s.active === a) {
+      s.active = b;
+    }
   }
 
   private async deletePath(path: string, isFolder: boolean) {
@@ -1722,11 +1739,11 @@ class Ide {
       ? [...s.project.files.keys()].filter((p) => p.startsWith(`${path}/`))
       : [path];
     if (
-      !confirm(
+      !(await this.confirmAction(
         isFolder
           ? `Delete the folder "${path}" and its ${paths.length} file(s)?`
           : `Delete "${path}"?`
-      )
+      ))
     ) {
       return;
     }
@@ -1738,24 +1755,7 @@ class Ide {
       }
     }
     for (const p of paths) {
-      const t = this.saveTimers.get(p);
-      if (t) {
-        clearTimeout(t);
-      }
-      this.saveTimers.delete(p);
-      const model = s.models.get(p);
-      if (model) {
-        this.disposeModel(model);
-        s.models.delete(p);
-      }
-      const i = s.tabs.indexOf(p);
-      if (i !== -1) {
-        s.tabs.splice(i, 1);
-      }
-      if (/\.pyi?$/i.test(p)) {
-        s.checker?.fileDeleted(`/project/${p}`);
-      }
-      s.dirty.delete(p);
+      this.forgetPath(s, p);
     }
     await s.project.remove(paths);
     if (s.active && paths.includes(s.active)) {
@@ -1769,9 +1769,31 @@ class Ide {
     }
     this.showActive();
     void s.project.saveRecord({
-      openTabs: [...s.tabs],
       activeFile: s.active,
+      openTabs: [...s.tabs],
     });
+  }
+
+  /** A file about to be deleted: its pending save, model, tab, and the Checker's copy go. */
+  private forgetPath(s: Session, p: string) {
+    const t = this.saveTimers.get(p);
+    if (t) {
+      clearTimeout(t);
+    }
+    this.saveTimers.delete(p);
+    const model = s.models.get(p);
+    if (model) {
+      this.disposeModel(model);
+      s.models.delete(p);
+    }
+    const i = s.tabs.indexOf(p);
+    if (i !== -1) {
+      s.tabs.splice(i, 1);
+    }
+    if (isPythonSource(p)) {
+      s.checker?.fileDeleted(`/project/${p}`);
+    }
+    s.dirty.delete(p);
   }
 
   private downloadPath(path: string) {
@@ -1781,7 +1803,7 @@ class Ide {
     }
     const blob =
       f.text === undefined
-        ? new Blob([f.bytes!])
+        ? new Blob(f.bytes ? [f.bytes] : [])
         : new Blob([f.text], { type: "text/plain" });
     saveBlob(blob, basename(path));
   }
@@ -1808,15 +1830,15 @@ class Ide {
       const bytes = new Uint8Array(await file.arrayBuffer());
       if (isTextPath(full) && looksLikeText(bytes)) {
         files.push({
+          mtime: now,
           path: full,
           text: new TextDecoder().decode(bytes),
-          mtime: now,
         });
       } else {
         files.push({
-          path: full,
           bytes: bytes.buffer as ArrayBuffer,
           mtime: now,
+          path: full,
         });
       }
     }
@@ -1829,7 +1851,7 @@ class Ide {
     }
     await s.project.writeMany(files);
     for (const f of files) {
-      if (/\.pyi?$/i.test(f.path)) {
+      if (isPythonSource(f.path)) {
         s.checker?.fileCreated(`/project/${f.path}`);
       }
       if (f.text !== undefined) {
@@ -1844,10 +1866,7 @@ class Ide {
       this.applySettings();
     }
     void this.syncFiles(
-      files.map((f) => ({
-        path: f.path,
-        data: f.text === undefined ? f.bytes!.slice(0) : f.text,
-      }))
+      files.map((f) => ({ data: fileData(f), path: f.path }))
     );
     if (s.extraFolders.size) {
       void this.saveFolders();
@@ -1863,16 +1882,46 @@ class Ide {
   private showMenu(path: string, isFolder: boolean, x: number, y: number) {
     const items: [string, () => void][] = isFolder
       ? [
-          ["New file here", () => void this.newFile(path)],
-          ["New folder here", () => void this.newFolder(path)],
-          ["Rename", () => void this.renamePath(path, true)],
-          ["Delete", () => void this.deletePath(path, true)],
+          [
+            "New file here",
+            () => {
+              void this.newFile(path);
+            },
+          ],
+          [
+            "New folder here",
+            () => {
+              void this.newFolder(path);
+            },
+          ],
+          [
+            "Rename",
+            () => {
+              void this.renamePath(path, true);
+            },
+          ],
+          [
+            "Delete",
+            () => {
+              void this.deletePath(path, true);
+            },
+          ],
         ]
       : [
           ["Open", () => this.openFile(path)],
-          ["Rename", () => void this.renamePath(path, false)],
+          [
+            "Rename",
+            () => {
+              void this.renamePath(path, false);
+            },
+          ],
           ["Download", () => this.downloadPath(path)],
-          ["Delete", () => void this.deletePath(path, false)],
+          [
+            "Delete",
+            () => {
+              void this.deletePath(path, false);
+            },
+          ],
         ];
     this.popupMenu(items, x, y);
   }
@@ -1923,17 +1972,30 @@ class Ide {
     const input = box.querySelector("input") as HTMLInputElement;
     const list = box.querySelector(".quickopen-list") as HTMLElement;
     let cursor = 0;
-    const paths = [...s.project.files.keys()]
-      .filter((p) => isText(s.project.files.get(p)!))
+    const paths = [...s.project.files.values()]
+      .filter((f) => isText(f))
+      .map((f) => f.path)
       .toSorted();
+    // Every listener goes when the box closes.
+    const listening = new AbortController();
+    const close = () => {
+      box.hidden = true;
+      listening.abort();
+    };
+    const choose = (p: string) => {
+      close();
+      this.openFile(p);
+    };
     const render = () => {
       const q = input.value.trim().toLowerCase();
       const matches = paths
-        .filter((p) => q.split(/\s+/).every((w) => p.toLowerCase().includes(w)))
+        .filter((p) =>
+          q.split(/\s+/u).every((w) => p.toLowerCase().includes(w))
+        )
         .slice(0, 50);
       cursor = Math.min(cursor, Math.max(0, matches.length - 1));
       list.replaceChildren();
-      matches.forEach((p, i) => {
+      for (const [i, p] of matches.entries()) {
         const row = document.createElement("div");
         row.className = `quickopen-row${i === cursor ? " cursor" : ""}`;
         row.textContent = p;
@@ -1942,19 +2004,9 @@ class Ide {
           choose(p);
         });
         list.append(row);
-      });
+      }
       list.dataset.matches = String(matches.length);
       return matches;
-    };
-    const close = () => {
-      box.hidden = true;
-      input.removeEventListener("input", onInput);
-      input.removeEventListener("keydown", onKey);
-      input.removeEventListener("blur", close);
-    };
-    const choose = (p: string) => {
-      close();
-      this.openFile(p);
     };
     const onInput = () => {
       cursor = 0;
@@ -1971,8 +2023,9 @@ class Ide {
         render();
         e.preventDefault();
       } else if (e.key === "Enter") {
-        if (matches[cursor]) {
-          choose(matches[cursor]);
+        const picked = matches[cursor];
+        if (picked) {
+          choose(picked);
         }
         e.preventDefault();
       } else if (e.key === "Escape") {
@@ -1983,9 +2036,10 @@ class Ide {
     input.value = "";
     box.hidden = false;
     render();
-    input.addEventListener("input", onInput);
-    input.addEventListener("keydown", onKey);
-    input.addEventListener("blur", close);
+    const { signal } = listening;
+    input.addEventListener("input", onInput, { signal });
+    input.addEventListener("keydown", onKey, { signal });
+    input.addEventListener("blur", close, { signal });
     input.focus();
   }
 
@@ -1997,12 +2051,19 @@ class Ide {
       return;
     }
     this.applyEditorOptions();
-    void this.linter
-      .configure(s.project.settings.ruff)
-      .then(() => this.linterBinding?.invalidate(s.models.values()))
-      .catch((error) => this.message(`Ruff settings: ${error.message}`));
+    void this.reconfigureLinter(s);
     this.restartChecker();
     this.renderPackages();
+  }
+
+  /** Hands Ruff the Project's settings, then lints every model again. */
+  private async reconfigureLinter(s: Session) {
+    try {
+      await this.linter.configure(s.project.settings.ruff);
+      this.linterBinding?.invalidate(s.models.values());
+    } catch (error) {
+      this.message(`Ruff settings: ${(error as Error).message}`);
+    }
   }
 
   private applyEditorOptions() {
@@ -2016,7 +2077,7 @@ class Ide {
       wordWrap: ide.wordWrap ? "on" : "off",
     });
     for (const m of s.models.values()) {
-      m.updateOptions({ tabSize: ide.tabSize, insertSpaces: true });
+      m.updateOptions({ insertSpaces: true, tabSize: ide.tabSize });
     }
   }
 
@@ -2083,14 +2144,14 @@ class Ide {
         <div class="prompt-actions"><button type="button" class="settings-cancel">Cancel</button><button type="submit" class="primary">Save</button></div>
       </form>`;
     const form = dialog.querySelector("form") as HTMLFormElement;
-    dialog
-      .querySelector(".settings-cancel")!
-      .addEventListener("click", () => dialog.close());
+    required(dialog, ".settings-cancel").addEventListener("click", () =>
+      dialog.close()
+    );
     form.onsubmit = () => {
       const data = new FormData(form);
       const list = (v: FormDataEntryValue | null) =>
         String(v ?? "")
-          .split(/[,\s]+/)
+          .split(/[,\s]+/u)
           .map((x) => x.trim())
           .filter(Boolean);
       const file = s.project.files.get(PROJECT_FILE);
@@ -2118,7 +2179,7 @@ class Ide {
         ide.minimap = data.get("minimap") === "on";
         ide["word-wrap"] = data.get("wordWrap") === "on";
         ide.args = String(data.get("args") ?? "").trim()
-          ? String(data.get("args")).trim().split(/\s+/)
+          ? String(data.get("args")).trim().split(/\s+/u)
           : [];
         const env: Record<string, string> = {};
         for (const line of String(data.get("env") ?? "").split("\n")) {
@@ -2165,27 +2226,26 @@ class Ide {
     if (s.checkerRestartPending) {
       return;
     }
-    const booting = s.checker && !s.checker.isReady;
-    if (booting) {
+    const { checker: booting } = s;
+    if (booting && !booting.isReady) {
       s.checkerRestartPending = true;
       const gen = s.generation;
-      void Promise.race([
-        s.checker!.ready,
-        new Promise((r) => setTimeout(r, 20_000)),
-      ]).then(() => {
+      const later = async () => {
+        await Promise.race([booting.ready, delay(20_000)]);
         if (this.session !== s || s.generation !== gen) {
           return;
         }
         s.checkerRestartPending = false;
         this.restartCheckerNow();
-      });
+      };
+      void later();
       return;
     }
     const config = {
-      typeshedPath: "/typeshed",
-      pythonVersion: "3.14",
-      pythonPlatform: "Linux",
       extraPaths: ["/site-packages"],
+      pythonPlatform: "Linux",
+      pythonVersion: "3.14",
+      typeshedPath: "/typeshed",
       ...s.project.settings.pyright,
     };
     const key = `${JSON.stringify(config)}\n${s.mirror?.key ?? ""}`;
@@ -2199,19 +2259,21 @@ class Ide {
       ...s.project.checkerFiles(),
     };
     const checker = new Checker(this.monaco, this.pyrightUrl, {
-      files,
       config,
+      files,
     });
     s.checker = checker;
     s.checkerKey = key;
     this.setCheckerStatus("starting");
     checker.start();
     const gen = s.generation;
-    void checker.ready.then(() => {
+    const whenReady = async () => {
+      await checker.ready;
       if (this.session === s && s.checker === checker && s.generation === gen) {
         this.setCheckerStatus("ready");
       }
-    });
+    };
+    void whenReady();
   }
 
   /**
@@ -2239,8 +2301,8 @@ class Ide {
     if (this.session !== s || s.generation !== gen) {
       return;
     }
-    s.mirror = { key, files };
-    await putMirror({ projectId: s.project.id, key, files });
+    s.mirror = { files, key };
+    await putMirror({ files, key, projectId: s.project.id });
     this.restartChecker();
   }
 
@@ -2253,7 +2315,13 @@ class Ide {
     }
     const gen = s.generation;
     const interpreter = new Interpreter({
-      onOutput: (stream, bytes) => this.terminal?.output(stream, bytes),
+      onCrash: (m) => {
+        this.terminal?.writeError(`\n${m}\n`);
+        if (this.session === s && s.interpreter === interpreter) {
+          void this.restartInterpreter();
+        }
+      },
+      onFigure: (png) => this.addFigure(png),
       onInputRequest: (id) => {
         s.pendingInput = id;
         this.terminal?.readLine("input");
@@ -2263,14 +2331,8 @@ class Ide {
         this.terminal?.writeDim(
           "\n[input() reached the end of Stdin; interactive input needs a browser with JSPI (Chrome 137+, Firefox 153+)]\n"
         ),
-      onFigure: (png) => this.addFigure(png),
+      onOutput: (stream, bytes) => this.terminal?.output(stream, bytes),
       onProgress: (m) => this.message(m),
-      onCrash: (m) => {
-        this.terminal?.writeError(`\n${m}\n`);
-        if (this.session === s && s.interpreter === interpreter) {
-          void this.restartInterpreter();
-        }
-      },
     });
     s.interpreter = interpreter;
     s.booted = false;
@@ -2295,22 +2357,7 @@ class Ide {
       }
       s.python = info.python;
       s.jspi = info.jspi;
-      await this.flushSaves();
-      // From here every change goes to the filesystem as it happens; this write, made in the same breath, carries everything before.
-      s.booted = true;
-      s.dirty.clear();
-      const files = [...s.project.files.values()].map((f) => ({
-        path: f.path,
-        data: f.text === undefined ? f.bytes!.slice(0) : f.text,
-      }));
-      // A path the filesystem refuses (a Project made before the Tree checked
-      // names) is reported, and the rest of the Project is there to run.
-      const unwritten = await interpreter
-        .writeFiles(files, [], [...s.extraFolders])
-        .then(
-          () => null,
-          (error: Error) => error.message
-        );
+      const unwritten = await this.writeBootFiles(s, interpreter);
       if (stale()) {
         return;
       }
@@ -2322,22 +2369,8 @@ class Ide {
           `Not written to the interpreter:\n${unwritten}\n`
         );
       }
-      if (!current && s.project.settings.dependencies.length) {
-        this.terminal?.writeDim(
-          record.lock
-            ? `Packages were locked for another Pyodide; resolving them again.\n`
-            : `Installing the project's dependencies.\n`
-        );
-        await this.installSpecs(s.project.settings.dependencies, false);
-        if (stale()) {
-          return;
-        }
-      } else if (!current && record.lock) {
-        await s.project.saveRecord({
-          lock: null,
-          lockPyodide: null,
-          packages: [],
-        });
+      if (!current && (await this.relock(s, stale))) {
+        return;
       }
       await this.refreshMirror();
       if (stale()) {
@@ -2357,6 +2390,59 @@ class Ide {
       this.message(`Interpreter failed: ${message}`);
       this.setState("off");
     }
+  }
+
+  /**
+   * The whole Project into a freshly booted Interpreter's filesystem, and
+   * from then on every change as it happens. Returns what the filesystem
+   * refused, or null.
+   */
+  private async writeBootFiles(
+    s: Session,
+    interpreter: Interpreter
+  ): Promise<string | null> {
+    await this.flushSaves();
+    // From here every change goes to the filesystem as it happens; this write, made in the same breath, carries everything before.
+    s.booted = true;
+    s.dirty.clear();
+    const files = [...s.project.files.values()].map((f) => ({
+      data: fileData(f),
+      path: f.path,
+    }));
+    // A path the filesystem refuses (a Project made before the Tree checked
+    // names) is reported, and the rest of the Project is there to run.
+    try {
+      await interpreter.writeFiles(files, [], [...s.extraFolders]);
+      return null;
+    } catch (error) {
+      return (error as Error).message;
+    }
+  }
+
+  /**
+   * A Lock made for another Pyodide, or none: the Dependencies are resolved
+   * again, or with none the stale Lock is dropped. True when the boot was
+   * overtaken meanwhile.
+   */
+  private async relock(s: Session, stale: () => boolean): Promise<boolean> {
+    const { record } = s.project;
+    if (s.project.settings.dependencies.length) {
+      this.terminal?.writeDim(
+        record.lock
+          ? `Packages were locked for another Pyodide; resolving them again.\n`
+          : `Installing the project's dependencies.\n`
+      );
+      await this.installSpecs(s.project.settings.dependencies, false);
+      return stale();
+    }
+    if (record.lock) {
+      await s.project.saveRecord({
+        lock: null,
+        lockPyodide: null,
+        packages: [],
+      });
+    }
+    return false;
   }
 
   private async restartInterpreter() {
@@ -2385,7 +2471,7 @@ class Ide {
     // Like CPython's REPL: a continuation keeps the previous line's indentation, deeper after a colon.
     const last = this.terminal.lastLine;
     const indent =
-      (/^\s*/.exec(last)?.[0] ?? "") +
+      (/^\s*/u.exec(last)?.[0] ?? "") +
       (last.trimEnd().endsWith(":") ? "    " : "");
     this.terminal.readLine("repl", "... ", indent);
   }
@@ -2428,19 +2514,7 @@ class Ide {
         this.prompt(true);
         return;
       }
-      if (result.status === "error") {
-        this.terminal?.writeError(
-          result.text.endsWith("\n") ? result.text : `${result.text}\n`
-        );
-      } else if (result.status === "exit") {
-        this.terminal?.writeDim(
-          `[sys.exit called${
-            result.text ? `: ${result.text}` : ""
-          }; the REPL carries on]\n`
-        );
-      } else if (result.text) {
-        this.terminal?.write(`${result.text}\n`);
-      }
+      this.writeReplResult(result);
       this.prompt();
     } catch (error) {
       if (this.session !== s || s.generation !== gen) {
@@ -2455,46 +2529,48 @@ class Ide {
     }
   }
 
+  /** What a complete REPL line gave: an error, an exit, or a value to show. */
+  private writeReplResult(result: ReplResult) {
+    if (result.status === "error") {
+      this.terminal?.writeError(
+        result.text.endsWith("\n") ? result.text : `${result.text}\n`
+      );
+    } else if (result.status === "exit") {
+      this.terminal?.writeDim(
+        `[sys.exit called${
+          result.text ? `: ${result.text}` : ""
+        }; the REPL carries on]\n`
+      );
+    } else if (result.status === "ok" && result.text) {
+      this.terminal?.write(`${result.text}\n`);
+    }
+  }
+
   private async run() {
     const s = this.session;
-    if (!s?.interpreter || s.state !== "ready" || !this.isPython(s.active)) {
+    const path = s?.active ?? null;
+    if (
+      !s?.interpreter ||
+      s.state !== "ready" ||
+      path === null ||
+      !isPython(path)
+    ) {
       return;
     }
-    const path = s.active!;
     const gen = s.generation;
-    if (s.project.settings.ide.formatOnRun) {
-      await this.editor.getAction("editor.action.formatDocument")?.run();
-    }
-    await this.flushSaves();
-    await this.syncDirty();
-    if (this.session !== s || s.generation !== gen || s.state !== "ready") {
+    if (!(await this.prepareRun(s, gen))) {
       return;
     }
-    this.togglePanel(true);
-    this.terminal?.stopLine();
-    this.terminal?.flush();
-    this.terminal?.newLine();
-    this.clearFigures();
-    this.terminal?.writeDim(
-      `$ python ${path}${s.project.settings.ide.args.length ? ` ${s.project.settings.ide.args.join(" ")}` : ""}\n`
-    );
-    this.setState("running");
-    this.terminal?.focus();
+    this.announceRun(s, path);
     const { interpreter } = s;
+    // Whether the Run has been overtaken: the Project closed, or the interpreter replaced.
+    const overtaken = () =>
+      this.session !== s ||
+      s.generation !== gen ||
+      s.interpreter !== interpreter;
     try {
-      const result = await interpreter.run({
-        path,
-        argv: s.project.settings.ide.args,
-        env: s.project.settings.ide.env,
-        stdin: (this.$(".stdin") as HTMLTextAreaElement).value,
-        cols: this.terminal?.term.cols ?? 80,
-        rows: this.terminal?.term.rows ?? 24,
-      });
-      if (
-        this.session !== s ||
-        s.generation !== gen ||
-        s.interpreter !== interpreter
-      ) {
+      const result = await interpreter.run(this.runOptions(s, path));
+      if (overtaken()) {
         return;
       }
       this.terminal?.flush();
@@ -2502,23 +2578,12 @@ class Ide {
         this.terminal?.writeDim(`[exit ${result.exit}]\n`);
       }
       await this.applyRunChanges(result);
-      if (
-        this.session !== s ||
-        s.generation !== gen ||
-        s.interpreter !== interpreter
-      ) {
+      if (overtaken()) {
         return;
       }
-      this.setState("ready");
-      // Edits made while the program ran waited; the REPL should see them.
-      void this.syncDirty();
-      this.prompt();
+      this.afterRun();
     } catch (error) {
-      if (
-        this.session !== s ||
-        s.generation !== gen ||
-        s.interpreter !== interpreter
-      ) {
+      if (overtaken()) {
         return;
       }
       this.terminal?.flush();
@@ -2526,11 +2591,52 @@ class Ide {
         `${error instanceof Error ? error.message : String(error)}\n`
       );
       if (interpreter.alive) {
-        this.setState("ready");
-        void this.syncDirty();
-        this.prompt();
+        this.afterRun();
       }
     }
+  }
+
+  private runOptions(s: Session, path: string): RunOptions {
+    return {
+      argv: s.project.settings.ide.args,
+      cols: this.terminal?.term.cols ?? 80,
+      env: s.project.settings.ide.env,
+      path,
+      rows: this.terminal?.term.rows ?? 24,
+      stdin: (this.$(".stdin") as HTMLTextAreaElement).value,
+    };
+  }
+
+  /** Ready again after a Run, with the edits made while the program ran sent: the REPL should see them. */
+  private afterRun() {
+    this.setState("ready");
+    void this.syncDirty();
+    this.prompt();
+  }
+
+  /** Formats (when the Project asks for it) and saves before a Run; false when the Run should not go ahead after all. */
+  private async prepareRun(s: Session, gen: number): Promise<boolean> {
+    if (s.project.settings.ide.formatOnRun) {
+      await this.editor.getAction("editor.action.formatDocument")?.run();
+    }
+    await this.flushSaves();
+    await this.syncDirty();
+    return this.session === s && s.generation === gen && s.state === "ready";
+  }
+
+  /** The Terminal and the Status Bar as a Run starts. */
+  private announceRun(s: Session, path: string) {
+    this.togglePanel(true);
+    this.terminal?.stopLine();
+    this.terminal?.flush();
+    this.terminal?.newLine();
+    this.clearFigures();
+    const { args } = s.project.settings.ide;
+    this.terminal?.writeDim(
+      `$ python ${path}${args.length ? ` ${args.join(" ")}` : ""}\n`
+    );
+    this.setState("running");
+    this.terminal?.focus();
   }
 
   /** Files and folders a Run wrote or removed become part of the Project. */
@@ -2539,57 +2645,11 @@ class Ide {
     if (!s) {
       return;
     }
-    const now = Date.now();
-    const files: ProjectFile[] = [];
-    for (const c of result.changed) {
-      // A file added or changed while the program ran is newer than what the program saw or wrote; it stays, and reaches the filesystem next.
-      if (s.dirty.has(c.path) && s.project.files.has(c.path)) {
-        continue;
-      }
-      const bytes = c.data;
-      if (isTextPath(c.path) && looksLikeText(bytes)) {
-        files.push({
-          path: c.path,
-          text: new TextDecoder().decode(bytes),
-          mtime: now,
-        });
-      } else {
-        files.push({
-          path: c.path,
-          bytes: bytes.buffer.slice(
-            bytes.byteOffset,
-            bytes.byteOffset + bytes.byteLength
-          ) as ArrayBuffer,
-          mtime: now,
-        });
-      }
-    }
+    const files = runFiles(s, result);
     if (files.length) {
       await s.project.writeMany(files);
       for (const f of files) {
-        const model = s.models.get(f.path);
-        if (f.text !== undefined) {
-          if (model) {
-            if (model.getValue() !== f.text) {
-              model.setValue(f.text);
-            }
-          } else {
-            if (/\.pyi?$/i.test(f.path)) {
-              s.checker?.fileCreated(`/project/${f.path}`);
-            }
-            this.ensureModel(f.path, f.text);
-          }
-        } else if (model) {
-          this.disposeModel(model);
-          s.models.delete(f.path);
-          const i = s.tabs.indexOf(f.path);
-          if (i !== -1) {
-            s.tabs.splice(i, 1);
-          }
-          if (s.active === f.path) {
-            s.active = s.tabs[0] ?? null;
-          }
-        }
+        this.takeRunFile(s, f);
       }
       // The models' own save would send the files back to the interpreter, which already has them.
       for (const f of files) {
@@ -2607,21 +2667,7 @@ class Ide {
     );
     if (removed.length) {
       for (const p of removed) {
-        const model = s.models.get(p);
-        if (model) {
-          this.disposeModel(model);
-          s.models.delete(p);
-        }
-        const i = s.tabs.indexOf(p);
-        if (i !== -1) {
-          s.tabs.splice(i, 1);
-        }
-        if (s.active === p) {
-          s.active = s.tabs[0] ?? null;
-        }
-        if (/\.pyi?$/i.test(p)) {
-          s.checker?.fileDeleted(`/project/${p}`);
-        }
+        this.dropRunRemoved(s, p);
       }
       await s.project.remove(removed);
     }
@@ -2630,18 +2676,7 @@ class Ide {
         `[${p} is over 20 MB and was not kept in the project]\n`
       );
     }
-    // The folders are as the program left them: the ones no file implies are the Project's empty folders now.
-    const implied = s.project.folders();
-    const empty = new Set(
-      result.folders.filter((f) => !implied.has(f) && !this.obstacle(f, true))
-    );
-    const foldersChanged =
-      empty.size !== s.extraFolders.size ||
-      [...empty].some((f) => !s.extraFolders.has(f));
-    if (foldersChanged) {
-      s.extraFolders = empty;
-      void this.saveFolders();
-    }
+    const foldersChanged = this.takeRunFolders(s, result);
     if (files.length || removed.length || foldersChanged) {
       this.showActive();
       const n = files.length + removed.length;
@@ -2654,6 +2689,71 @@ class Ide {
         this.applySettings();
       }
     }
+  }
+
+  /** A file a Run wrote: text updates or opens its model, binary closes it. */
+  private takeRunFile(s: Session, f: ProjectFile) {
+    const model = s.models.get(f.path);
+    if (f.text !== undefined) {
+      if (model) {
+        if (model.getValue() !== f.text) {
+          model.setValue(f.text);
+        }
+      } else {
+        if (isPythonSource(f.path)) {
+          s.checker?.fileCreated(`/project/${f.path}`);
+        }
+        this.ensureModel(f.path, f.text);
+      }
+    } else if (model) {
+      this.disposeModel(model);
+      s.models.delete(f.path);
+      const i = s.tabs.indexOf(f.path);
+      if (i !== -1) {
+        s.tabs.splice(i, 1);
+      }
+      if (s.active === f.path) {
+        s.active = s.tabs[0] ?? null;
+      }
+    }
+  }
+
+  /** A file a Run removed: its model, tab, and the Checker's copy go. */
+  private dropRunRemoved(s: Session, p: string) {
+    const model = s.models.get(p);
+    if (model) {
+      this.disposeModel(model);
+      s.models.delete(p);
+    }
+    const i = s.tabs.indexOf(p);
+    if (i !== -1) {
+      s.tabs.splice(i, 1);
+    }
+    if (s.active === p) {
+      s.active = s.tabs[0] ?? null;
+    }
+    if (isPythonSource(p)) {
+      s.checker?.fileDeleted(`/project/${p}`);
+    }
+  }
+
+  /**
+   * The folders are as the program left them: the ones no file implies are
+   * the Project's empty folders now. Returns whether they changed.
+   */
+  private takeRunFolders(s: Session, result: RunResult): boolean {
+    const implied = s.project.folders();
+    const empty = new Set(
+      result.folders.filter((f) => !implied.has(f) && !this.obstacle(f, true))
+    );
+    const foldersChanged =
+      empty.size !== s.extraFolders.size ||
+      [...empty].some((f) => !s.extraFolders.has(f));
+    if (foldersChanged) {
+      s.extraFolders = empty;
+      void this.saveFolders();
+    }
+    return foldersChanged;
   }
 
   private async stop() {
@@ -2680,13 +2780,8 @@ class Ide {
     }
     const rows: PackageRow[] = s.project.record.packages.map((p) => ({
       name: p.name,
+      origin: originOf(p.source),
       version: p.version,
-      origin:
-        p.source === "pyodide"
-          ? "catalog"
-          : /wasm32|emscripten/.test(p.source)
-            ? "wasm"
-            : "pypi",
     }));
     renderPackages(
       this.$(".pkg-direct"),
@@ -2694,16 +2789,28 @@ class Ide {
       s.project.settings.dependencies,
       rows,
       {
-        onRemove: (spec) => void this.removeSpec(spec),
         onMenu: (spec, x, y) =>
           this.popupMenu(
             [
-              ["Copy name", () => void navigator.clipboard?.writeText(spec)],
-              ["Remove from the project", () => void this.removeSpec(spec)],
+              [
+                "Copy name",
+                () => {
+                  void navigator.clipboard?.writeText(spec);
+                },
+              ],
+              [
+                "Remove from the project",
+                () => {
+                  void this.removeSpec(spec);
+                },
+              ],
             ],
             x,
             y
           ),
+        onRemove: (spec) => {
+          void this.removeSpec(spec);
+        },
       }
     );
   }
@@ -2724,13 +2831,14 @@ class Ide {
     this.terminal?.newLine();
     this.setState("installing");
     this.terminal?.writeDim(`$ pip install ${specs.join(" ")}\n`);
+    // Whether the install has been overtaken: the Project closed, or the interpreter replaced.
+    const overtaken = () =>
+      this.session !== s ||
+      s.generation !== gen ||
+      s.interpreter !== interpreter;
     try {
       const result = await interpreter.install(specs);
-      if (
-        this.session !== s ||
-        s.generation !== gen ||
-        s.interpreter !== interpreter
-      ) {
+      if (overtaken()) {
         return;
       }
       await s.project.saveRecord({
@@ -2739,25 +2847,7 @@ class Ide {
         packages: result.packages,
       });
       if (addToProject) {
-        const file = s.project.files.get(PROJECT_FILE);
-        const text =
-          file && isText(file) ? file.text : defaultPyproject(s.project.name);
-        const next = updatePyproject(text, (doc) => {
-          const project = (doc.project ??= {}) as Record<string, unknown>;
-          const deps = Array.isArray(project.dependencies)
-            ? [...(project.dependencies as string[])]
-            : [];
-          for (const spec of specs) {
-            const i = deps.findIndex((d) => specName(d) === specName(spec));
-            if (i === -1) {
-              deps.push(spec);
-            } else {
-              deps[i] = spec;
-            }
-          }
-          project.dependencies = deps;
-        });
-        await this.writeText(PROJECT_FILE, next);
+        await this.addDependencies(s, specs);
       }
       const installed = result.packages.filter((p) =>
         specs.some((sp) => specName(sp) === specName(p.name))
@@ -2770,11 +2860,7 @@ class Ide {
       this.setState("ready");
       await this.refreshMirror();
     } catch (error) {
-      if (
-        this.session !== s ||
-        s.generation !== gen ||
-        s.interpreter !== interpreter
-      ) {
+      if (overtaken()) {
         return;
       }
       this.terminal?.writeError(
@@ -2787,6 +2873,29 @@ class Ide {
     if (this.session === s && s.generation === gen && s.state === "ready") {
       this.prompt();
     }
+  }
+
+  /** Writes specs into the Project File as Dependencies, each replacing any spec of the same name. */
+  private async addDependencies(s: Session, specs: string[]) {
+    const file = s.project.files.get(PROJECT_FILE);
+    const text =
+      file && isText(file) ? file.text : defaultPyproject(s.project.name);
+    const next = updatePyproject(text, (doc) => {
+      const project = (doc.project ??= {}) as Record<string, unknown>;
+      const deps = Array.isArray(project.dependencies)
+        ? [...(project.dependencies as string[])]
+        : [];
+      for (const spec of specs) {
+        const i = deps.findIndex((d) => specName(d) === specName(spec));
+        if (i === -1) {
+          deps.push(spec);
+        } else {
+          deps[i] = spec;
+        }
+      }
+      project.dependencies = deps;
+    });
+    await this.writeText(PROJECT_FILE, next);
   }
 
   private async removeSpec(spec: string) {
@@ -2861,28 +2970,31 @@ class Ide {
     this.el.classList.add("has-figures");
     const btn = this.$(".figures-btn");
     btn.hidden = false;
-    btn.querySelector(".badge")!.textContent = String(s.figures.length);
+    required(btn, ".badge").textContent = String(s.figures.length);
     btn.setAttribute("aria-pressed", "true");
     this.selectFigure(s.figures.length - 1);
     this.terminal?.layout();
   }
 
   /** Shows one Figure in the panel, and in the modal too while that is open. */
-  private selectFigure(index: number) {
+  private selectFigure(wanted: number) {
     const s = this.session;
     if (!s || !s.figures.length) {
       return;
     }
     const n = s.figures.length;
-    index = ((index % n) + n) % n;
+    const index = ((wanted % n) + n) % n;
+    const url = s.figures.at(index);
+    if (url === undefined) {
+      return;
+    }
     s.figureIndex = index;
-    const url = s.figures[index]!;
     const panel = this.$(".figures");
     (panel.querySelector(".figure img") as HTMLImageElement).src = url;
     (panel.querySelector(".figure img") as HTMLImageElement).alt =
       `Figure ${index + 1}`;
-    panel.querySelector(".figure-name")!.textContent = `Figure ${index + 1}`;
-    panel.querySelector(".figures-count")!.textContent = `${index + 1} / ${n}`;
+    required(panel, ".figure-name").textContent = `Figure ${index + 1}`;
+    required(panel, ".figures-count").textContent = `${index + 1} / ${n}`;
     for (const sel of [".figures-prev", ".figures-next"]) {
       (panel.querySelector(sel) as HTMLButtonElement).disabled = n < 2;
     }
@@ -2896,7 +3008,7 @@ class Ide {
     const img = dialog.querySelector("img") as HTMLImageElement;
     img.src = url;
     img.alt = `Figure ${index + 1}`;
-    dialog.querySelector(".figure-dialog-name")!.textContent =
+    required(dialog, ".figure-dialog-name").textContent =
       `Figure ${index + 1} of ${n}`;
     for (const sel of [".figure-dialog-prev", ".figure-dialog-next"]) {
       (dialog.querySelector(sel) as HTMLButtonElement).disabled = n < 2;
@@ -2975,16 +3087,18 @@ class Ide {
 
   private bindUi() {
     const { $ } = this;
-    $(".run-btn").addEventListener("click", () => void this.run());
-    $(".stop-btn").addEventListener("click", () => void this.stop());
-    $(".restart-btn").addEventListener(
-      "click",
-      () => void this.restartInterpreter()
-    );
-    $(".format-btn").addEventListener(
-      "click",
-      () => void this.editor?.getAction("editor.action.formatDocument")?.run()
-    );
+    $(".run-btn").addEventListener("click", () => {
+      void this.run();
+    });
+    $(".stop-btn").addEventListener("click", () => {
+      void this.stop();
+    });
+    $(".restart-btn").addEventListener("click", () => {
+      void this.restartInterpreter();
+    });
+    $(".format-btn").addEventListener("click", () => {
+      void this.editor?.getAction("editor.action.formatDocument")?.run();
+    });
     $(".stdin-btn").addEventListener("click", () => {
       const row = $(".stdin-row");
       row.hidden = !row.hidden;
@@ -3059,10 +3173,9 @@ class Ide {
     $(".terminal-close").addEventListener("click", () =>
       this.togglePanel(false)
     );
-    $(".terminal-copy").addEventListener(
-      "click",
-      () => void this.copyTerminal()
-    );
+    $(".terminal-copy").addEventListener("click", () => {
+      void this.copyTerminal();
+    });
     $(".terminal-clear").addEventListener("click", () => {
       this.terminal?.clearScreen();
       this.syncTerminalCopy();
@@ -3071,16 +3184,20 @@ class Ide {
     this.togglePanel(read(PANEL_OPEN_KEY) !== "closed");
     $(".quickopen-btn").addEventListener("click", () => this.openQuickOpen());
     $(".settings-btn").addEventListener("click", () => this.openSettings());
-    $(".new-file-btn").addEventListener("click", () => void this.newFile());
-    $(".new-folder-btn").addEventListener("click", () => void this.newFolder());
+    $(".new-file-btn").addEventListener("click", () => {
+      void this.newFile();
+    });
+    $(".new-folder-btn").addEventListener("click", () => {
+      void this.newFolder();
+    });
     $(".upload-btn").addEventListener("click", () =>
       ($(".file-input") as HTMLInputElement).click()
     );
     $(".file-input").addEventListener("change", (e) => {
       const input = e.target as HTMLInputElement;
       const files = [...(input.files ?? [])].map((f) => ({
-        path: f.name,
         file: f,
+        path: f.name,
       }));
       input.value = "";
       void this.addFiles(files);
@@ -3095,7 +3212,9 @@ class Ide {
     });
     ($(".project-select") as HTMLSelectElement).addEventListener(
       "change",
-      (e) => void this.openProject((e.target as HTMLSelectElement).value)
+      (e) => {
+        void this.openProject((e.target as HTMLSelectElement).value);
+      }
     );
     $(".project-menu-btn").addEventListener("click", (e) => {
       const btn = e.currentTarget as HTMLElement;
@@ -3137,15 +3256,40 @@ class Ide {
   private showProjectMenu(x: number, y: number) {
     this.popupMenu(
       [
-        ["New project", () => void this.newProject()],
-        ["Rename project", () => void this.renameProject()],
-        ["Duplicate project", () => void this.duplicateProject()],
-        ["Export as zip", () => void this.exportProject()],
+        [
+          "New project",
+          () => {
+            void this.newProject();
+          },
+        ],
+        [
+          "Rename project",
+          () => {
+            void this.renameProject();
+          },
+        ],
+        [
+          "Duplicate project",
+          () => {
+            void this.duplicateProject();
+          },
+        ],
+        [
+          "Export as zip",
+          () => {
+            void this.exportProject();
+          },
+        ],
         [
           "Import from zip",
           () => (this.$(".zip-input") as HTMLInputElement).click(),
         ],
-        ["Delete project", () => void this.deleteProject()],
+        [
+          "Delete project",
+          () => {
+            void this.deleteProject();
+          },
+        ],
       ],
       x,
       y
@@ -3310,30 +3454,26 @@ class Ide {
       row.type = "button";
       row.className = `problem ${names[m.severity] ?? "hint"}`;
       row.setAttribute("role", "listitem");
-      const code = m.code
-        ? typeof m.code === "string"
-          ? m.code
-          : m.code.value
-        : "";
+      const code = markerCode(m.code);
       // The Linter's markers carry their code in the message; here it has a column of its own.
       const message = (m.message.split("\n")[0] ?? m.message).replace(
         code ? ` (${code})` : "\u0000",
         ""
       );
       row.innerHTML = `<span class="problem-dot"></span><span class="problem-text"></span><span class="problem-source"></span><span class="problem-pos"></span>`;
-      row.querySelector(".problem-text")!.textContent = message;
+      required(row, ".problem-text").textContent = message;
       row.title = m.message;
-      row.querySelector(".problem-source")!.textContent =
+      required(row, ".problem-source").textContent =
         (m.source === "lsp" || m.owner === "lsp"
           ? "pyright"
           : (m.source ?? m.owner)) + (code ? ` (${code})` : "");
-      row.querySelector(".problem-pos")!.textContent =
+      required(row, ".problem-pos").textContent =
         `${m.startLineNumber}:${m.startColumn}`;
       row.addEventListener("click", () => {
         this.openFile(path);
         this.editor.setPosition({
-          lineNumber: m.startLineNumber,
           column: m.startColumn,
+          lineNumber: m.startLineNumber,
         });
         this.editor.revealRangeInCenterIfOutsideViewport(m);
         this.editor.focus();
@@ -3424,7 +3564,8 @@ class Ide {
       el.classList.add("dragging");
     });
     el.addEventListener("dragleave", () => {
-      if (--depth <= 0) {
+      depth -= 1;
+      if (depth <= 0) {
         depth = 0;
         el.classList.remove("dragging");
       }
@@ -3450,16 +3591,16 @@ class Ide {
     const items: { path: string; file: File }[] = [];
     const walk = async (entry: FileSystemEntry, prefix: string) => {
       if (entry.isFile) {
-        const file = await new Promise<File>((res, rej) =>
-          (entry as FileSystemFileEntry).file(res, rej)
-        );
-        items.push({ path: prefix + entry.name, file });
+        const got = Promise.withResolvers<File>();
+        (entry as FileSystemFileEntry).file(got.resolve, got.reject);
+        const file = await got.promise;
+        items.push({ file, path: prefix + entry.name });
       } else if (entry.isDirectory) {
         const reader = (entry as FileSystemDirectoryEntry).createReader();
         for (;;) {
-          const batch = await new Promise<FileSystemEntry[]>((res, rej) =>
-            reader.readEntries(res, rej)
-          );
+          const reading = Promise.withResolvers<FileSystemEntry[]>();
+          reader.readEntries(reading.resolve, reading.reject);
+          const batch = await reading.promise;
           if (batch.length === 0) {
             break;
           }
@@ -3472,7 +3613,7 @@ class Ide {
     const entries = [...dt.items].map((i) =>
       i.webkitGetAsEntry ? i.webkitGetAsEntry() : null
     );
-    if (entries.some((e) => e)) {
+    if (entries.some(Boolean)) {
       for (const e of entries) {
         if (e) {
           await walk(e, "");
@@ -3480,18 +3621,140 @@ class Ide {
       }
     } else {
       for (const f of dt.files) {
-        items.push({ path: f.name, file: f });
+        items.push({ file: f, path: f.name });
       }
     }
+    const [only] = items;
     if (
       items.length === 1 &&
-      /\.zip$/i.test(items[0]!.path) &&
-      items[0]!.file.size > 0 &&
+      only &&
+      /\.zip$/iu.test(only.path) &&
+      only.file.size > 0 &&
       !this.session?.project.files.size
     ) {
-      await this.importZip(items[0]!.file);
+      await this.importZip(only.file);
       return;
     }
     await this.addFiles(items);
   }
 }
+
+const tool: Tool = {
+  fullHeight: true,
+  id: "python-ide",
+  keywords: [
+    "python",
+    "ide",
+    "pyodide",
+    "pyright",
+    "ruff",
+    "editor",
+    "repl",
+    "terminal",
+    "pip",
+    "notebook",
+    "matplotlib",
+  ],
+  mount(el, ctx) {
+    el.innerHTML = `
+      <div class="ide">
+        <div class="ide-body">
+          <aside class="explorer">
+            <div class="explorer-head">
+              <select class="project-select" aria-label="Project"></select>
+              <button type="button" class="icon project-menu-btn" title="Project actions" aria-label="Project actions">${I.ICON_MORE}</button>
+            </div>
+            <div class="section files">
+              <div class="section-head">
+                <span>Files</span>
+                <span class="spacer"></span>
+                <button type="button" class="icon new-file-btn" title="New file">${I.ICON_NEW_FILE}</button>
+                <button type="button" class="icon new-folder-btn" title="New folder">${I.ICON_NEW_FOLDER}</button>
+                <button type="button" class="icon upload-btn" title="Upload files">${I.ICON_UPLOAD}</button>
+              </div>
+              <div class="tree" role="tree"></div>
+            </div>
+            <div class="section packages">
+              <div class="section-head"><span>Packages</span></div>
+              <form class="install-row">
+                <input class="install-input" placeholder="Add a package" title="A name, or a pinned spec like requests==2.33" spellcheck="false" autocomplete="off" aria-label="Package to install" role="combobox" aria-expanded="false" aria-autocomplete="list">
+                <button type="submit" class="install-btn">Add</button>
+                <div class="catalog-list" role="listbox" hidden></div>
+              </form>
+              <div class="pkg-direct"></div>
+              <details class="pkg-transitive-wrap"><summary>Dependencies of dependencies</summary><div class="pkg-transitive"></div></details>
+            </div>
+          </aside>
+          <div class="explorer-resizer" role="separator" aria-orientation="vertical"></div>
+          <div class="workbench">
+            <div class="runbar">
+              <button type="button" class="run-btn primary" title="Run the current file (${MOD}Enter)">${I.ICON_RUN}<span>Run</span></button>
+              <button type="button" class="stop-btn" title="Stop the program" hidden>${I.ICON_STOP}<span>Stop</span></button>
+              <button type="button" class="icon restart-btn" title="Restart the interpreter">${I.ICON_RESTART}</button>
+              <button type="button" class="icon format-btn" title="Format with Ruff (Shift+Alt+F)">${I.ICON_FORMAT}</button>
+              <button type="button" class="icon inlay-hints-btn" title="Inlay hints" aria-pressed="false">${I.ICON_INLAY_HINTS}</button>
+              <button type="button" class="icon stdin-btn" title="Stdin: text for input() to read first" aria-pressed="false">${I.ICON_STDIN}</button>
+              <span class="spacer"></span>
+              <button type="button" class="icon sidebar-btn" title="Hide sidebar" aria-label="Hide sidebar" aria-pressed="true">${I.ICON_SIDEBAR}</button>
+              <button type="button" class="icon panel-btn" title="Terminal and Problems (${MOD}J)" aria-pressed="true">${I.ICON_PANEL}</button>
+              <button type="button" class="icon quickopen-btn" title="Open a file by name (${MOD}P)">${I.ICON_SEARCH}</button>
+              <button type="button" class="icon settings-btn" title="Project settings">${I.ICON_SETTINGS}</button>
+            </div>
+            <div class="stdin-row" hidden>
+              <textarea class="stdin" rows="3" placeholder="Lines for input() to read before it asks the terminal" spellcheck="false" aria-label="Stdin"></textarea>
+            </div>
+            <div class="tabs" role="tablist"></div>
+            <div class="editor-host"></div>
+            <div class="editor-empty">No file open. Pick one in the Explorer, or press ${MOD}P.</div>
+            <div class="panel-resizer" role="separator" aria-orientation="horizontal"></div>
+            <div class="panel">
+              <div class="panel-head" role="tablist">
+                <button type="button" class="panel-tab" role="tab" data-panel="terminal" aria-selected="true">Terminal</button>
+                <button type="button" class="panel-tab" role="tab" data-panel="problems" aria-selected="false">Problems<span class="badge problems-count" hidden></span></button>
+                <span class="spacer"></span>
+                <button type="button" class="icon figures-btn" title="Show or hide the Figures" aria-pressed="false" hidden>${I.ICON_FIGURE}<span class="badge"></span></button>
+                <button type="button" class="icon terminal-copy" title="Copy the terminal's output" disabled>${I.ICON_COPY}</button>
+                <button type="button" class="icon terminal-clear" title="Clear the terminal">${I.ICON_CLEAR}</button>
+                <button type="button" class="icon terminal-close" title="Close the panel (${MOD}J)">${I.ICON_CLOSE}</button>
+              </div>
+              <div class="panel-body" data-panel="terminal">
+                <div class="terminal-host"></div>
+                <div class="figures-resizer" role="separator" aria-orientation="vertical" hidden></div>
+                <div class="figures" hidden>
+                  <div class="figures-head"><span>Figures</span><span class="spacer"></span><button type="button" class="icon figures-prev" title="Previous figure">${I.ICON_PREVIOUS}</button><span class="figures-count"></span><button type="button" class="icon figures-next" title="Next figure">${I.ICON_NEXT}</button><button type="button" class="icon figures-clear" title="Clear figures">${I.ICON_CLOSE}</button></div>
+                  <figure class="figure"><img alt="" title="Open at full size"><figcaption><span class="figure-name"></span><span class="spacer"></span><a download title="Download">${I.ICON_DOWNLOAD}</a></figcaption></figure>
+                </div>
+                <div class="problems" role="list"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="statusbar">
+          <span class="st-python">Python</span>
+          <span class="st-interp">Starting</span>
+          <span class="st-checker">Pyright</span>
+          <span class="st-engine"></span>
+          <span class="spacer"></span>
+          <span class="st-message"></span>
+          <span class="st-cursor"></span>
+          <span class="st-lang"></span>
+        </div>
+        <div class="context-menu" hidden></div>
+        <div class="quickopen" hidden><input class="quickopen-input" placeholder="Open file" spellcheck="false" autocomplete="off" aria-label="Open file"><div class="quickopen-list"></div></div>
+      </div>
+      <div class="narrow-message">The Python IDE needs a wider window: at least 768px.</div>
+      <div class="drop-overlay"><div class="card">Drop files into the project<div class="sub">Files and folders. Nothing leaves your browser.</div></div></div>
+      <input type="file" class="file-input" multiple hidden>
+      <input type="file" class="zip-input" accept=".zip,application/zip" hidden>
+      <dialog class="settings-dialog"></dialog>
+      <dialog class="figure-dialog"><img alt=""><div class="figure-dialog-bar"><button type="button" class="icon figure-dialog-prev" title="Previous figure (←)">${I.ICON_PREVIOUS}</button><span class="figure-dialog-name"></span><button type="button" class="icon figure-dialog-next" title="Next figure (→)">${I.ICON_NEXT}</button><span class="spacer"></span><a download title="Download">${I.ICON_DOWNLOAD}</a><button type="button" class="icon figure-dialog-close" title="Close (Esc)">${I.ICON_CLOSE}</button></div></dialog>
+      <dialog class="prompt-dialog"><form method="dialog"><label class="prompt-label"></label><input class="prompt-input" spellcheck="false" autocomplete="off"><div class="prompt-actions"><button type="button" class="prompt-cancel">Cancel</button><button type="submit" class="primary prompt-ok">OK</button></div></form></dialog>`;
+    // The instance lives on through the listeners it binds to `el`.
+    void new Ide(el, ctx);
+  },
+  name: "Python IDE",
+  subtitle:
+    "Write and run Python in the browser, checked by Pyright and formatted by Ruff, with packages per project.",
+};
+
+export default tool;

@@ -8,38 +8,84 @@ export interface ZipEntry {
   data: Uint8Array;
 }
 
-const CRC_TABLE = (() => {
-  const t = new Uint32Array(256);
-  for (let n = 0; n < 256; n += 1) {
-    let c = n;
-    for (let k = 0; k < 8; k += 1) {
-      c = c & 1 ? 0xed_b8_83_20 ^ (c >>> 1) : c >>> 1;
-    }
-    t[n] = c >>> 0;
-  }
-  return t;
-})();
+// CRC-32 works a byte at a time, so it is kept here as four bytes, low
+// first, and XOR comes from a table of every pair of bytes.
 
-function crc32(bytes: Uint8Array): number {
-  let c = 0xff_ff_ff_ff;
-  for (let i = 0; i < bytes.length; i += 1) {
-    c = CRC_TABLE[(c ^ bytes[i]!) & 0xff]! ^ (c >>> 8);
+/** `XOR[a * 256 + b]` is the exclusive or of bytes `a` and `b`. */
+const XOR = new Uint8Array(256 * 256);
+for (let a = 0; a < 256; a += 1) {
+  for (let b = 0; b < 256; b += 1) {
+    let x = 0;
+    for (let bit = 1; bit < 256; bit *= 2) {
+      if ((Math.floor(a / bit) + Math.floor(b / bit)) % 2 === 1) {
+        x += bit;
+      }
+    }
+    XOR[a * 256 + b] = x;
   }
-  return (c ^ 0xff_ff_ff_ff) >>> 0;
 }
 
-function dosDateTime(ms: number): [number, number] {
+const xorByte = (a: number, b: number): number => XOR[a * 256 + b];
+
+/** The reflected CRC-32 polynomial, 0xedb88320, as bytes low first. */
+const POLY = [0x20, 0x83, 0xb8, 0xed] as const;
+
+/** The CRC of each byte value, four bytes per entry, low first. */
+const CRC_TABLE = new Uint8Array(256 * 4);
+for (let n = 0; n < 256; n += 1) {
+  const c = [n, 0, 0, 0];
+  for (let k = 0; k < 8; k += 1) {
+    const odd = c[0] % 2 === 1;
+    // Shift the four bytes right by one bit.
+    for (let i = 0; i < 4; i += 1) {
+      const next = i < 3 ? c[i + 1] : 0;
+      const carry = next % 2 === 1 ? 128 : 0;
+      c[i] = Math.floor(c[i] / 2) + carry;
+    }
+    if (odd) {
+      for (let i = 0; i < 4; i += 1) {
+        c[i] = xorByte(c[i], POLY[i]);
+      }
+    }
+  }
+  CRC_TABLE.set(c, n * 4);
+}
+
+const crc32 = (bytes: Uint8Array): number => {
+  let [c0, c1, c2, c3] = [255, 255, 255, 255];
+  for (const byte of bytes) {
+    // c = TABLE[(c ^ byte) & 0xff] ^ (c >>> 8)
+    const at = xorByte(c0, byte) * 4;
+    c0 = xorByte(CRC_TABLE[at], c1);
+    c1 = xorByte(CRC_TABLE[at + 1], c2);
+    c2 = xorByte(CRC_TABLE[at + 2], c3);
+    c3 = CRC_TABLE[at + 3];
+  }
+  // The final XOR with 0xffffffff, byte by byte.
+  return (
+    255 - c0 + (255 - c1) * 2 ** 8 + (255 - c2) * 2 ** 16 + (255 - c3) * 2 ** 24
+  );
+};
+
+/**
+ * MS-DOS time and date: hours, minutes and seconds halved in 5, 6 and 5
+ * bits; years since 1980, month and day in 7, 4 and 5 bits. The fields
+ * never overlap, so packing them is adding them at their place values.
+ */
+const dosDateTime = (ms: number): [number, number] => {
   const d = new Date(ms);
   const time =
-    (d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1);
+    d.getHours() * 2 ** 11 +
+    d.getMinutes() * 2 ** 5 +
+    Math.floor(d.getSeconds() / 2);
   const date =
-    ((Math.max(1980, d.getFullYear()) - 1980) << 9) |
-    ((d.getMonth() + 1) << 5) |
+    (Math.max(1980, d.getFullYear()) - 1980) * 2 ** 9 +
+    (d.getMonth() + 1) * 2 ** 5 +
     d.getDate();
   return [time, date];
-}
+};
 
-export function writeZip(entries: ZipEntry[], mtime = Date.now()): Blob {
+export const writeZip = (entries: ZipEntry[], mtime = Date.now()): Blob => {
   const encoder = new TextEncoder();
   const parts: Uint8Array[] = [];
   const central: Uint8Array[] = [];
@@ -51,8 +97,10 @@ export function writeZip(entries: ZipEntry[], mtime = Date.now()): Blob {
     const local = new DataView(new ArrayBuffer(30));
     local.setUint32(0, 0x04_03_4b_50, true);
     local.setUint16(4, 20, true);
-    local.setUint16(6, 0x08_00, true); // UTF-8 names
-    local.setUint16(8, 0, true); // stored
+    // UTF-8 names.
+    local.setUint16(6, 0x08_00, true);
+    // Stored.
+    local.setUint16(8, 0, true);
     local.setUint16(10, time, true);
     local.setUint16(12, date, true);
     local.setUint32(14, crc, true);
@@ -100,16 +148,16 @@ export function writeZip(entries: ZipEntry[], mtime = Date.now()): Blob {
     [...parts, ...central, new Uint8Array(end.buffer)] as BlobPart[],
     { type: "application/zip" }
   );
-}
+};
 
-async function inflateRaw(data: Uint8Array): Promise<Uint8Array> {
+const inflateRaw = async (data: Uint8Array): Promise<Uint8Array> => {
   const ds = new DecompressionStream("deflate-raw");
   const stream = new Blob([data as BlobPart]).stream().pipeThrough(ds);
   return new Uint8Array(await new Response(stream).arrayBuffer());
-}
+};
 
 /** Reads a zip's files (directories are skipped). Throws when it is not a zip. */
-export async function readZip(buffer: ArrayBuffer): Promise<ZipEntry[]> {
+export const readZip = async (buffer: ArrayBuffer): Promise<ZipEntry[]> => {
   const bytes = new Uint8Array(buffer);
   const view = new DataView(buffer);
   // The end-of-central-directory record is within the last 64 KB + 22 bytes.
@@ -117,7 +165,7 @@ export async function readZip(buffer: ArrayBuffer): Promise<ZipEntry[]> {
   for (
     let i = bytes.length - 22;
     i >= Math.max(0, bytes.length - 65_558);
-    i--
+    i -= 1
   ) {
     if (view.getUint32(i, true) === 0x06_05_4b_50) {
       eocd = i;
@@ -145,7 +193,9 @@ export async function readZip(buffer: ArrayBuffer): Promise<ZipEntry[]> {
     const commentLen = view.getUint16(pos + 32, true);
     const localOffset = view.getUint32(pos + 42, true);
     const nameBytes = bytes.subarray(pos + 46, pos + 46 + nameLen);
-    const path = (flags & 0x08_00 ? decoder : cp437).decode(nameBytes);
+    // Bit 11 of the flags marks a UTF-8 name.
+    const utf8 = Math.floor(flags / 0x08_00) % 2 === 1;
+    const path = (utf8 ? decoder : cp437).decode(nameBytes);
     pos += 46 + nameLen + extraLen + commentLen;
     if (path.endsWith("/")) {
       continue;
@@ -170,7 +220,7 @@ export async function readZip(buffer: ArrayBuffer): Promise<ZipEntry[]> {
     if (data.length !== size && size !== 0xff_ff_ff_ff) {
       throw new Error(`Size mismatch for ${path}.`);
     }
-    entries.push({ path, data });
+    entries.push({ data, path });
   }
   return entries;
-}
+};

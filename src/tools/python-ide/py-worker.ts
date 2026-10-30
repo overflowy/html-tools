@@ -142,7 +142,7 @@ const fetches = new Map<
 >();
 const realFetch = globalThis.fetch.bind(globalThis);
 
-function urlOf(input: RequestInfo | URL): string {
+const urlOf = (input: RequestInfo | URL): string => {
   if (typeof input === "string") {
     return input;
   }
@@ -150,9 +150,9 @@ function urlOf(input: RequestInfo | URL): string {
     return input.href;
   }
   return input.url;
-}
+};
 
-function contentType(url: string): string {
+const contentType = (url: string): string => {
   if (url.endsWith(".wasm")) {
     return "application/wasm";
   }
@@ -160,31 +160,32 @@ function contentType(url: string): string {
     return "application/json";
   }
   return "application/octet-stream";
-}
+};
 
 /** Wheels go through the main thread's Wheel Cache; a miss there is fetched once and kept. */
-function isWheel(url: string): boolean {
-  return /\.whl($|\?)/.test(url);
-}
+const isWheel = (url: string): boolean => /\.whl(?:$|\?)/u.test(url);
 
-function askMain(url: string): Promise<Response> {
-  return new Promise((resolve, reject) => {
-    const id = nextFetchId++;
-    fetches.set(id, { resolve, reject });
-    post({ type: "fetch", id, url });
-  });
-}
+const askMain = (url: string): Promise<Response> => {
+  const { promise, resolve, reject } = Promise.withResolvers<Response>();
+  const id = nextFetchId;
+  nextFetchId += 1;
+  fetches.set(id, { reject, resolve });
+  post({ id, type: "fetch", url });
+  return promise;
+};
 
-globalThis.fetch = (async (
+globalThis.fetch = ((
   input: RequestInfo | URL,
   init?: RequestInit
 ): Promise<Response> => {
   const url = urlOf(input);
   const bytes = preloaded.get(url);
   if (bytes) {
-    return new Response(bytes, {
-      headers: { "Content-Type": contentType(url) },
-    });
+    return Promise.resolve(
+      new Response(bytes, {
+        headers: { "Content-Type": contentType(url) },
+      })
+    );
   }
   if (isWheel(url)) {
     return askMain(url);
@@ -192,7 +193,7 @@ globalThis.fetch = (async (
   return realFetch(input, init);
 }) as typeof fetch;
 
-function onFetched(msg: Extract<PyRequest, { type: "fetched" }>) {
+const onFetched = (msg: Extract<PyRequest, { type: "fetched" }>) => {
   const p = fetches.get(msg.id);
   if (!p) {
     return;
@@ -209,7 +210,7 @@ function onFetched(msg: Extract<PyRequest, { type: "fetched" }>) {
       new Response(msg.error ?? "not available", { status: msg.status ?? 502 })
     );
   }
-}
+};
 
 /* ---------------- input ---------------- */
 
@@ -218,47 +219,57 @@ const inputs = new Map<number, (line: string | null) => void>();
 
 /** The JavaScript module Python imports as `pyide_host`. */
 const host = {
-  runArgs: {} as unknown,
-  toObject: Object.fromEntries,
-  requestInput(): Promise<string | null> {
-    return new Promise((resolve) => {
-      const id = nextInputId++;
-      inputs.set(id, resolve);
-      post({ type: "inputRequest", id });
-    });
+  emitFigure(png: Uint8Array) {
+    const owned = new Uint8Array(png);
+    post({ png: owned, type: "figure" }, [owned.buffer]);
   },
   inputUnavailable() {
     post({ type: "inputUnavailable" });
   },
-  emitFigure(png: Uint8Array) {
-    const owned = png.slice();
-    post({ type: "figure", png: owned }, [owned.buffer]);
+  requestInput(): Promise<string | null> {
+    const { promise, resolve } = Promise.withResolvers<string | null>();
+    const id = nextInputId;
+    nextInputId += 1;
+    inputs.set(id, resolve);
+    post({ id, type: "inputRequest" });
+    return promise;
   },
+  runArgs: {} as unknown,
+  toObject: Object.fromEntries,
 };
 
 /* ---------------- boot ---------------- */
 
-function writer(stream: "stdout" | "stderr") {
-  return {
-    write(bytes: Uint8Array): number {
-      // Pyodide's own memory backs `bytes`; only a copy may be transferred.
-      const owned = bytes.slice();
-      post({ type: "out", stream, bytes: owned }, [owned.buffer]);
-      return bytes.length;
-    },
-    isatty: true,
-    getTerminalSize: () => ({ columns: terminal.cols, rows: terminal.rows }),
-  };
-}
+const writer = (stream: "stdout" | "stderr") => ({
+  getTerminalSize: () => ({ columns: terminal.cols, rows: terminal.rows }),
+  isatty: true,
+  write(bytes: Uint8Array): number {
+    // Pyodide's own memory backs `bytes`; only a copy may be transferred.
+    const owned = new Uint8Array(bytes);
+    post({ bytes: owned, stream, type: "out" }, [owned.buffer]);
+    return bytes.length;
+  },
+});
 
-async function boot(
+/* ---------------- requests ---------------- */
+
+const need = (): { py: PyodideAPI; rt: PyProxy } => {
+  if (!pyodide || !runtime) {
+    throw new Error("The interpreter has not booted.");
+  }
+  return { py: pyodide, rt: runtime };
+};
+
+const FS = (py: PyodideAPI = need().py): EmFS => py.FS as unknown as EmFS;
+
+const boot = async (
   opts: BootOptions
-): Promise<{ python: string; jspi: boolean }> {
+): Promise<{ python: string; jspi: boolean }> => {
   preloaded.set(`${opts.cdnBase}pyodide.asm.wasm`, opts.wasm);
   preloaded.set(`${opts.cdnBase}python_stdlib.zip`, opts.stdlib);
   const loaderUrl = scriptDataUrl(opts.loader, "pyodide.mjs");
   const factoryUrl = scriptDataUrl(opts.factory, "pyodide.asm.mjs");
-  post({ type: "progress", message: "Starting Python" });
+  post({ message: "Starting Python", type: "progress" });
   const { loadPyodide } = (await import(loaderUrl)) as {
     loadPyodide: (c: PyodideConfig) => Promise<PyodideAPI>;
   };
@@ -266,16 +277,16 @@ async function boot(
     default: PyodideConfig["createPyodideModule"];
   };
   const py = await loadPyodide({
-    indexURL: opts.cdnBase,
     createPyodideModule,
-    lockFileContents: JSON.parse(opts.lock),
-    packageBaseUrl: opts.cdnBase,
-    packages: opts.packages,
     env: {
       HOME: "/home/pyodide",
       MPLBACKEND: "module://pyide_mpl",
       PYTHONUNBUFFERED: "1",
     },
+    indexURL: opts.cdnBase,
+    lockFileContents: JSON.parse(opts.lock),
+    packageBaseUrl: opts.cdnBase,
+    packages: opts.packages,
   });
   preloaded.clear();
   pyodide = py;
@@ -297,21 +308,71 @@ async function boot(
   const jspi = (await py.runPythonAsync(
     "from pyodide.ffi import can_run_sync; can_run_sync()"
   )) as boolean;
-  return { python, jspi };
-}
+  return { jspi, python };
+};
 
-/* ---------------- requests ---------------- */
-
-function need(): { py: PyodideAPI; rt: PyProxy } {
-  if (!pyodide || !runtime) {
-    throw new Error("The interpreter has not booted.");
+/** Removes a folder with everything in it; a missing one is nothing to do. */
+const removeTree = (fs: EmFS, full: string) => {
+  let names: string[];
+  try {
+    names = fs.readdir(full).filter((n) => n !== "." && n !== "..");
+  } catch {
+    return;
   }
-  return { py: pyodide, rt: runtime };
-}
+  for (const name of names) {
+    const child = `${full}/${name}`;
+    try {
+      fs.unlink(child);
+    } catch {
+      removeTree(fs, child);
+    }
+  }
+  try {
+    fs.rmdir(full);
+  } catch {
+    // a file by that name, or already gone
+  }
+};
 
-function FS(py: PyodideAPI = need().py): EmFS {
-  return py.FS as unknown as EmFS;
-}
+/** Emscripten's errno values, for the ones a Project write can run into. */
+const ERRNO: Record<number, string> = {
+  2: "permission denied",
+  20: "already exists",
+  28: "invalid path",
+  31: "a folder with this name is in the way",
+  44: "does not exist",
+  54: "a file is in the way of one of its folders",
+  55: "the folder is not empty",
+  63: "not permitted",
+};
+
+/**
+ * The message of anything thrown. Emscripten's `FS.ErrnoError` is not an
+ * Error and carries only an errno, so it is named here; other objects are
+ * read for a message or a name before falling back to String.
+ */
+const describe = (e: unknown): string => {
+  if (e instanceof Error) {
+    return e.message;
+  }
+  if (typeof e === "object" && e !== null) {
+    const { errno, message, name } = e as {
+      errno?: unknown;
+      message?: unknown;
+      name?: unknown;
+    };
+    if (typeof errno === "number") {
+      return ERRNO[errno] ?? `filesystem error ${errno}`;
+    }
+    if (typeof message === "string" && message) {
+      return message;
+    }
+    if (typeof name === "string" && name) {
+      return name;
+    }
+  }
+  return String(e);
+};
 
 /**
  * Removals first, then folders, then files. A removed file leaves its folder
@@ -320,7 +381,7 @@ function FS(py: PyodideAPI = need().py): EmFS {
  * reported together, by path and reason, so one bad path (a file where a
  * folder is needed, or the reverse) does not stop the rest from arriving.
  */
-function writeFiles(msg: Extract<PyRequest, { type: "files" }>) {
+const writeFiles = (msg: Extract<PyRequest, { type: "files" }>) => {
   const fs = FS();
   for (const rel of msg.removed) {
     try {
@@ -359,40 +420,17 @@ function writeFiles(msg: Extract<PyRequest, { type: "files" }>) {
   if (failed.length) {
     throw new Error(failed.join("\n"));
   }
-}
+};
 
-/** Removes a folder with everything in it; a missing one is nothing to do. */
-function removeTree(fs: EmFS, full: string) {
-  let names: string[];
-  try {
-    names = fs.readdir(full).filter((n) => n !== "." && n !== "..");
-  } catch {
-    return;
-  }
-  for (const name of names) {
-    const child = `${full}/${name}`;
-    try {
-      fs.unlink(child);
-    } catch {
-      removeTree(fs, child);
-    }
-  }
-  try {
-    fs.rmdir(full);
-  } catch {
-    // a file by that name, or already gone
-  }
-}
-
-async function run(
+const run = async (
   msg: Extract<PyRequest, { type: "run" }>
-): Promise<RunResult> {
+): Promise<RunResult> => {
   const { py } = need();
   terminal = { cols: msg.cols, rows: msg.rows };
   host.runArgs = {
-    path: `${PROJECT_ROOT}/${msg.path}`,
     argv: msg.argv,
     env: msg.env,
+    path: `${PROJECT_ROOT}/${msg.path}`,
     stdin: msg.stdin,
   };
   // Entered through runPythonAsync so that run_sync (and with it interactive
@@ -402,23 +440,23 @@ async function run(
   )) as RunResult;
   // to_js may hand back views into Pyodide's memory; only copies can be transferred.
   for (const c of result.changed) {
-    c.data = c.data.slice();
+    c.data = new Uint8Array(c.data);
   }
   return result;
-}
+};
 
-async function pythonJson<T>(code: string): Promise<T> {
+const pythonJson = async <T>(code: string): Promise<T> => {
   const { py } = need();
   const text = (await py.runPythonAsync(code)) as string;
   return JSON.parse(text) as T;
-}
+};
 
 /** A JavaScript value as a Python literal, to pass arguments in the code itself. */
-function lit(value: unknown): string {
-  return `__import__('json').loads(${JSON.stringify(JSON.stringify(value))})`;
-}
+const lit = (value: unknown): string =>
+  `__import__('json').loads(${JSON.stringify(JSON.stringify(value))})`;
 
-async function handle(msg: PyRequest): Promise<unknown> {
+/** The answer to a request, or a promise of it; a throw is its failure. */
+const handle = (msg: PyRequest): unknown => {
   switch (msg.type) {
     case "boot": {
       return boot(msg);
@@ -468,7 +506,7 @@ async function handle(msg: PyRequest): Promise<unknown> {
       throw new Error(`Unknown request ${(msg as { type: string }).type}`);
     }
   }
-}
+};
 
 self.onmessage = async (ev: MessageEvent<PyRequest>) => {
   const msg = ev.data;
@@ -493,48 +531,8 @@ self.onmessage = async (ev: MessageEvent<PyRequest>) => {
         transfer.push(c.data.buffer as ArrayBuffer);
       }
     }
-    post({ type: "done", id: msg.id, result }, transfer);
+    post({ id: msg.id, result, type: "done" }, transfer);
   } catch (error) {
-    post({ type: "fail", id: msg.id, message: describe(error) });
+    post({ id: msg.id, message: describe(error), type: "fail" });
   }
 };
-
-/** Emscripten's errno values, for the ones a Project write can run into. */
-const ERRNO: Record<number, string> = {
-  2: "permission denied",
-  20: "already exists",
-  28: "invalid path",
-  31: "a folder with this name is in the way",
-  44: "does not exist",
-  54: "a file is in the way of one of its folders",
-  55: "the folder is not empty",
-  63: "not permitted",
-};
-
-/**
- * The message of anything thrown. Emscripten's `FS.ErrnoError` is not an
- * Error and carries only an errno, so it is named here; other objects are
- * read for a message or a name before falling back to String.
- */
-function describe(e: unknown): string {
-  if (e instanceof Error) {
-    return e.message;
-  }
-  if (typeof e === "object" && e !== null) {
-    const { errno, message, name } = e as {
-      errno?: unknown;
-      message?: unknown;
-      name?: unknown;
-    };
-    if (typeof errno === "number") {
-      return ERRNO[errno] ?? `filesystem error ${errno}`;
-    }
-    if (typeof message === "string" && message) {
-      return message;
-    }
-    if (typeof name === "string" && name) {
-      return name;
-    }
-  }
-  return String(e);
-}

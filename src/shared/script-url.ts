@@ -35,7 +35,8 @@ const putPair = (out: Uint8Array, at: number, v: number) => {
   out[at + 1] = PAIRS[2 * v + 1];
 };
 
-const base64 = (bytes: Uint8Array): string => {
+/** Base64 of `bytes`, without the multi-megabyte binary string btoa() needs. */
+export const base64 = (bytes: Uint8Array): string => {
   const whole = bytes.length - (bytes.length % 3);
   const out = new Uint8Array(Math.ceil(bytes.length / 3) * 4);
   let at = 0;

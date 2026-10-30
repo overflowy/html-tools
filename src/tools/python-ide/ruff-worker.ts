@@ -60,8 +60,15 @@ interface RuffModule {
 let ruff: RuffModule | null = null;
 let workspace: Workspace | null = null;
 
-// oxlint-disable-next-line unicorn/require-post-message-target-origin
-const post = (msg: RuffResponse) => self.postMessage(msg);
+const post = (msg: RuffResponse) => self.postMessage(msg, { transfer: [] });
+
+const describe = (e: unknown): string => {
+  if (e instanceof Error) {
+    return e.message;
+  }
+  // Ruff raises plain strings for settings and syntax problems.
+  return String(e);
+};
 
 self.onmessage = async (ev: MessageEvent<RuffRequest>) => {
   const msg = ev.data;
@@ -81,7 +88,7 @@ self.onmessage = async (ev: MessageEvent<RuffRequest>) => {
     if (msg.type === "configure") {
       workspace?.free();
       workspace = new ruff.Workspace(msg.options, ruff.PositionEncoding.Utf16);
-      post({ type: "configured", id: msg.id });
+      post({ id: msg.id, type: "configured" });
       return;
     }
     if (!workspace) {
@@ -89,27 +96,19 @@ self.onmessage = async (ev: MessageEvent<RuffRequest>) => {
     }
     if (msg.type === "format") {
       post({
-        type: "format",
-        id: msg.id,
         formatted: workspace.format(msg.source),
+        id: msg.id,
+        type: "format",
       });
     } else if (msg.type === "check") {
       post({
-        type: "check",
-        id: msg.id,
         diagnostics: workspace.check(msg.source),
+        id: msg.id,
+        type: "check",
       });
     }
   } catch (error) {
     const id = "id" in msg ? msg.id : null;
-    post({ type: "error", id, message: describe(error) });
+    post({ id, message: describe(error), type: "error" });
   }
 };
-
-function describe(e: unknown): string {
-  if (e instanceof Error) {
-    return e.message;
-  }
-  // Ruff raises plain strings for settings and syntax problems.
-  return String(e);
-}

@@ -13,148 +13,152 @@ type Model = Monaco.editor.ITextModel;
 
 const RUFF_OWNER = "ruff";
 
-export function defineTheme(monaco: typeof Monaco) {
+export const defineTheme = (monaco: typeof Monaco) => {
   const style = getComputedStyle(document.documentElement);
   const v = (name: string) => style.getPropertyValue(name).trim();
   monaco.editor.defineTheme("pyide", {
     base: "vs-dark",
-    inherit: true,
-    rules: [
-      { token: "comment", foreground: "7f7f79", fontStyle: "italic" },
-      { token: "keyword", foreground: "d9a066" },
-      { token: "string", foreground: "9fbf7f" },
-      { token: "number", foreground: "e3c17a" },
-      { token: "type", foreground: "8ab4f8" },
-      { token: "tag", foreground: "c96442" },
-      { token: "delimiter", foreground: "a0a09a" },
-    ],
     colors: {
       "editor.background": v("--bg") || "#1a1a1a",
       "editor.foreground": v("--text") || "#f5f4ee",
+      "editor.inactiveSelectionBackground": "#c9644230",
       "editor.lineHighlightBackground": "#ffffff08",
       "editor.lineHighlightBorder": "#00000000",
-      "editorLineNumber.foreground": "#5f5f5a",
-      "editorLineNumber.activeForeground": "#a0a09a",
       "editor.selectionBackground": "#c9644255",
-      "editor.inactiveSelectionBackground": "#c9644230",
       "editorCursor.foreground": v("--accent") || "#c96442",
-      "editorIndentGuide.background1": "#ffffff10",
+      "editorError.foreground": "#f28b82",
+      "editorGutter.background": v("--bg") || "#1a1a1a",
+      "editorHoverWidget.background": v("--surface") || "#262625",
       "editorIndentGuide.activeBackground1": "#ffffff28",
-      "editorWidget.background": v("--surface") || "#262625",
-      "editorWidget.border": "#ffffff20",
+      "editorIndentGuide.background1": "#ffffff10",
+      "editorInfo.foreground": "#8ab4f8",
+      "editorLineNumber.activeForeground": "#a0a09a",
+      "editorLineNumber.foreground": "#5f5f5a",
       "editorSuggestWidget.background": v("--surface") || "#262625",
       "editorSuggestWidget.selectedBackground": "#c9644240",
-      "editorHoverWidget.background": v("--surface") || "#262625",
-      "input.background": v("--surface-2") || "#2d2d2c",
+      "editorWarning.foreground": "#e3c17a",
+      "editorWidget.background": v("--surface") || "#262625",
+      "editorWidget.border": "#ffffff20",
       focusBorder: v("--accent") || "#c96442",
+      "input.background": v("--surface-2") || "#2d2d2c",
       "list.activeSelectionBackground": "#c9644240",
       "list.hoverBackground": "#ffffff0a",
       "minimap.background": v("--bg") || "#1a1a1a",
       "scrollbarSlider.background": "#ffffff18",
       "scrollbarSlider.hoverBackground": "#ffffff28",
-      "editorGutter.background": v("--bg") || "#1a1a1a",
-      "editorError.foreground": "#f28b82",
-      "editorWarning.foreground": "#e3c17a",
-      "editorInfo.foreground": "#8ab4f8",
     },
+    inherit: true,
+    rules: [
+      { fontStyle: "italic", foreground: "7f7f79", token: "comment" },
+      { foreground: "d9a066", token: "keyword" },
+      { foreground: "9fbf7f", token: "string" },
+      { foreground: "e3c17a", token: "number" },
+      { foreground: "8ab4f8", token: "type" },
+      { foreground: "c96442", token: "tag" },
+      { foreground: "a0a09a", token: "delimiter" },
+    ],
   });
-}
+};
 
 /** A TOML tokenizer good enough for pyproject.toml. */
-export function registerToml(monaco: typeof Monaco) {
+export const registerToml = (monaco: typeof Monaco) => {
   if (monaco.languages.getLanguages().some((l) => l.id === "toml")) {
     return;
   }
   monaco.languages.register({
-    id: "toml",
-    extensions: [".toml"],
     aliases: ["TOML"],
+    extensions: [".toml"],
+    id: "toml",
   });
   monaco.languages.setLanguageConfiguration("toml", {
-    comments: { lineComment: "#" },
+    autoClosingPairs: [
+      { close: "]", open: "[" },
+      { close: "}", open: "{" },
+      { close: '"', open: '"' },
+      { close: "'", open: "'" },
+    ],
     brackets: [
       ["[", "]"],
       ["{", "}"],
     ],
-    autoClosingPairs: [
-      { open: "[", close: "]" },
-      { open: "{", close: "}" },
-      { open: '"', close: '"' },
-      { open: "'", close: "'" },
-    ],
+    comments: { lineComment: "#" },
   });
+  // Monarch compiles each rule from its regex's source with flags of its
+  // own, so a literal's flags do not reach the tokenizer. Its start state
+  // is named, not left to whichever state comes first.
   monaco.languages.setMonarchTokensProvider("toml", {
+    start: "root",
     tokenizer: {
-      root: [
-        [/#.*$/, "comment"],
-        [/^\s*\[\[?[^\]]*\]\]?/, "type"],
-        [/^\s*[A-Za-z0-9_.-]+(?=\s*=)/, "tag"],
-        [/"""/, "string", "@mstring"],
-        [/"([^"\\]|\\.)*"/, "string"],
-        [/'[^']*'/, "string"],
-        [/\b(true|false)\b/, "keyword"],
-        [
-          /\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})?)?/,
-          "number",
-        ],
-        [/[+-]?(inf|nan)\b/, "number"],
-        [
-          /[+-]?(0x[0-9a-fA-F_]+|0o[0-7_]+|0b[01_]+|\d[\d_]*(\.\d[\d_]*)?([eE][+-]?\d+)?)/,
-          "number",
-        ],
-        [/[[\]{},=]/, "delimiter"],
-      ],
       mstring: [
-        [/"""/, "string", "@pop"],
-        [/./, "string"],
+        [/"""/u, "string", "@pop"],
+        [/./u, "string"],
+      ],
+      root: [
+        [/#.*$/u, "comment"],
+        [/^\s*\[\[?[^\]]*\]\]?/u, "type"],
+        [/^\s*[A-Za-z0-9_.-]+(?=\s*=)/u, "tag"],
+        [/"""/u, "string", "@mstring"],
+        [/"(?:[^"\\]|\\.)*"/u, "string"],
+        [/'[^']*'/u, "string"],
+        [/\b(?:true|false)\b/u, "keyword"],
+        [
+          /\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?)?/u,
+          "number",
+        ],
+        [/[+-]?(?:inf|nan)\b/u, "number"],
+        [
+          /[+-]?(?:0x[0-9a-fA-F_]+|0o[0-7_]+|0b[01_]+|\d[\d_]*(?:\.\d[\d_]*)?(?:[eE][+-]?\d+)?)/u,
+          "number",
+        ],
+        [/[[\]{},=]/u, "delimiter"],
       ],
     },
   });
-}
+};
 
 /** JSON keeps its tokenizer and drops the worker-backed services, which would want a second worker. */
-export function configureJson(monaco: typeof Monaco) {
+export const configureJson = (monaco: typeof Monaco) => {
   monaco.json.jsonDefaults.setModeConfiguration({
+    colors: false,
+    completionItems: false,
+    diagnostics: false,
     documentFormattingEdits: false,
     documentRangeFormattingEdits: false,
-    completionItems: false,
-    hovers: false,
     documentSymbols: false,
-    tokens: true,
-    colors: false,
     foldingRanges: false,
-    diagnostics: false,
+    hovers: false,
     selectionRanges: false,
+    tokens: true,
   });
-}
+};
 
-export function createEditor(
+export const createEditor = (
   monaco: typeof Monaco,
   host: HTMLElement,
   tabSize: number
-): Editor {
+): Editor => {
   const style = getComputedStyle(document.documentElement);
   return monaco.editor.create(host, {
-    model: null,
-    theme: "pyide",
     automaticLayout: true,
+    bracketPairColorization: { enabled: true },
+    cursorBlinking: "smooth",
+    fixedOverflowWidgets: true,
     fontFamily: style.getPropertyValue("--mono").trim() || "monospace",
     fontSize: 13,
-    lineHeight: 20,
-    tabSize,
     insertSpaces: true,
+    lineHeight: 20,
     minimap: { enabled: false },
-    scrollBeyondLastLine: false,
-    renderLineHighlight: "line",
+    model: null,
     padding: { top: 10 },
-    smoothScrolling: true,
-    cursorBlinking: "smooth",
-    bracketPairColorization: { enabled: true },
-    stickyScroll: { enabled: false },
-    fixedOverflowWidgets: true,
+    renderLineHighlight: "line",
+    scrollBeyondLastLine: false,
     "semanticHighlighting.enabled": true,
+    smoothScrolling: true,
+    stickyScroll: { enabled: false },
+    tabSize,
+    theme: "pyide",
   });
-}
+};
 
 /* ---------------- the Linter in the editor ---------------- */
 
@@ -163,14 +167,12 @@ interface Loc {
   column: number;
 }
 
-function toRange(start: Loc, end: Loc): Monaco.IRange {
-  return {
-    startLineNumber: start.row,
-    startColumn: start.column,
-    endLineNumber: end.row,
-    endColumn: end.column,
-  };
-}
+const toRange = (start: Loc, end: Loc): Monaco.IRange => ({
+  endColumn: end.column,
+  endLineNumber: end.row,
+  startColumn: start.column,
+  startLineNumber: start.row,
+});
 
 export class LinterBinding {
   /** The Linter's latest findings per model, for quick fixes. */
@@ -179,11 +181,18 @@ export class LinterBinding {
   private disposables: Monaco.IDisposable[] = [];
   private generation = 0;
 
+  private monaco: typeof Monaco;
+  private linter: Linter;
+  private onError: (message: string) => void;
+
   constructor(
-    private monaco: typeof Monaco,
-    private linter: Linter,
-    private onError: (message: string) => void
+    monaco: typeof Monaco,
+    linter: Linter,
+    onError: (message: string) => void
   ) {
+    this.monaco = monaco;
+    this.linter = linter;
+    this.onError = onError;
     this.disposables.push(
       monaco.languages.registerCodeActionProvider("python", {
         provideCodeActions: (model, range, context) =>
@@ -252,10 +261,10 @@ export class LinterBinding {
     const { MarkerSeverity, MarkerTag } = this.monaco;
     const markers: Monaco.editor.IMarkerData[] = diagnostics.map((d) =>
       Object.assign(toRange(d.start_location, d.end_location), {
+        code: d.code ?? undefined,
         message: d.code ? `${d.message} (${d.code})` : d.message,
         severity:
           d.code === null ? MarkerSeverity.Error : MarkerSeverity.Warning,
-        code: d.code ?? undefined,
         source: "ruff",
         tags: d.tags.map((t) =>
           t === "unnecessary" ? MarkerTag.Unnecessary : MarkerTag.Deprecated
@@ -287,20 +296,20 @@ export class LinterBinding {
         continue;
       }
       actions.push({
-        title: d.fix.message ?? `Fix ${d.code ?? ""}`.trim(),
-        kind: "quickfix",
         diagnostics: [marker],
-        isPreferred: true,
         edit: {
           edits: d.fix.edits.map((e) => ({
             resource: model.uri,
-            versionId: model.getVersionId(),
             textEdit: {
               range: toRange(e.location, e.end_location),
               text: e.content ?? "",
             },
+            versionId: model.getVersionId(),
           })),
         },
+        isPreferred: true,
+        kind: "quickfix",
+        title: d.fix.message ?? `Fix ${d.code ?? ""}`.trim(),
       });
     }
     void range;

@@ -44,17 +44,22 @@ export class IdeTerminal {
   private tail = "";
   /** Keys pressed while no line was being read, kept for the next one, as a terminal's typeahead. */
   private typeahead: string[] = [];
-  private decoders = { stdout: new TextDecoder(), stderr: new TextDecoder() };
+  private decoders = { stderr: new TextDecoder(), stdout: new TextDecoder() };
   private resizeObserver: ResizeObserver;
+  private handlers: TerminalHandlers;
+  /** What each editing key does; any other key types itself, control keys excepted. */
+  private readonly bindings = this.keyBindings();
 
   constructor(
     api: TerminalApi,
     container: HTMLElement,
-    private handlers: TerminalHandlers
+    handlers: TerminalHandlers
   ) {
+    this.handlers = handlers;
     const style = getComputedStyle(document.documentElement);
     const v = (name: string) => style.getPropertyValue(name).trim();
     this.term = new api.Terminal({
+      allowProposedApi: true,
       convertEol: true,
       cursorBlink: true,
       cursorStyle: "bar",
@@ -62,29 +67,28 @@ export class IdeTerminal {
       fontSize: 12.5,
       lineHeight: 1.3,
       scrollback: 5000,
-      allowProposedApi: true,
       theme: {
         background: v("--bg") || "#1a1a1a",
-        foreground: v("--text") || "#f5f4ee",
+        black: "#1a1a1a",
+        blue: "#8ab4f8",
+        brightBlack: "#6b6b66",
+        brightBlue: "#aecbfa",
+        brightCyan: "#a3e3e3",
+        brightGreen: "#b8d99c",
+        brightMagenta: "#e8c4f2",
+        brightRed: "#f7c1c1",
+        brightWhite: "#ffffff",
+        brightYellow: "#f0d69a",
         cursor: v("--accent") || "#c96442",
         cursorAccent: v("--bg") || "#1a1a1a",
-        selectionBackground: "rgba(201, 100, 66, 0.35)",
-        black: "#1a1a1a",
-        red: "#f28b82",
-        green: "#9fbf7f",
-        yellow: "#e3c17a",
-        blue: "#8ab4f8",
-        magenta: "#d7a3e8",
         cyan: "#7fd1d1",
+        foreground: v("--text") || "#f5f4ee",
+        green: "#9fbf7f",
+        magenta: "#d7a3e8",
+        red: "#f28b82",
+        selectionBackground: "rgba(201, 100, 66, 0.35)",
         white: "#f5f4ee",
-        brightBlack: "#6b6b66",
-        brightRed: "#f7c1c1",
-        brightGreen: "#b8d99c",
-        brightYellow: "#f0d69a",
-        brightBlue: "#aecbfa",
-        brightMagenta: "#e8c4f2",
-        brightCyan: "#a3e3e3",
-        brightWhite: "#ffffff",
+        yellow: "#e3c17a",
       },
     });
     this.fit = new api.FitAddon();
@@ -122,7 +126,7 @@ export class IdeTerminal {
 
   reset() {
     this.term.reset();
-    this.decoders = { stdout: new TextDecoder(), stderr: new TextDecoder() };
+    this.decoders = { stderr: new TextDecoder(), stdout: new TextDecoder() };
   }
 
   dispose() {
@@ -238,8 +242,8 @@ export class IdeTerminal {
       if (initial) {
         this.insert(initial);
       }
-      if (this.queued.length) {
-        const next = this.queued.shift()!;
+      const next = this.queued.shift();
+      if (next !== undefined) {
         this.buffer = next;
         this.cursor = next.length;
         this.redraw();
@@ -249,10 +253,19 @@ export class IdeTerminal {
         this.tail = "";
         this.insert(tail);
       }
-      while (this.typeahead.length && this.mode !== "off") {
-        this.onData(this.typeahead.shift()!);
+      for (
+        let key = this.nextTypeahead();
+        key !== undefined;
+        key = this.nextTypeahead()
+      ) {
+        this.onData(key);
       }
     });
+  }
+
+  /** The next key typed ahead, while a line is being read. */
+  private nextTypeahead(): string | undefined {
+    return this.mode === "off" ? undefined : this.typeahead.shift();
   }
 
   /** The last line entered, for a continuation prompt to copy its indentation. */
@@ -342,169 +355,160 @@ export class IdeTerminal {
 
   private onData(data: string) {
     if (this.mode === "off") {
-      if (data === "\u0003") {
-        this.typeahead = [];
-        this.handlers.onInterrupt();
-      } else if (this.typeahead.length < 200) {
-        this.typeahead.push(data);
-      }
+      this.whileOff(data);
       return;
     }
     if (data.length > 1 && !data.startsWith("\u001B")) {
-      // A paste. Each newline enters a line; whatever follows the last one is left typed.
-      const lines = data
-        .replaceAll("\r\n", "\n")
-        .replaceAll("\r", "\n")
-        .split("\n");
-      this.insert(lines[0]!);
-      if (lines.length > 1) {
-        this.queued.push(...lines.slice(1, -1));
-        this.tail = lines.at(-1)!;
-        this.submit();
-      }
+      this.paste(data);
       return;
     }
-    switch (data) {
-      case "\r": {
-        this.submit();
-        return;
+    const action = this.bindings.get(data);
+    if (action) {
+      action();
+      return;
+    }
+    if (data.startsWith("\u001B") || (data.length === 1 && data < " ")) {
+      return;
+    }
+    this.insert(data);
+  }
+
+  /** A key while no line is being read: Ctrl+C interrupts, anything else is typeahead. */
+  private whileOff(data: string) {
+    if (data === "\u0003") {
+      this.typeahead = [];
+      this.handlers.onInterrupt();
+    } else if (this.typeahead.length < 200) {
+      this.typeahead.push(data);
+    }
+  }
+
+  /** A paste. Each newline enters a line; whatever follows the last one is left typed. */
+  private paste(data: string) {
+    const [first = "", ...rest] = data
+      .replaceAll("\r\n", "\n")
+      .replaceAll("\r", "\n")
+      .split("\n");
+    this.insert(first);
+    const tail = rest.pop();
+    if (tail !== undefined) {
+      this.queued.push(...rest);
+      this.tail = tail;
+      this.submit();
+    }
+  }
+
+  private keyBindings(): Map<string, () => void> {
+    const toStart = () => this.moveCursor(0);
+    const toEnd = () => this.moveCursor(this.buffer.length);
+    const wordBack = () => this.moveCursor(this.wordLeft());
+    const wordForward = () => this.moveCursor(this.wordRight());
+    return new Map<string, () => void>([
+      ["\r", () => this.submit()],
+      ["\u007F", () => this.deleteBack()],
+      ["\u001B[3~", () => this.deleteForward()],
+      ["\u001B[D", () => this.moveCursor(this.cursor - 1)],
+      ["\u001B[C", () => this.moveCursor(this.cursor + 1)],
+      ["\u001B[1;5D", wordBack],
+      ["\u001Bb", wordBack],
+      ["\u001B[1;5C", wordForward],
+      ["\u001Bf", wordForward],
+      ["\u001B[H", toStart],
+      ["\u001B[1~", toStart],
+      ["\u0001", toStart],
+      ["\u001B[F", toEnd],
+      ["\u001B[4~", toEnd],
+      ["\u0005", toEnd],
+      ["\u001B[A", () => this.historyStep(-1)],
+      ["\u001B[B", () => this.historyStep(1)],
+      ["\u0015", () => this.killToStart()],
+      ["\u000B", () => this.killToEnd()],
+      ["\u0017", () => this.killWordBack()],
+      ["\u000C", () => this.clearScreen()],
+      ["\u0003", () => this.interrupt()],
+      ["\u0004", () => this.endOfInput()],
+      ["\t", () => this.tab()],
+    ]);
+  }
+
+  private deleteBack() {
+    if (this.cursor > 0) {
+      this.buffer =
+        this.buffer.slice(0, this.cursor - 1) + this.buffer.slice(this.cursor);
+      this.cursor -= 1;
+      this.redraw();
+    }
+  }
+
+  private deleteForward() {
+    if (this.cursor < this.buffer.length) {
+      this.buffer =
+        this.buffer.slice(0, this.cursor) + this.buffer.slice(this.cursor + 1);
+      this.redraw();
+    }
+  }
+
+  private killToStart() {
+    this.buffer = this.buffer.slice(this.cursor);
+    this.cursor = 0;
+    this.redraw();
+  }
+
+  private killToEnd() {
+    this.buffer = this.buffer.slice(0, this.cursor);
+    this.redraw();
+  }
+
+  private killWordBack() {
+    const from = this.wordLeft();
+    this.buffer = this.buffer.slice(0, from) + this.buffer.slice(this.cursor);
+    this.cursor = from;
+    this.redraw();
+  }
+
+  /** Ctrl+C: the REPL's line is cancelled here; a program's input() is the owner's to stop. */
+  private interrupt() {
+    if (this.mode === "repl") {
+      this.moveCursor(this.buffer.length);
+      this.term.write("^C\r\n");
+      this.buffer = "";
+      this.cursor = 0;
+      this.queued = [];
+      this.tail = "";
+      this.mode = "off";
+      this.handlers.onLine(null, "repl");
+    } else {
+      this.handlers.onInterrupt();
+    }
+  }
+
+  /** Ctrl+D: end of input on an empty line of input(), else delete forward. */
+  private endOfInput() {
+    if (this.buffer.length === 0) {
+      if (this.mode === "input") {
+        this.mode = "off";
+        this.term.write("\r\n");
+        this.handlers.onLine(null, "input");
       }
-      case "\u007F": {
-        if (this.cursor > 0) {
-          this.buffer =
-            this.buffer.slice(0, this.cursor - 1) +
-            this.buffer.slice(this.cursor);
-          this.cursor -= 1;
-          this.redraw();
-        }
-        return;
-      }
-      case "\u001B[3~": {
-        if (this.cursor < this.buffer.length) {
-          this.buffer =
-            this.buffer.slice(0, this.cursor) +
-            this.buffer.slice(this.cursor + 1);
-          this.redraw();
-        }
-        return;
-      }
-      case "\u001B[D": {
-        this.moveCursor(this.cursor - 1);
-        return;
-      }
-      case "\u001B[C": {
-        this.moveCursor(this.cursor + 1);
-        return;
-      }
-      case "\u001B[1;5D":
-      case "\u001Bb": {
-        this.moveCursor(this.wordLeft());
-        return;
-      }
-      case "\u001B[1;5C":
-      case "\u001Bf": {
-        this.moveCursor(this.wordRight());
-        return;
-      }
-      case "\u001B[H":
-      case "\u001B[1~":
-      case "\u0001": {
-        this.moveCursor(0);
-        return;
-      }
-      case "\u001B[F":
-      case "\u001B[4~":
-      case "\u0005": {
-        this.moveCursor(this.buffer.length);
-        return;
-      }
-      case "\u001B[A": {
-        this.historyStep(-1);
-        return;
-      }
-      case "\u001B[B": {
-        this.historyStep(1);
-        return;
-      }
-      case "\u0015": {
-        this.buffer = this.buffer.slice(this.cursor);
-        this.cursor = 0;
-        this.redraw();
-        return;
-      }
-      case "\u000B": {
-        this.buffer = this.buffer.slice(0, this.cursor);
-        this.redraw();
-        return;
-      }
-      case "\u0017": {
-        const from = this.wordLeft();
-        this.buffer =
-          this.buffer.slice(0, from) + this.buffer.slice(this.cursor);
-        this.cursor = from;
-        this.redraw();
-        return;
-      }
-      case "\u000C": {
-        this.clearScreen();
-        return;
-      }
-      case "\u0003": {
-        if (this.mode === "repl") {
-          this.moveCursor(this.buffer.length);
-          this.term.write("^C\r\n");
-          this.buffer = "";
-          this.cursor = 0;
-          this.queued = [];
-          this.tail = "";
-          this.mode = "off";
-          this.handlers.onLine(null, "repl");
-        } else {
-          this.handlers.onInterrupt();
-        }
-        return;
-      }
-      case "\u0004": {
-        if (this.buffer.length === 0) {
-          if (this.mode === "input") {
-            this.mode = "off";
-            this.term.write("\r\n");
-            this.handlers.onLine(null, "input");
-          }
-        } else if (this.cursor < this.buffer.length) {
-          this.buffer =
-            this.buffer.slice(0, this.cursor) +
-            this.buffer.slice(this.cursor + 1);
-          this.redraw();
-        }
-        return;
-      }
-      case "\t": {
-        if (this.mode === "repl") {
-          void this.complete();
-        } else {
-          this.insert("\t");
-        }
-        return;
-      }
-      default: {
-        if (
-          data.startsWith("\u001B") ||
-          (data.length === 1 && data.charCodeAt(0) < 32)
-        ) {
-          return;
-        }
-        this.insert(data);
-      }
+    } else {
+      this.deleteForward();
+    }
+  }
+
+  private tab() {
+    if (this.mode === "repl") {
+      void this.complete();
+    } else {
+      this.insert("\t");
     }
   }
 
   private wordLeft(): number {
     let i = this.cursor;
-    while (i > 0 && /\s/.test(this.buffer[i - 1]!)) {
+    while (i > 0 && /\s/u.test(this.buffer.charAt(i - 1))) {
       i -= 1;
     }
-    while (i > 0 && !/[\s.(),[\]{}]/.test(this.buffer[i - 1]!)) {
+    while (i > 0 && !/[\s.(),[\]{}]/u.test(this.buffer.charAt(i - 1))) {
       i -= 1;
     }
     return i;
@@ -513,10 +517,10 @@ export class IdeTerminal {
   private wordRight(): number {
     let i = this.cursor;
     const n = this.buffer.length;
-    while (i < n && /[\s.(),[\]{}]/.test(this.buffer[i]!)) {
+    while (i < n && /[\s.(),[\]{}]/u.test(this.buffer.charAt(i))) {
       i += 1;
     }
-    while (i < n && !/[\s.(),[\]{}]/.test(this.buffer[i]!)) {
+    while (i < n && !/[\s.(),[\]{}]/u.test(this.buffer.charAt(i))) {
       i += 1;
     }
     return i;
@@ -537,8 +541,8 @@ export class IdeTerminal {
       return;
     }
     this.historyIndex = next;
-    this.buffer =
-      next === this.history.length ? this.draft : this.history[next]!;
+    // One step past the last entry is the line being typed before.
+    this.buffer = this.history[next] ?? this.draft;
     this.cursor = this.buffer.length;
     this.redraw();
   }
@@ -559,11 +563,12 @@ export class IdeTerminal {
       return;
     }
     const { completions, start } = result;
-    if (completions.length === 0) {
+    const [first] = completions;
+    if (first === undefined) {
       return;
     }
     const word = head.slice(start);
-    let common = completions[0]!;
+    let common = first;
     for (const c of completions) {
       let i = 0;
       while (i < common.length && i < c.length && common[i] === c[i]) {
@@ -582,12 +587,12 @@ export class IdeTerminal {
       const width = Math.max(...completions.map((c) => c.length)) + 2;
       const perRow = Math.max(1, Math.floor(cols / width));
       let text = "\r\n";
-      completions.slice(0, 200).forEach((c, i) => {
+      for (const [i, c] of completions.slice(0, 200).entries()) {
         text += c.padEnd(width);
         if ((i + 1) % perRow === 0) {
           text += "\r\n";
         }
-      });
+      }
       if (!text.endsWith("\r\n")) {
         text += "\r\n";
       }

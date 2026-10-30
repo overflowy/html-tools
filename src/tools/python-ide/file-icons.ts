@@ -37,61 +37,61 @@ export { default as ICON_FOLDER } from "@react-symbols/icons/folders/Folder";
 export { default as ICON_FOLDER_OPEN } from "@react-symbols/icons/folders/FolderOpen";
 
 const BY_NAME: Record<string, string> = {
+  ".editorconfig": editorConfig,
+  ".gitignore": git,
+  Dockerfile: docker,
   LICENSE: license,
   README: markdown,
-  Dockerfile: docker,
-  ".gitignore": git,
-  ".editorconfig": editorConfig,
   "requirements.txt": python,
 };
 
 const BY_EXTENSION: Record<string, string> = {
+  bmp: image,
+  css: bracketsPurple,
+  csv,
+  env: gear,
+  flac: audio,
+  gif: image,
+  gz: compressed,
+  htm: codeOrange,
+  html: codeOrange,
+  ico: image,
+  ipynb: notebook,
+  jpeg: image,
+  jpg: image,
+  js,
+  json: bracketsYellow,
+  lock,
+  markdown,
+  md: markdown,
+  mov: video,
+  mp3: audio,
+  mp4: video,
+  ogg: audio,
+  pdf,
+  png: image,
   py: python,
   pyi: python,
   pyx: python,
-  toml: gear,
-  env: gear,
-  md: markdown,
-  markdown,
-  txt: text,
-  json: bracketsYellow,
-  csv,
-  tsv: csv,
-  yaml,
-  yml: yaml,
-  html: codeOrange,
-  htm: codeOrange,
-  css: bracketsPurple,
-  js,
-  ts: typescript,
-  xml,
-  svg,
   sh: shell,
   sql: database,
-  lock,
-  ipynb: notebook,
-  pdf,
-  zip: compressed,
-  gz: compressed,
+  svg,
   tar: compressed,
-  png: image,
-  jpg: image,
-  jpeg: image,
-  gif: image,
-  webp: image,
-  bmp: image,
-  ico: image,
+  toml: gear,
+  ts: typescript,
+  tsv: csv,
+  txt: text,
   wav: audio,
-  mp3: audio,
-  ogg: audio,
-  flac: audio,
-  mp4: video,
   webm: video,
-  mov: video,
+  webp: image,
+  xml,
+  yaml,
+  yml: yaml,
+  zip: compressed,
 };
 
 /** The icon for a file, by its name first and its extension second; a plain document otherwise. */
-export function fileIcon(path: string): string {
+export const fileIcon = (path: string): string => {
   const name = basename(path);
   const byName = BY_NAME[name];
   if (byName) {
@@ -102,4 +102,4 @@ export function fileIcon(path: string): string {
     (dot > 0 ? BY_EXTENSION[name.slice(dot + 1).toLowerCase()] : undefined) ??
     document
   );
-}
+};

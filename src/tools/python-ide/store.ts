@@ -59,86 +59,88 @@ let storageErrorHandler: StorageErrorHandler = (what, reason) =>
   console.error(`Storage: ${what}: ${reason}`);
 
 /** Registers the one handler told about every write that did not happen. */
-export function onStorageError(fn: StorageErrorHandler) {
+export const onStorageError = (fn: StorageErrorHandler) => {
   storageErrorHandler = fn;
-}
+};
 
-function describe(e: unknown): string {
+const describe = (e: unknown): string => {
   if (e instanceof Error || (e && typeof e === "object" && "name" in e)) {
     const { name, message } = e as { name?: string; message?: string };
     return [name, message].filter(Boolean).join(": ") || "unknown error";
   }
   return String(e);
-}
+};
 
-function openDb(): Promise<IDBDatabase | null> {
+const openDb = (): Promise<IDBDatabase | null> => {
   if (dbPromise) {
     return dbPromise;
   }
-  dbPromise = new Promise((resolve) => {
-    let req: IDBOpenDBRequest;
-    try {
-      if (typeof indexedDB === "undefined") {
-        openError = "this browser has no IndexedDB";
-        return resolve(null);
-      }
-      req = indexedDB.open(DB_NAME, DB_VERSION);
-    } catch (error) {
-      openError = describe(error);
-      return resolve(null);
+  const { promise, resolve } = Promise.withResolvers<IDBDatabase | null>();
+  dbPromise = promise;
+  let req: IDBOpenDBRequest;
+  try {
+    if (typeof indexedDB === "undefined") {
+      openError = "this browser has no IndexedDB";
+      resolve(null);
+      return promise;
     }
-    req.onupgradeneeded = () => {
-      const db = req.result;
-      if (!db.objectStoreNames.contains("projects")) {
-        db.createObjectStore("projects", { keyPath: "id" });
-      }
-      if (!db.objectStoreNames.contains("files")) {
-        const files = db.createObjectStore("files", {
-          keyPath: ["projectId", "path"],
-        });
-        files.createIndex("project", "projectId", { unique: false });
-      }
-      if (!db.objectStoreNames.contains("wheels")) {
-        db.createObjectStore("wheels", { keyPath: "url" });
-      }
-      if (!db.objectStoreNames.contains("mirrors")) {
-        db.createObjectStore("mirrors", { keyPath: "projectId" });
-      }
-    };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => {
-      openError = describe(req.error);
-      resolve(null);
-    };
-    req.onblocked = () => {
-      openError = "the database is open in another tab at an older version";
-      resolve(null);
-    };
-  });
-  return dbPromise;
-}
+    req = indexedDB.open(DB_NAME, DB_VERSION);
+  } catch (error) {
+    openError = describe(error);
+    resolve(null);
+    return promise;
+  }
+  req.onupgradeneeded = () => {
+    const db = req.result;
+    if (!db.objectStoreNames.contains("projects")) {
+      db.createObjectStore("projects", { keyPath: "id" });
+    }
+    if (!db.objectStoreNames.contains("files")) {
+      const files = db.createObjectStore("files", {
+        keyPath: ["projectId", "path"],
+      });
+      files.createIndex("project", "projectId", { unique: false });
+    }
+    if (!db.objectStoreNames.contains("wheels")) {
+      db.createObjectStore("wheels", { keyPath: "url" });
+    }
+    if (!db.objectStoreNames.contains("mirrors")) {
+      db.createObjectStore("mirrors", { keyPath: "projectId" });
+    }
+  };
+  req.onsuccess = () => resolve(req.result);
+  req.onerror = () => {
+    openError = describe(req.error);
+    resolve(null);
+  };
+  req.onblocked = () => {
+    openError = "the database is open in another tab at an older version";
+    resolve(null);
+  };
+  return promise;
+};
 
-function request<T>(r: IDBRequest<T>): Promise<T> {
-  return new Promise((resolve, reject) => {
-    r.onsuccess = () => resolve(r.result);
-    r.onerror = () => reject(r.error);
-  });
-}
+const request = <T>(r: IDBRequest<T>): Promise<T> => {
+  const { promise, resolve, reject } = Promise.withResolvers<T>();
+  r.onsuccess = () => resolve(r.result);
+  r.onerror = () => reject(r.error);
+  return promise;
+};
 
-function done(tx: IDBTransaction): Promise<void> {
-  return new Promise((resolve, reject) => {
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-    tx.onabort = () => reject(tx.error);
-  });
-}
+const done = (tx: IDBTransaction): Promise<undefined> => {
+  const { promise, resolve, reject } = Promise.withResolvers<undefined>();
+  tx.oncomplete = () => resolve(undefined);
+  tx.onerror = () => reject(tx.error);
+  tx.onabort = () => reject(tx.error);
+  return promise;
+};
 
 type StoreName = "projects" | "files" | "wheels" | "mirrors";
 
-async function read<T>(
+const read = async <T>(
   store: StoreName,
   run: (s: IDBObjectStore) => IDBRequest<T>
-): Promise<T | undefined> {
+): Promise<T | undefined> => {
   const db = await openDb();
   if (!db) {
     return undefined;
@@ -150,14 +152,14 @@ async function read<T>(
   } catch {
     return undefined;
   }
-}
+};
 
 /** A write, named by `what` (a file path, "the project record") for the error report. */
-async function write(
+const write = async (
   what: string,
   stores: StoreName[],
   run: (tx: IDBTransaction) => void
-): Promise<boolean> {
+): Promise<boolean> => {
   const db = await openDb();
   if (!db) {
     storageErrorHandler(what, `IndexedDB could not be opened: ${openError}`);
@@ -172,118 +174,98 @@ async function write(
     storageErrorHandler(what, describe(error));
     return false;
   }
-}
+};
 
 /** The reason the database could not be opened, once `storageAvailable` said so. */
-export function storageError(): string {
-  return openError;
-}
+export const storageError = (): string => openError;
 
-export function storageAvailable(): Promise<boolean> {
-  return openDb().then((db) => db !== null);
-}
+export const storageAvailable = (): Promise<boolean> =>
+  openDb().then((db) => db !== null);
 
 /* ---------------- projects ---------------- */
 
-export async function listProjects(): Promise<ProjectRecord[]> {
+export const listProjects = async (): Promise<ProjectRecord[]> => {
   const rows =
     (await read<ProjectRecord[]>("projects", (s) => s.getAll())) ?? [];
   return rows.toSorted((a, b) => b.updatedAt - a.updatedAt);
-}
+};
 
-export function getProject(id: string): Promise<ProjectRecord | undefined> {
-  return read<ProjectRecord | undefined>("projects", (s) => s.get(id));
-}
+export const getProject = (id: string): Promise<ProjectRecord | undefined> =>
+  read<ProjectRecord | undefined>("projects", (s) => s.get(id));
 
-export function putProject(p: ProjectRecord): Promise<boolean> {
-  return write(`the project "${p.name}"`, ["projects"], (tx) =>
+export const putProject = (p: ProjectRecord): Promise<boolean> =>
+  write(`the project "${p.name}"`, ["projects"], (tx) =>
     tx.objectStore("projects").put(p)
   );
-}
 
 /** Removes a Project with its files and Mirror. The Wheel Cache is shared and stays. */
-export function deleteProject(id: string): Promise<boolean> {
-  return write(
-    "deleting the project",
-    ["projects", "files", "mirrors"],
-    (tx) => {
-      tx.objectStore("projects").delete(id);
-      tx.objectStore("mirrors").delete(id);
-      const files = tx.objectStore("files").index("project");
-      files.openKeyCursor(IDBKeyRange.only(id)).onsuccess = (ev) => {
-        const cursor = (ev.target as IDBRequest<IDBCursor | null>).result;
-        if (!cursor) {
-          return;
-        }
-        tx.objectStore("files").delete(cursor.primaryKey);
-        cursor.continue();
-      };
-    }
-  );
-}
+export const deleteProject = (id: string): Promise<boolean> =>
+  write("deleting the project", ["projects", "files", "mirrors"], (tx) => {
+    tx.objectStore("projects").delete(id);
+    tx.objectStore("mirrors").delete(id);
+    const files = tx.objectStore("files").index("project");
+    files.openKeyCursor(IDBKeyRange.only(id)).onsuccess = (ev) => {
+      const cursor = (ev.target as IDBRequest<IDBCursor | null>).result;
+      if (!cursor) {
+        return;
+      }
+      tx.objectStore("files").delete(cursor.primaryKey);
+      cursor.continue();
+    };
+  });
 
 /* ---------------- files ---------------- */
 
-export async function listFiles(projectId: string): Promise<FileRecord[]> {
-  return (
-    (await read<FileRecord[]>("files", (s) =>
-      s.index("project").getAll(IDBKeyRange.only(projectId))
-    )) ?? []
-  );
-}
+export const listFiles = async (projectId: string): Promise<FileRecord[]> =>
+  (await read<FileRecord[]>("files", (s) =>
+    s.index("project").getAll(IDBKeyRange.only(projectId))
+  )) ?? [];
 
-export function putFiles(files: FileRecord[]): Promise<boolean> {
-  return write(files.map((f) => f.path).join(", "), ["files"], (tx) => {
+export const putFiles = (files: FileRecord[]): Promise<boolean> =>
+  write(files.map((f) => f.path).join(", "), ["files"], (tx) => {
     const s = tx.objectStore("files");
     for (const f of files) {
       s.put(f);
     }
   });
-}
 
-export function deleteFiles(
+export const deleteFiles = (
   projectId: string,
   paths: string[]
-): Promise<boolean> {
-  return write(`deleting ${paths.join(", ")}`, ["files"], (tx) => {
+): Promise<boolean> =>
+  write(`deleting ${paths.join(", ")}`, ["files"], (tx) => {
     const s = tx.objectStore("files");
     for (const p of paths) {
       s.delete([projectId, p]);
     }
   });
-}
 
 /* ---------------- wheels ---------------- */
 
-export function getWheel(url: string): Promise<WheelRecord | undefined> {
-  return read<WheelRecord | undefined>("wheels", (s) => s.get(url));
-}
+export const getWheel = (url: string): Promise<WheelRecord | undefined> =>
+  read<WheelRecord | undefined>("wheels", (s) => s.get(url));
 
-export function putWheel(w: WheelRecord): Promise<boolean> {
-  return write(
+export const putWheel = (w: WheelRecord): Promise<boolean> =>
+  write(
     `the wheel ${w.url.slice(w.url.lastIndexOf("/") + 1)}`,
     ["wheels"],
     (tx) => tx.objectStore("wheels").put(w)
   );
-}
 
 /** Drops Wheels of other Pyodide releases: the catalog ones name their release in the URL. */
-export function clearWheels(): Promise<boolean> {
-  return write("clearing the wheel cache", ["wheels"], (tx) =>
+export const clearWheels = (): Promise<boolean> =>
+  write("clearing the wheel cache", ["wheels"], (tx) =>
     tx.objectStore("wheels").clear()
   );
-}
 
 /* ---------------- mirrors ---------------- */
 
-export function getMirror(
+export const getMirror = (
   projectId: string
-): Promise<MirrorRecord | undefined> {
-  return read<MirrorRecord | undefined>("mirrors", (s) => s.get(projectId));
-}
+): Promise<MirrorRecord | undefined> =>
+  read<MirrorRecord | undefined>("mirrors", (s) => s.get(projectId));
 
-export function putMirror(m: MirrorRecord): Promise<boolean> {
-  return write("the package sources for Pyright", ["mirrors"], (tx) =>
+export const putMirror = (m: MirrorRecord): Promise<boolean> =>
+  write("the package sources for Pyright", ["mirrors"], (tx) =>
     tx.objectStore("mirrors").put(m)
   );
-}

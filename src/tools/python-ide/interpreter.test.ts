@@ -9,13 +9,20 @@ class FakeWorker {
   static last: FakeWorker;
   onmessage: ((event: MessageEvent) => void) | null = null;
   onerror: ((event: ErrorEvent) => void) | null = null;
+  posted: unknown[] = [];
+  terminated = false;
 
   constructor() {
     FakeWorker.last = this;
   }
 
-  postMessage() {}
-  terminate() {}
+  postMessage(message: unknown) {
+    this.posted.push(message);
+  }
+
+  terminate() {
+    this.terminated = true;
+  }
 }
 
 beforeEach(() => {
@@ -29,16 +36,14 @@ afterEach(() => {
   globalThis.Worker = RealWorker;
 });
 
-function events(onCrash: (message: string) => void): InterpreterEvents {
-  return {
-    onOutput() {},
-    onInputRequest() {},
-    onInputUnavailable() {},
-    onFigure() {},
-    onProgress() {},
-    onCrash,
-  };
-}
+const events = (onCrash: (message: string) => void): InterpreterEvents => ({
+  onCrash,
+  onFigure() {},
+  onInputRequest() {},
+  onInputUnavailable() {},
+  onOutput() {},
+  onProgress() {},
+});
 
 test("an error from an intentionally terminated worker stays quiet", () => {
   let crash = "";

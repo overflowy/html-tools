@@ -6,9 +6,14 @@
 // Monaco is assembled from cached chunks by amd.ts, and Pyodide boots from
 // bytes handed to its worker.
 
+import type { FitAddon } from "@xterm/addon-fit";
+import type { Terminal } from "@xterm/xterm";
+import type * as Monaco from "monaco-editor";
+
 import { getEngine } from "../../shared/engines";
 import type { EngineAsset, Progress } from "../../shared/engines";
 import {
+  base64,
   blobModuleWorkersWork,
   scriptBlobUrl,
   scriptDataUrl,
@@ -26,32 +31,60 @@ const NPM = "https://cdn.jsdelivr.net/npm/";
 export const PYODIDE_BASE = `https://cdn.jsdelivr.net/pyodide/v${PYODIDE_VERSION}/full/`;
 const MONACO_BASE = `${NPM}monaco-editor@${MONACO_VERSION}/min/`;
 
+/* ---------------- helpers ---------------- */
+
+/** Bytes loaded so far across everything one Engine needs, for the Status Bar. */
+export type LoadProgress = (loaded: number, total: number) => void;
+
+const combined = (onProgress?: LoadProgress) => {
+  const seen = new Map<string, Progress>();
+  return (p: Progress) => {
+    seen.set(p.asset.id, p);
+    let loaded = 0;
+    let total = 0;
+    for (const q of seen.values()) {
+      loaded += q.loaded;
+      total += q.total;
+    }
+    onProgress?.(loaded, total);
+  };
+};
+
+const importModule = async <T>(bytes: ArrayBuffer): Promise<T> => {
+  const url = URL.createObjectURL(
+    new Blob([bytes], { type: "text/javascript" })
+  );
+  try {
+    return (await import(url)) as T;
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+};
+
 /* ---------------- Pyodide ---------------- */
 
-function pyodideAsset(
+const pyodideAsset = (
   file: string,
   label: string,
   approxBytes: number
-): EngineAsset {
-  return {
-    id: `pyodide-${file}`,
-    label,
-    version: PYODIDE_VERSION,
-    url: PYODIDE_BASE + file,
-    approxBytes,
-  };
-}
+): EngineAsset => ({
+  approxBytes,
+  id: `pyodide-${file}`,
+  label,
+  url: PYODIDE_BASE + file,
+  version: PYODIDE_VERSION,
+});
 
 export const PYODIDE = {
-  loader: pyodideAsset("pyodide.mjs", "Pyodide loader", 18_000),
   factory: pyodideAsset("pyodide.asm.mjs", "Pyodide runtime", 1_250_000),
-  wasm: pyodideAsset("pyodide.asm.wasm", "Python interpreter", 9_600_000),
+  loader: pyodideAsset("pyodide.mjs", "Pyodide loader", 18_000),
+  lock: pyodideAsset("pyodide-lock.json", "Pyodide package catalog", 115_000),
   stdlib: pyodideAsset(
     "python_stdlib.zip",
     "Python standard library",
     2_550_000
   ),
-  lock: pyodideAsset("pyodide-lock.json", "Pyodide package catalog", 115_000),
+  wasm: pyodideAsset("pyodide.asm.wasm", "Python interpreter", 9_600_000),
 };
 
 export interface PyodideAssets {
@@ -62,9 +95,9 @@ export interface PyodideAssets {
   lock: string;
 }
 
-export async function loadPyodideAssets(
+export const loadPyodideAssets = async (
   onProgress?: LoadProgress
-): Promise<PyodideAssets> {
+): Promise<PyodideAssets> => {
   const report = combined(onProgress);
   const [loader, factory, wasm, stdlib, lock] = await Promise.all([
     getEngine(PYODIDE.loader, report),
@@ -74,13 +107,13 @@ export async function loadPyodideAssets(
     getEngine(PYODIDE.lock, report),
   ]);
   return {
-    loader,
     factory,
-    wasm,
-    stdlib,
+    loader,
     lock: new TextDecoder().decode(lock),
+    stdlib,
+    wasm,
   };
-}
+};
 
 /* ---------------- Monaco ---------------- */
 
@@ -90,56 +123,54 @@ export async function loadPyodideAssets(
  * tend to need. Anything else Monaco asks for lazily (another language's
  * tokenizer) comes straight from the CDN, uncached.
  */
-const MONACO_MODULES: Record<string, number> = {
-  "vs/editor/editor.main": 2800,
-  "vs/index-CBVt3dzv": 77_000,
-  "vs/editor-KLE6jdfb": 2_390_000,
-  "vs/editorWorkerHost-fVE1cjcC": 358_000,
-  "vs/toggleHighContrast-qGX7E9o7": 1_264_000,
-  "vs/basic-languages/monaco.contribution": 15_000,
-  "vs/monaco.contribution-9cKT3C7t": 2200,
-  "vs/monaco.contribution-BE88ZNGY": 4800,
-  "vs/monaco.contribution-BPhsneLd": 1600,
-  "vs/monaco.contribution-BgRy6xDf": 2200,
-  "vs/json.worker-BizpAl9O": 210,
-  "vs/css.worker-CyhWkhHo": 210,
-  "vs/html.worker-CA3iAimZ": 210,
-  "vs/ts.worker-2QLmBukE": 210,
-  "vs/nls.messages-loader": 270,
-  "vs/python-CqWUUgfu": 3900,
-  "vs/markdown-C_rD0bIw": 3800,
-  "vs/yaml-A1fOIdH6": 3700,
-  "vs/ini-CsNwO04R": 1100,
-  "vs/shell-ClXCKCEW": 3100,
-  "vs/restructuredtext-C7UUFKFD": 3900,
-};
+const MONACO_MODULES = new Map<string, number>([
+  ["vs/editor/editor.main", 2800],
+  ["vs/index-CBVt3dzv", 77_000],
+  ["vs/editor-KLE6jdfb", 2_390_000],
+  ["vs/editorWorkerHost-fVE1cjcC", 358_000],
+  ["vs/toggleHighContrast-qGX7E9o7", 1_264_000],
+  ["vs/basic-languages/monaco.contribution", 15_000],
+  ["vs/monaco.contribution-9cKT3C7t", 2200],
+  ["vs/monaco.contribution-BE88ZNGY", 4800],
+  ["vs/monaco.contribution-BPhsneLd", 1600],
+  ["vs/monaco.contribution-BgRy6xDf", 2200],
+  ["vs/json.worker-BizpAl9O", 210],
+  ["vs/css.worker-CyhWkhHo", 210],
+  ["vs/html.worker-CA3iAimZ", 210],
+  ["vs/ts.worker-2QLmBukE", 210],
+  ["vs/nls.messages-loader", 270],
+  ["vs/python-CqWUUgfu", 3900],
+  ["vs/markdown-C_rD0bIw", 3800],
+  ["vs/yaml-A1fOIdH6", 3700],
+  ["vs/ini-CsNwO04R", 1100],
+  ["vs/shell-ClXCKCEW", 3100],
+  ["vs/restructuredtext-C7UUFKFD", 3900],
+]);
 
 const MONACO_CSS: EngineAsset = {
+  approxBytes: 350_000,
   id: "monaco-css",
   label: "Monaco styles",
-  version: MONACO_VERSION,
   url: `${MONACO_BASE}vs/editor/editor.main.css`,
-  approxBytes: 350_000,
+  version: MONACO_VERSION,
 };
 const MONACO_WORKER: EngineAsset = {
+  approxBytes: 273_000,
   id: "monaco-worker",
   label: "Monaco editor worker",
-  version: MONACO_VERSION,
   url: `${MONACO_BASE}vs/assets/editor.worker-lj3bdIIn.js`,
-  approxBytes: 273_000,
+  version: MONACO_VERSION,
 };
 
-function monacoModule(id: string): EngineAsset {
-  return {
-    id: `monaco-${id.replaceAll("/", "-")}`,
-    label: `Monaco ${id.slice(3)}`,
-    version: MONACO_VERSION,
-    url: `${MONACO_BASE + id}.js`,
-    approxBytes: MONACO_MODULES[id] ?? 4000,
-  };
-}
+const monacoModule = (id: string): EngineAsset => ({
+  approxBytes: MONACO_MODULES.get(id) ?? 4000,
+  id: `monaco-${id.replaceAll("/", "-")}`,
+  label: `Monaco ${id.slice(3)}`,
+  url: `${MONACO_BASE + id}.js`,
+  version: MONACO_VERSION,
+});
 
-export type MonacoApi = typeof import("monaco-editor");
+export type MonacoApi = typeof Monaco;
 
 let monacoLoading: Promise<MonacoApi> | null = null;
 
@@ -152,13 +183,13 @@ let monacoWorkerUrl = "";
  * spawned from a blob: URL of the cached worker script, since a worker's own
  * script may be a blob from file:// while importScripts of one may not.
  */
-export function loadMonaco(onProgress?: LoadProgress): Promise<MonacoApi> {
+export const loadMonaco = (onProgress?: LoadProgress): Promise<MonacoApi> => {
   if (monacoLoading) {
     return monacoLoading;
   }
   const report = combined(onProgress);
   monacoLoading = (async () => {
-    const ids = Object.keys(MONACO_MODULES);
+    const ids = [...MONACO_MODULES.keys()];
     const [sources, css, worker] = await Promise.all([
       Promise.all(ids.map((id) => getEngine(monacoModule(id), report))),
       getEngine(MONACO_CSS, report),
@@ -189,16 +220,16 @@ export function loadMonaco(onProgress?: LoadProgress): Promise<MonacoApi> {
   })();
   monacoLoading.catch(() => (monacoLoading = null));
   return monacoLoading;
-}
+};
 
 /* ---------------- basedpyright ---------------- */
 
 const PYRIGHT: EngineAsset = {
+  approxBytes: 17_834_000,
   id: "basedpyright",
   label: "basedpyright",
-  version: PYRIGHT_VERSION,
   url: `${NPM}browser-basedpyright@${PYRIGHT_VERSION}/dist/pyright.worker.js`,
-  approxBytes: 17_834_000,
+  version: PYRIGHT_VERSION,
 };
 
 let pyrightUrl: Promise<string> | null = null;
@@ -212,7 +243,9 @@ let pyrightUrl: Promise<string> | null = null;
  * script is still being compiled, and a dynamic import of the same script
  * can be cut short safely.
  */
-export function loadPyrightScript(onProgress?: LoadProgress): Promise<string> {
+export const loadPyrightScript = (
+  onProgress?: LoadProgress
+): Promise<string> => {
   if (pyrightUrl) {
     return pyrightUrl;
   }
@@ -224,23 +257,23 @@ export function loadPyrightScript(onProgress?: LoadProgress): Promise<string> {
   );
   pyrightUrl.catch(() => (pyrightUrl = null));
   return pyrightUrl;
-}
+};
 
 /* ---------------- Ruff ---------------- */
 
 const RUFF_GLUE: EngineAsset = {
+  approxBytes: 27_000,
   id: "ruff-glue",
   label: "Ruff bindings",
-  version: RUFF_VERSION,
   url: `${NPM}@astral-sh/ruff-wasm-web@${RUFF_VERSION}/ruff_wasm.js`,
-  approxBytes: 27_000,
+  version: RUFF_VERSION,
 };
 const RUFF_WASM: EngineAsset = {
+  approxBytes: 10_872_000,
   id: "ruff-wasm",
   label: "Ruff",
-  version: RUFF_VERSION,
   url: `${NPM}@astral-sh/ruff-wasm-web@${RUFF_VERSION}/ruff_wasm_bg.wasm`,
-  approxBytes: 10_872_000,
+  version: RUFF_VERSION,
 };
 
 export interface RuffAssets {
@@ -248,49 +281,51 @@ export interface RuffAssets {
   wasm: ArrayBuffer;
 }
 
-export async function loadRuffAssets(
+export const loadRuffAssets = async (
   onProgress?: LoadProgress
-): Promise<RuffAssets> {
+): Promise<RuffAssets> => {
   const report = combined(onProgress);
   const [glue, wasm] = await Promise.all([
     getEngine(RUFF_GLUE, report),
     getEngine(RUFF_WASM, report),
   ]);
   return { glue: new TextDecoder().decode(glue), wasm };
-}
+};
 
 /* ---------------- xterm ---------------- */
 
 const XTERM: EngineAsset = {
+  approxBytes: 345_000,
   id: "xterm",
   label: "xterm.js",
-  version: XTERM_VERSION,
   url: `${NPM}@xterm/xterm@${XTERM_VERSION}/lib/xterm.mjs`,
-  approxBytes: 345_000,
+  version: XTERM_VERSION,
 };
 const XTERM_CSS: EngineAsset = {
+  approxBytes: 7200,
   id: "xterm-css",
   label: "xterm.js styles",
-  version: XTERM_VERSION,
   url: `${NPM}@xterm/xterm@${XTERM_VERSION}/css/xterm.css`,
-  approxBytes: 7200,
+  version: XTERM_VERSION,
 };
 const XTERM_FIT: EngineAsset = {
+  approxBytes: 2000,
   id: "xterm-fit",
   label: "xterm.js fit addon",
-  version: XTERM_FIT_VERSION,
   url: `${NPM}@xterm/addon-fit@${XTERM_FIT_VERSION}/lib/addon-fit.mjs`,
-  approxBytes: 2000,
+  version: XTERM_FIT_VERSION,
 };
 
 export interface TerminalApi {
-  Terminal: typeof import("@xterm/xterm").Terminal;
-  FitAddon: typeof import("@xterm/addon-fit").FitAddon;
+  Terminal: typeof Terminal;
+  FitAddon: typeof FitAddon;
 }
 
 let terminalLoading: Promise<TerminalApi> | null = null;
 
-export function loadTerminal(onProgress?: LoadProgress): Promise<TerminalApi> {
+export const loadTerminal = (
+  onProgress?: LoadProgress
+): Promise<TerminalApi> => {
   if (terminalLoading) {
     return terminalLoading;
   }
@@ -309,51 +344,8 @@ export function loadTerminal(onProgress?: LoadProgress): Promise<TerminalApi> {
       importModule<TerminalApi>(js),
       importModule<{ FitAddon: TerminalApi["FitAddon"] }>(fit),
     ]);
-    return { Terminal: xterm.Terminal, FitAddon: addon.FitAddon };
+    return { FitAddon: addon.FitAddon, Terminal: xterm.Terminal };
   })();
   terminalLoading.catch(() => (terminalLoading = null));
   return terminalLoading;
-}
-
-/* ---------------- helpers ---------------- */
-
-/** Bytes loaded so far across everything one Engine needs, for the Status Bar. */
-export type LoadProgress = (loaded: number, total: number) => void;
-
-function combined(onProgress?: LoadProgress) {
-  const seen = new Map<string, Progress>();
-  return (p: Progress) => {
-    seen.set(p.asset.id, p);
-    let loaded = 0;
-    let total = 0;
-    for (const q of seen.values()) {
-      loaded += q.loaded;
-      total += q.total;
-    }
-    onProgress?.(loaded, total);
-  };
-}
-
-async function importModule<T>(bytes: ArrayBuffer): Promise<T> {
-  const url = URL.createObjectURL(
-    new Blob([bytes], { type: "text/javascript" })
-  );
-  try {
-    return (await import(url)) as T;
-  } finally {
-    URL.revokeObjectURL(url);
-  }
-}
-
-const CHUNK = 0x80_00;
-
-function base64(bytes: Uint8Array): string {
-  let bin = "";
-  for (let i = 0; i < bytes.length; i += CHUNK) {
-    bin += String.fromCharCode.apply(
-      null,
-      bytes.subarray(i, i + CHUNK) as unknown as number[]
-    );
-  }
-  return btoa(bin);
-}
+};

@@ -47,11 +47,13 @@ export class Interpreter {
   private dead = false;
   /** Bytes fetched from the network for the Wheel Cache during this boot, for the Status Bar. */
   downloaded = 0;
+  private events: InterpreterEvents;
 
-  constructor(private events: InterpreterEvents) {
+  constructor(events: InterpreterEvents) {
+    this.events = events;
     this.worker = new Worker(
       scriptDataUrl(PYIDE_PY_WORKER_SRC, "py-worker.js"),
-      { type: "module", name: "python-interpreter" }
+      { name: "python-interpreter", type: "module" }
     );
     this.worker.onmessage = (ev: MessageEvent<PyResponse>) =>
       this.receive(ev.data);
@@ -106,6 +108,11 @@ export class Interpreter {
         } else {
           p.resolve(msg.result);
         }
+        break;
+      }
+      default: {
+        // Every PyResponse type has its case above.
+        break;
       }
     }
   }
@@ -122,29 +129,36 @@ export class Interpreter {
         const res = await fetch(url);
         if (!res.ok) {
           this.send({
-            type: "fetched",
+            error: `HTTP ${res.status}`,
             id,
             ok: false,
             status: res.status,
-            error: `HTTP ${res.status}`,
+            type: "fetched",
           });
           return;
         }
         bytes = await res.arrayBuffer();
         this.downloaded += bytes.byteLength;
-        await putWheel({ url, bytes, storedAt: Date.now() });
+        await putWheel({ bytes, storedAt: Date.now(), url });
       }
       // The cache keeps its copy; the worker gets one to own.
-      const copy = bytes.slice(0);
-      this.send({ type: "fetched", id, ok: true, bytes: copy }, [copy]);
+      const copy = structuredClone(bytes);
+      this.send({ bytes: copy, id, ok: true, type: "fetched" }, [copy]);
     } catch (error) {
       this.send({
-        type: "fetched",
+        error: error instanceof Error ? error.message : String(error),
         id,
         ok: false,
-        error: error instanceof Error ? error.message : String(error),
+        type: "fetched",
       });
     }
+  }
+
+  /** A fresh request id. */
+  private takeId(): number {
+    const id = this.nextId;
+    this.nextId += 1;
+    return id;
   }
 
   private failAll(e: Error) {
@@ -165,18 +179,18 @@ export class Interpreter {
     msg: Extract<PyRequest, { id: number }>,
     transfer: Transferable[] = []
   ): Promise<T> {
-    return new Promise<T>((resolve, reject) => {
-      this.pending.set(msg.id, {
-        resolve: resolve as (r: unknown) => void,
-        reject,
-      });
-      try {
-        this.send(msg, transfer);
-      } catch (error) {
-        this.pending.delete(msg.id);
-        reject(error as Error);
-      }
+    const { promise, resolve, reject } = Promise.withResolvers<T>();
+    this.pending.set(msg.id, {
+      reject,
+      resolve: resolve as (r: unknown) => void,
     });
+    try {
+      this.send(msg, transfer);
+    } catch (error) {
+      this.pending.delete(msg.id);
+      reject(error as Error);
+    }
+    return promise;
   }
 
   /**
@@ -190,21 +204,21 @@ export class Interpreter {
   ): Promise<BootInfo> {
     const assets = await loadPyodideAssets(onProgress);
     // Copies: the Engine cache's buffers must survive for the next boot.
-    const loader = assets.loader.slice(0);
-    const factory = assets.factory.slice(0);
-    const wasm = assets.wasm.slice(0);
-    const stdlib = assets.stdlib.slice(0);
+    const loader = structuredClone(assets.loader);
+    const factory = structuredClone(assets.factory);
+    const wasm = structuredClone(assets.wasm);
+    const stdlib = structuredClone(assets.stdlib);
     return this.ask<BootInfo>(
       {
-        type: "boot",
-        id: this.nextId++,
         cdnBase: PYODIDE_BASE,
-        loader,
         factory,
-        wasm,
-        stdlib,
+        id: this.takeId(),
+        loader,
         lock: lock ?? assets.lock,
         packages,
+        stdlib,
+        type: "boot",
+        wasm,
       },
       [loader, factory, wasm, stdlib]
     );
@@ -220,74 +234,74 @@ export class Interpreter {
     const transfer = files
       .map((f) => f.data)
       .filter((d): d is ArrayBuffer => typeof d !== "string");
-    return this.ask<void>(
+    return this.ask<undefined>(
       {
-        type: "files",
-        id: this.nextId++,
         files,
-        removed,
         folders,
+        id: this.takeId(),
+        removed,
         removedFolders,
+        type: "files",
       },
       transfer
     );
   }
 
   run(opts: RunOptions): Promise<RunResult> {
-    return this.ask<RunResult>({ type: "run", id: this.nextId++, ...opts });
+    return this.ask<RunResult>({ id: this.takeId(), type: "run", ...opts });
   }
 
   install(specs: string[]): Promise<EnvironmentResult> {
     return this.ask<EnvironmentResult>({
-      type: "install",
-      id: this.nextId++,
+      id: this.takeId(),
       specs,
+      type: "install",
     });
   }
 
   uninstall(names: string[]): Promise<EnvironmentResult> {
     return this.ask<EnvironmentResult>({
-      type: "uninstall",
-      id: this.nextId++,
+      id: this.takeId(),
       names,
+      type: "uninstall",
     });
   }
 
   environment(): Promise<EnvironmentResult> {
     return this.ask<EnvironmentResult>({
+      id: this.takeId(),
       type: "environment",
-      id: this.nextId++,
     });
   }
 
   mirror(): Promise<Record<string, string>> {
     return this.ask<Record<string, string>>({
+      id: this.takeId(),
       type: "mirror",
-      id: this.nextId++,
     });
   }
 
   repl(line: string): Promise<ReplResult> {
-    return this.ask<ReplResult>({ type: "repl", id: this.nextId++, line });
+    return this.ask<ReplResult>({ id: this.takeId(), line, type: "repl" });
   }
 
   complete(source: string): Promise<{ completions: string[]; start: number }> {
-    return this.ask({ type: "complete", id: this.nextId++, source });
+    return this.ask({ id: this.takeId(), source, type: "complete" });
   }
 
   resetRepl(): Promise<void> {
-    return this.ask<void>({ type: "resetRepl", id: this.nextId++ });
+    return this.ask<undefined>({ id: this.takeId(), type: "resetRepl" });
   }
 
   replyInput(id: number, line: string | null) {
     if (!this.dead) {
-      this.send({ type: "inputReply", id, line });
+      this.send({ id, line, type: "inputReply" });
     }
   }
 
   resize(cols: number, rows: number) {
     if (!this.dead) {
-      this.send({ type: "resize", cols, rows });
+      this.send({ cols, rows, type: "resize" });
     }
   }
 
