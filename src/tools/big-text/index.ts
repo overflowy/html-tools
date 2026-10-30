@@ -57,20 +57,22 @@ const tool: Tool = {
         <label class="opt" data-when="scroll">Speed
           <select class="o-speed"><option value="slow">Slow</option><option value="normal">Normal</option><option value="fast">Fast</option></select>
         </label>
-      </div>
-      <div class="options">
-        <label class="opt">Countdown
-          <select class="o-cd"><option value="none">None</option><option value="until">Until</option><option value="timer">Timer</option></select>
-        </label>
-        <input type="datetime-local" class="o-until" aria-label="Count down until" data-when="until">
-        <input type="text" class="o-timer" aria-label="Timer length" placeholder="10m, 1h30m" spellcheck="false" autocomplete="off" data-when="timer" title="Starts when you present">
+        <div class="opt-group">
+          <label class="opt">Countdown
+            <select class="o-cd"><option value="none">None</option><option value="until">Until</option><option value="timer">Timer</option></select>
+          </label>
+          <input type="datetime-local" class="o-until" aria-label="Count down until" data-when="until">
+          <input type="text" class="o-timer" aria-label="Timer length" placeholder="10m, 1h30m" spellcheck="false" autocomplete="off" data-when="timer" title="Starts when you present">
+        </div>
         <label class="opt" data-when="countdown">Style
           <select class="o-style"><option value="label">1h 5m 0s</option><option value="clock">1:05:00</option></select>
         </label>
-        <label class="opt" data-when="countdown">At zero
-          <select class="o-end"><option value="freeze">Stay at zero</option><option value="hide">Go blank</option><option value="text">Show text</option></select>
-        </label>
-        <input type="text" class="o-endtext" aria-label="Text at zero" placeholder="Time's up" spellcheck="false" autocomplete="off" data-when="endtext">
+        <div class="opt-group" data-when="countdown">
+          <label class="opt">At zero
+            <select class="o-end"><option value="freeze">Stay at zero</option><option value="hide">Go blank</option><option value="text">Show text</option></select>
+          </label>
+          <input type="text" class="o-endtext" aria-label="Text at zero" placeholder="Time's up" spellcheck="false" autocomplete="off" data-when="endtext">
+        </div>
         <label class="opt" data-when="slides">Each slide <input type="number" class="o-secs" min="${LIMITS.secs[0]}" max="${LIMITS.secs[1]}" step="0.5"> s</label>
         <label class="opt" data-when="slides">Transition
           <select class="o-trans"><option value="fade">Fade</option><option value="slide">Slide</option><option value="none">None</option></select>
