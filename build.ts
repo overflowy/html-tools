@@ -10,16 +10,16 @@ import { renderToStaticMarkup } from "react-dom/server";
 // as a constant and spawns it from a data: or blob: URL, so the artifact
 // stays one file and the workers still run from file://.
 const WORKERS = [
-  { entry: "src/tools/doc-to-markdown/worker.ts", constant: "DOC_WORKER_SRC" },
+  { constant: "DOC_WORKER_SRC", entry: "src/tools/doc-to-markdown/worker.ts" },
   {
-    entry: "src/tools/python-ide/py-worker.ts",
     constant: "PYIDE_PY_WORKER_SRC",
+    entry: "src/tools/python-ide/py-worker.ts",
   },
   {
-    entry: "src/tools/python-ide/ruff-worker.ts",
     constant: "PYIDE_RUFF_WORKER_SRC",
+    entry: "src/tools/python-ide/ruff-worker.ts",
   },
-  { entry: "src/tools/speech-to-text/worker.ts", constant: "STT_WORKER_SRC" },
+  { constant: "STT_WORKER_SRC", entry: "src/tools/speech-to-text/worker.ts" },
 ];
 
 // Python source files are imported as text: the interpreter worker writes
@@ -38,26 +38,26 @@ const lucide: Bun.BunPlugin = {
   name: "lucide icons",
   setup(build) {
     build.onLoad(
-      { filter: /[\\/]lucide-static[\\/]icons[\\/][^\\/]+\.svg$/ },
+      { filter: /[\\/]lucide-static[\\/]icons[\\/][^\\/]+\.svg$/u },
       async (args) => {
-        const text = (await Bun.file(args.path).text())
-          .replace(/<!--[\s\S]*?-->/, "")
-          .trim();
-        const root = /^<svg\s([^>]*)>/.exec(text);
+        const file = await Bun.file(args.path).text();
+        const text = file.replace(/<!--[\s\S]*?-->/u, "").trim();
+        const root = /^<svg\s(?<attrs>[^>]*)>/u.exec(text);
         if (!root) {
           throw new Error(`${args.path} is not an SVG`);
         }
-        const attrs = ` ${root[1]!}`
-          .replaceAll(/\s(class|width|height|xmlns)="[^"]*"/g, "")
+        const rootAttrs = root.groups?.attrs ?? "";
+        const attrs = ` ${rootAttrs}`
+          .replaceAll(/\s(?:class|width|height|xmlns)="[^"]*"/gu, "")
           .replace(
-            /stroke-width="[^"]*"/,
+            /stroke-width="[^"]*"/u,
             `stroke-width="${ICON_STROKE}" aria-hidden="true"`
           )
-          .replaceAll(/\s+/g, " ")
+          .replaceAll(/\s+/gu, " ")
           .trim();
         const body = text
           .slice(root[0].length)
-          .replaceAll(/\s*\n\s*/g, "")
+          .replaceAll(/\s*\n\s*/gu, "")
           .replaceAll(" />", "/>");
         return {
           contents: `export default ${JSON.stringify(`<svg ${attrs}>${body}`)};`,
@@ -78,32 +78,40 @@ const lucide: Bun.BunPlugin = {
 const reactSymbols: Bun.BunPlugin = {
   name: "react-symbols icons",
   setup(build) {
-    const filter = /^@react-symbols\/icons\/(files|folders)\/(\w+)$/;
+    const filter =
+      /^@react-symbols\/icons\/(?<set>files|folders)\/(?<name>\w+)$/u;
     build.onResolve({ filter }, (args) => ({
-      path: args.path,
       namespace: "react-symbols",
+      path: args.path,
     }));
-    build.onLoad({ filter: /.*/, namespace: "react-symbols" }, (args) => {
-      const [, set, name] = filter.exec(args.path)!;
+    build.onLoad({ filter: /.*/u, namespace: "react-symbols" }, (args) => {
+      const groups = filter.exec(args.path)?.groups;
+      if (!groups) {
+        throw new Error(`${args.path} is not a @react-symbols/icons import`);
+      }
+      const { set, name } = groups;
       const icons: Record<string, FC | undefined> =
         set === "files" ? symbolFiles : symbolFolders;
-      const component = icons[name!];
+      const component = icons[name];
       if (!component) {
         throw new Error(
           `@react-symbols/icons has no ${set} icon named ${name}`
         );
       }
-      const prefix = `rs-${name!.toLowerCase()}-`;
+      const prefix = `rs-${name.toLowerCase()}-`;
       const svg = renderToStaticMarkup(createElement(component))
-        .replace(/ xmlns="[^"]*"/, "")
+        .replace(/ xmlns="[^"]*"/u, "")
         .replace("<svg", '<svg aria-hidden="true"')
-        .replaceAll(/ id="([^"]+)"/g, (_, id: string) => ` id="${prefix}${id}"`)
         .replaceAll(
-          /url\(#([^)]+)\)/g,
+          / id="(?<id>[^"]+)"/gu,
+          (_, id: string) => ` id="${prefix}${id}"`
+        )
+        .replaceAll(
+          /url\(#(?<id>[^)]+)\)/gu,
           (_, id: string) => `url(#${prefix}${id})`
         )
         .replaceAll(
-          /href="#([^"]+)"/g,
+          /href="#(?<id>[^"]+)"/gu,
           (_, id: string) => `href="#${prefix}${id}"`
         );
       return {
@@ -119,7 +127,7 @@ const reactSymbols: Bun.BunPlugin = {
 const audio: Bun.BunPlugin = {
   name: "audio files",
   setup(build) {
-    build.onLoad({ filter: /\.mp3$/ }, async (args) => {
+    build.onLoad({ filter: /\.mp3$/u }, async (args) => {
       const b64 = Buffer.from(await Bun.file(args.path).arrayBuffer()).toString(
         "base64"
       );
@@ -139,11 +147,11 @@ const define: Record<string, string> = {};
 for (const w of WORKERS) {
   const worker = await Bun.build({
     entrypoints: [w.entry],
-    target: "browser",
     format: "esm",
-    minify: true,
     loader,
+    minify: true,
     plugins,
+    target: "browser",
   });
   if (!worker.success) {
     for (const log of worker.logs) {
@@ -159,12 +167,12 @@ for (const w of WORKERS) {
 }
 
 const result = await Bun.build({
-  entrypoints: ["src/shell/main.ts"],
-  target: "browser",
-  minify: true,
-  loader,
   define,
+  entrypoints: ["src/shell/main.ts"],
+  loader,
+  minify: true,
   plugins,
+  target: "browser",
 });
 
 if (!result.success) {
@@ -188,20 +196,21 @@ for (const output of result.outputs) {
 // Fonts: CSS imported from the script bundle keeps each url() as the font's
 // path on disk, and each one goes in as a data: URL.
 const fonts = new Map<string, string>();
-for (const [, path] of css.matchAll(/url\(([^)]+\.woff2)\)/g)) {
-  const file = Bun.file(path!);
+for (const { groups = {} } of css.matchAll(/url\((?<path>[^)]+\.woff2)\)/gu)) {
+  const { path } = groups;
+  const file = Bun.file(path);
   if (!(await file.exists())) {
     throw new Error(`font not found: ${path}`);
   }
   fonts.set(
-    path!,
+    path,
     `data:font/woff2;base64,${Buffer.from(await file.arrayBuffer()).toString(
       "base64"
     )}`
   );
 }
 css = css.replaceAll(
-  /url\(([^)]+\.woff2)\)/g,
+  /url\((?<path>[^)]+\.woff2)\)/gu,
   (_, path: string) => `url(${fonts.get(path)})`
 );
 
