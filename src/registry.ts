@@ -1,6 +1,7 @@
 // Adding a tool: create src/tools/<id>/ (module + scoped css) and add one line here.
 import type { Tool } from "./shell/types";
 import base64ToImage from "./tools/base64-to-image";
+import bigText from "./tools/big-text";
 import dependencyAudit from "./tools/dependency-audit";
 import dnsLookup from "./tools/dns-lookup";
 import dualNBack from "./tools/dual-n-back";
@@ -15,4 +16,4 @@ import speechToText from "./tools/speech-to-text";
 import uuidGenerator from "./tools/uuid-generator";
 import whoami from "./tools/whoami";
 
-export const tools: Tool[] = [base64ToImage, dependencyAudit, dnsLookup, docToMarkdown, dualNBack, imageMetadata, jsoncSorter, markdownEditor, pythonIde, qrGenerator, saveDecoder, speechToText, uuidGenerator, whoami];
+export const tools: Tool[] = [base64ToImage, bigText, dependencyAudit, dnsLookup, docToMarkdown, dualNBack, imageMetadata, jsoncSorter, markdownEditor, pythonIde, qrGenerator, saveDecoder, speechToText, uuidGenerator, whoami];

@@ -5,6 +5,7 @@ A collection of browser utilities built into one self-contained `index.html`. Op
 ## Tools
 
 - **Base64 ⇄ Image**: base64 to image and back
+- **Big Text**: a message as large as the screen allows, with slides, a countdown, and a scrolling marquee
 - **Dependency Audit**: check a lockfile (npm, yarn, pnpm, bun, uv) against OSV.dev
 - **DNS Lookup**: DNS over HTTPS, subdomains, email auth checks, whois over RDAP
 - **Document to Markdown**: Word, Excel, PowerPoint, PDF and more, with OCR for scans

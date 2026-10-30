@@ -54,7 +54,7 @@ function check(label: string, ok: boolean, detail = "") {
 
 await page.goto(url);
 const names = await page.locator(".tool-list button").allTextContents();
-check("sidebar lists all tools", names.length === 14, names.join(", "));
+check("sidebar lists all tools", names.length === 15, names.join(", "));
 
 // base64 tool: paste a tiny valid png via direct input.
 await page.goto(url + "#base64-to-image");
@@ -1064,6 +1064,122 @@ page.off("request", hfSpy);
 check("speech: second visit transcribes from the cached engine with no download",
   hfRequests.length === 0 && /Berlin/.test(await sttText()) && (await sttMeta())!.startsWith("German · "), hfRequests.join(" ") + " " + (await sttMeta()));
 await page.evaluate(() => { localStorage.removeItem("html-tools:speech-to-text:language"); localStorage.removeItem("html-tools:speech-to-text:keywords"); });
+
+// Big Text: the Message fitted as large as it goes, Slides, the Countdown,
+// and Present, from the button and from a Present Link.
+const bt = ".tool-big-text ";
+const btLink = (params: Record<string, string>) => url + "#big-text/" + new URLSearchParams(params).toString();
+/** Whether the Slide on screen fits its area, and would not at 4% larger. */
+const btFit = () => page.evaluate(() => {
+  const slide = document.querySelector(".tool-big-text .slide") as HTMLElement;
+  const text = slide.querySelector(".text") as HTMLElement;
+  const size = parseFloat(text.style.fontSize);
+  const fits = () => text.scrollHeight <= slide.clientHeight && text.scrollWidth <= text.clientWidth;
+  text.style.overflow = "hidden";
+  const now = fits();
+  text.style.fontSize = size * 1.04 + "px";
+  const bigger = fits();
+  text.style.fontSize = size + "px";
+  text.style.overflow = "";
+  return { size, now, bigger };
+});
+const btText = () => page.evaluate(() => (document.querySelector(".tool-big-text .slide .text") as HTMLElement).innerText.trim());
+
+await page.goto(url + "#big-text");
+await page.waitForSelector(bt + ".stage");
+check("big text: nothing to show, nothing to present or share",
+  (await page.locator(bt + ".btn-present").isDisabled()) && (await page.locator(bt + ".btn-link").isDisabled()));
+await page.locator(bt + ".o-message").fill("# Welcome\n**Big** *words* ~~small~~ `x*y*` snake_case");
+const btFirst = await btFit();
+check("big text: the message is as large as it fits", btFirst.now && !btFirst.bigger && btFirst.size > 20, JSON.stringify(btFirst));
+check("big text: markdown subset renders", await page.evaluate(() => {
+  const t = document.querySelector(".tool-big-text .slide .text")!;
+  return t.querySelector(".h1")?.textContent === "Welcome" && t.querySelector("strong")?.textContent === "Big" &&
+    t.querySelector("em")?.textContent === "words" && t.querySelector("del")?.textContent === "small" &&
+    t.querySelector("code")?.textContent === "x*y*" && t.textContent!.includes("snake_case");
+}));
+check("big text: state goes in the deep link", await page.evaluate(() => location.hash.startsWith("#big-text/m=%23+Welcome")));
+
+await page.locator(bt + ".o-message").fill("Supercalifragilisticexpialidocious");
+const btWord = await btFit();
+check("big text: a long word shrinks, never splits", btWord.now && !btWord.bigger &&
+  await page.evaluate(() => { const t = document.querySelector(".tool-big-text .slide .text") as HTMLElement; return t.getClientRects().length === 1 && t.offsetHeight < parseFloat(t.style.fontSize) * 1.5; }), JSON.stringify(btWord));
+
+// Slides rotate on their own, and the preview follows the caret.
+await page.goto(btLink({ m: "One || Two || Three", secs: "0.5" }));
+await page.waitForFunction(() => document.querySelector(".tool-big-text .slide-pos")!.textContent === "2 / 3");
+check("big text: slides rotate", (await page.locator(bt + ".o-secs").isVisible()) && (await page.locator(bt + ".o-trans").isVisible()));
+await page.goto(btLink({ m: "One || Two || Three", secs: "60" }));
+await page.locator(bt + ".o-message").click();
+await page.keyboard.press("End");
+await page.waitForFunction(() => document.querySelector(".tool-big-text .slide-pos")!.textContent === "3 / 3");
+check("big text: the preview shows the slide under the caret", (await btText()) === "Three");
+
+// Countdown: a Timer waits at full length in the preview and runs once presented.
+await page.goto(btLink({ m: "Back in {countdown}", timer: "10m" }));
+await page.waitForSelector(bt + ".cd");
+check("big text: a timer waits at full length", (await page.locator(bt + ".cd").textContent()) === "10m\u00a00s" && (await page.locator(bt + ".o-timer").inputValue()) === "10m");
+await page.locator(bt + ".btn-present").click();
+await page.waitForFunction(() => document.querySelector(".tool-big-text .cd")?.textContent === "9m\u00a059s", null, { timeout: 3000 });
+check("big text: presenting starts the timer", true);
+const btCover = await page.evaluate(() => {
+  const r = document.querySelector(".tool-big-text .stage")!.getBoundingClientRect();
+  return r.x === 0 && r.y === 0 && r.width === innerWidth && r.height === innerHeight && location.hash.endsWith("&show=1");
+});
+check("big text: present covers the window and is in the link", btCover);
+await page.keyboard.press("Escape");
+await page.waitForFunction(() => !document.querySelector(".tool-big-text .stage")!.classList.contains("presenting"));
+check("big text: escape ends it, and the timer waits again",
+  (await page.locator(bt + ".cd").textContent()) === "10m\u00a00s" && !(await page.evaluate(() => location.hash)).includes("show=1"));
+
+// At zero: Until in the past swaps the Slides with the Countdown for the end text.
+await page.goto(btLink({ m: "Sale ends in {countdown} || Visit us", until: "2020-01-01T00:00:00Z", end: "text", endtext: "**Sold out**" }));
+await page.waitForSelector(bt + ".slide strong");
+check("big text: at zero the end text takes the countdown's place", (await btText()) === "Sold out" && (await page.locator(bt + ".slide-pos").textContent()) === "1 / 2");
+await page.goto(btLink({ m: "Big news", timer: "5m" }));
+await page.waitForSelector(bt + ".slide");
+check("big text: a message without {countdown} says where it goes", (await page.locator(bt + ".note").textContent())!.includes("{countdown}"));
+
+// Copy link: a Present Link, without the Shell's query string.
+await page.goto(url + "?sidebar=collapsed#big-text/" + new URLSearchParams({ m: "Hi there" }).toString());
+await page.waitForSelector(bt + ".slide");
+const btCopied = await page.evaluate(() => {
+  let out = "";
+  navigator.clipboard.writeText = async (t: string) => { out = t; };
+  (document.querySelector(".tool-big-text .btn-link") as HTMLElement).click();
+  return new Promise<string>((resolve) => setTimeout(() => resolve(out), 50));
+});
+check("big text: copy link makes a present link", new URL(btCopied).search === "" && new URL(btCopied).hash === "#big-text/m=Hi+there&show=1", btCopied);
+check("big text: copy link says so", (await page.locator(bt + ".btn-link").textContent()) === "Copied");
+
+// A Present Link opens straight onto the display; arrows step, and leaving the Tool ends it.
+await page.goto(btLink({ m: "A || B", secs: "60", show: "1" }));
+await page.waitForSelector(bt + ".stage.presenting");
+check("big text: a present link opens presenting, with the full screen hint",
+  (await btText()) === "A" && (await page.locator(bt + ".hint").isVisible()) &&
+  (await page.locator(bt + ".stage").evaluate((s) => getComputedStyle(s).userSelect)) === "none");
+await page.keyboard.press("ArrowRight");
+await page.waitForFunction(() => document.querySelector(".tool-big-text .slide-pos")!.textContent === "2 / 2");
+await page.keyboard.press("/");
+check("big text: keys step slides and stay away from the shell", !(await page.evaluate(() => document.body.classList.contains("drawer-open"))));
+await page.keyboard.press("f");
+await page.waitForFunction(() => !!document.fullscreenElement);
+await page.mouse.click(300, 300);
+await page.waitForFunction(() => document.querySelector(".tool-big-text .slide-pos")!.textContent === "1 / 2");
+check("big text: F goes full screen, and a click moves to the next slide", !!(await page.evaluate(() => document.fullscreenElement)));
+await page.keyboard.press("Escape");
+// Firefox clears fullscreenElement before it fires fullscreenchange, so wait for the presentation itself.
+await page.waitForFunction(() => !document.fullscreenElement && !document.querySelector(".tool-big-text .stage.presenting"));
+check("big text: escape ends it", !(await page.locator(bt + ".stage.presenting").count()) && !(await page.evaluate(() => location.hash)).includes("show=1"));
+await page.goto(btLink({ m: "A", show: "1" }));
+await page.waitForSelector(bt + ".stage.presenting");
+await page.mouse.click(300, 300);
+check("big text: with one slide, a click ends it", !(await page.locator(bt + ".stage.presenting").count()));
+await page.goto(btLink({ m: "A", show: "1" }));
+await page.waitForSelector(bt + ".stage.presenting");
+await page.evaluate(() => { location.hash = "uuid-generator"; });
+await page.waitForFunction(() => !document.querySelector(".tool-big-text .stage.presenting"));
+check("big text: switching tools ends the presentation", true);
 
 // UUID Generator: one version 4 UUID on selection, another on Generate, and
 // both Copy and the value itself put it on the clipboard. No State, so the
