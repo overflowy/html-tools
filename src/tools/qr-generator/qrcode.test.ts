@@ -16,7 +16,7 @@ interface Fixture {
   matrix: string[];
 }
 
-function rowsOf(qr: ReturnType<typeof encode>): string[] {
+const rowsOf = (qr: ReturnType<typeof encode>): string[] => {
   const rows: string[] = [];
   for (let y = 0; y < qr.size; y += 1) {
     let row = "";
@@ -26,7 +26,7 @@ function rowsOf(qr: ReturnType<typeof encode>): string[] {
     rows.push(row);
   }
   return rows;
-}
+};
 
 describe("mode selection", () => {
   test("digits are numeric", () =>

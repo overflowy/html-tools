@@ -16,9 +16,9 @@ export interface Encoded {
   matrix: Uint8Array;
 }
 
-const ECL_INDEX: Record<Ecl, number> = { L: 0, M: 1, Q: 2, H: 3 };
+const ECL_INDEX: Record<Ecl, number> = { H: 3, L: 0, M: 1, Q: 2 };
 /** Two-bit error correction indicator placed in the format information. */
-const ECL_FORMAT_BITS: Record<Ecl, number> = { L: 1, M: 0, Q: 3, H: 2 };
+const ECL_FORMAT_BITS: Record<Ecl, number> = { H: 2, L: 1, M: 0, Q: 3 };
 
 // Spec tables (ISO/IEC 18004), indexed [ecl][version]; version 0 is unused padding.
 const ECC_CODEWORDS_PER_BLOCK = [
@@ -64,10 +64,47 @@ const NUM_BLOCKS = [
 
 const ALPHANUMERIC_CHARSET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ $%*+-./:";
 
+/** Element `i` of a table or buffer. Every index here is computed in range, so a miss is a bug. */
+const at = <T>(list: ArrayLike<T>, i: number): T => {
+  const value = list[i];
+  if (value === undefined) {
+    throw new RangeError(`Index ${i} is outside a table of ${list.length}`);
+  }
+  return value;
+};
+
+/* ---------------- bit arithmetic ---------------- */
+
+/** XOR_TABLE[a * 256 + b] is the bitwise XOR of bytes a and b. */
+const XOR_TABLE = new Uint8Array(256 * 256);
+for (let a = 0; a < 256; a += 1) {
+  for (let b = 0; b < 256; b += 1) {
+    // The low bits differ exactly when their sum is odd; the rest is the XOR of the halves.
+    const high = at(XOR_TABLE, Math.floor(a / 2) * 256 + Math.floor(b / 2));
+    XOR_TABLE[a * 256 + b] = high * 2 + ((a + b) % 2);
+  }
+}
+
+/** Bitwise XOR of two non-negative integers, a byte at a time. */
+const xor = (a: number, b: number): number => {
+  let result = 0;
+  let scale = 1;
+  for (let x = a, y = b; x > 0 || y > 0; scale *= 256) {
+    result += at(XOR_TABLE, (x % 256) * 256 + (y % 256)) * scale;
+    x = Math.floor(x / 256);
+    y = Math.floor(y / 256);
+  }
+  return result;
+};
+
+/** Bit `i` (0 = least significant) of a non-negative integer, as 0 or 1. */
+const bitOf = (value: number, i: number): number =>
+  Math.floor(value / 2 ** i) % 2;
+
 /* ---------------- segment sizing ---------------- */
 
-export function pickMode(text: string): Mode {
-  if (/^[0-9]+$/.test(text)) {
+export const pickMode = (text: string): Mode => {
+  if (/^[0-9]+$/u.test(text)) {
     return "numeric";
   }
   let alnum = true;
@@ -78,33 +115,44 @@ export function pickMode(text: string): Mode {
     }
   }
   return alnum ? "alphanumeric" : "byte";
-}
+};
+
+/** Character count field widths per mode, for versions 1-9, 10-26 and 27-40. */
+const CHAR_COUNT_BITS: Record<Mode, readonly number[]> = {
+  alphanumeric: [9, 11, 13],
+  byte: [8, 16, 16],
+  numeric: [10, 12, 14],
+};
 
 /** Width of the character count field for a mode, by version. */
-function charCountBits(mode: Mode, version: number): number {
-  const cls = version <= 9 ? 0 : version <= 26 ? 1 : 2;
-  if (mode === "numeric") {
-    return [10, 12, 14][cls]!;
+const charCountBits = (mode: Mode, version: number): number => {
+  let versionClass = 2;
+  if (version <= 9) {
+    versionClass = 0;
+  } else if (version <= 26) {
+    versionClass = 1;
   }
-  if (mode === "alphanumeric") {
-    return [9, 11, 13][cls]!;
-  }
-  return [8, 16, 16][cls]!;
-}
+  return at(CHAR_COUNT_BITS[mode], versionClass);
+};
+
+/** Bits for a trailing group of 0, 1 or 2 numeric digits. */
+const NUMERIC_TAIL_BITS = [0, 4, 7];
+/** Bits for a numeric group of 0-3 digits, by group length. */
+const NUMERIC_GROUP_BITS = [0, 4, 7, 10];
 
 /** Payload bits for `count` characters (bytes for byte mode), excluding headers. */
-function payloadBits(mode: Mode, count: number): number {
+const payloadBits = (mode: Mode, count: number): number => {
   if (mode === "numeric") {
-    return 10 * Math.floor(count / 3) + [0, 4, 7][count % 3]!;
+    return 10 * Math.floor(count / 3) + at(NUMERIC_TAIL_BITS, count % 3);
   }
   if (mode === "alphanumeric") {
     return 11 * Math.floor(count / 2) + 6 * (count % 2);
   }
   return 8 * count;
-}
+};
 
 /** Data modules available in a version after removing every function pattern. */
-function rawDataModules(version: number): number {
+const rawDataModules = (version: number): number => {
   let n = (16 * version + 128) * version + 64;
   if (version >= 2) {
     const numAlign = Math.floor(version / 7) + 2;
@@ -114,39 +162,42 @@ function rawDataModules(version: number): number {
     }
   }
   return n;
-}
+};
 
-function dataCodewords(version: number, ecl: Ecl): number {
-  const e = ECL_INDEX[ecl];
-  return (
-    Math.floor(rawDataModules(version) / 8) -
-    ECC_CODEWORDS_PER_BLOCK[e]![version]! * NUM_BLOCKS[e]![version]!
-  );
-}
+const eccCodewordsPerBlock = (version: number, ecl: Ecl): number =>
+  at(at(ECC_CODEWORDS_PER_BLOCK, ECL_INDEX[ecl]), version);
+
+const numBlocks = (version: number, ecl: Ecl): number =>
+  at(at(NUM_BLOCKS, ECL_INDEX[ecl]), version);
+
+const dataCodewords = (version: number, ecl: Ecl): number =>
+  Math.floor(rawDataModules(version) / 8) -
+  eccCodewordsPerBlock(version, ecl) * numBlocks(version, ecl);
 
 /** Largest byte-mode payload a given level can hold (version 40). */
-export function maxBytes(ecl: Ecl): number {
-  return (
-    dataCodewords(40, ecl) - Math.ceil((4 + charCountBits("byte", 40)) / 8)
-  );
-}
+export const maxBytes = (ecl: Ecl): number =>
+  dataCodewords(40, ecl) - Math.ceil((4 + charCountBits("byte", 40)) / 8);
 
 /* ---------------- bit stream ---------------- */
 
-function appendBits(buf: number[], value: number, length: number) {
+const appendBits = (buf: number[], value: number, length: number) => {
   for (let i = length - 1; i >= 0; i -= 1) {
-    buf.push((value >>> i) & 1);
+    buf.push(bitOf(value, i));
   }
-}
+};
 
-function buildBitStream(text: string, mode: Mode, version: number): number[] {
+const buildBitStream = (
+  text: string,
+  mode: Mode,
+  version: number
+): number[] => {
   const buf: number[] = [];
   if (mode === "numeric") {
     appendBits(buf, 1, 4);
     appendBits(buf, text.length, charCountBits(mode, version));
     for (let i = 0; i < text.length; i += 3) {
       const group = text.slice(i, i + 3);
-      appendBits(buf, Number(group), [0, 4, 7, 10][group.length]!);
+      appendBits(buf, Number(group), at(NUMERIC_GROUP_BITS, group.length));
     }
   } else if (mode === "alphanumeric") {
     appendBits(buf, 2, 4);
@@ -154,13 +205,13 @@ function buildBitStream(text: string, mode: Mode, version: number): number[] {
     for (let i = 0; i + 1 < text.length; i += 2) {
       appendBits(
         buf,
-        ALPHANUMERIC_CHARSET.indexOf(text[i]!) * 45 +
-          ALPHANUMERIC_CHARSET.indexOf(text[i + 1]!),
+        ALPHANUMERIC_CHARSET.indexOf(text.charAt(i)) * 45 +
+          ALPHANUMERIC_CHARSET.indexOf(text.charAt(i + 1)),
         11
       );
     }
     if (text.length % 2 === 1) {
-      appendBits(buf, ALPHANUMERIC_CHARSET.indexOf(text.at(-1)!), 6);
+      appendBits(buf, ALPHANUMERIC_CHARSET.indexOf(text.slice(-1)), 6);
     }
   } else {
     const bytes = new TextEncoder().encode(text);
@@ -171,7 +222,7 @@ function buildBitStream(text: string, mode: Mode, version: number): number[] {
     }
   }
   return buf;
-}
+};
 
 /* ---------------- Reed-Solomon over GF(256), polynomial 0x11D ---------------- */
 
@@ -182,69 +233,68 @@ const GF_LOG = new Uint8Array(256);
   for (let i = 0; i < 255; i += 1) {
     GF_EXP[i] = x;
     GF_LOG[x] = i;
-    x <<= 1;
-    if (x & 0x1_00) {
-      x ^= 0x1_1d;
+    x *= 2;
+    if (x >= 0x1_00) {
+      x = xor(x, 0x1_1d);
     }
   }
   for (let i = 255; i < 512; i += 1) {
-    GF_EXP[i] = GF_EXP[i - 255]!;
+    GF_EXP[i] = at(GF_EXP, i - 255);
   }
 }
 
-function gfMul(a: number, b: number): number {
+const gfMul = (a: number, b: number): number => {
   if (a === 0 || b === 0) {
     return 0;
   }
-  return GF_EXP[GF_LOG[a]! + GF_LOG[b]!]!;
-}
+  return at(GF_EXP, at(GF_LOG, a) + at(GF_LOG, b));
+};
 
 /** Generator polynomial coefficients for `degree` ECC codewords, leading 1 omitted. */
-function rsGenerator(degree: number): Uint8Array {
+const rsGenerator = (degree: number): Uint8Array => {
   let poly = new Uint8Array([1]);
   for (let i = 0; i < degree; i += 1) {
     const next = new Uint8Array(poly.length + 1);
-    const root = GF_EXP[i]!;
-    for (let j = 0; j < poly.length; j += 1) {
-      next[j] ^= poly[j]!;
-      next[j + 1] ^= gfMul(poly[j]!, root);
+    const root = at(GF_EXP, i);
+    for (const [j, coef] of poly.entries()) {
+      next[j] = xor(at(next, j), coef);
+      next[j + 1] = xor(at(next, j + 1), gfMul(coef, root));
     }
     poly = next;
   }
   return poly.slice(1);
-}
+};
 
-function rsRemainder(data: Uint8Array, generator: Uint8Array): Uint8Array {
+const rsRemainder = (data: Uint8Array, generator: Uint8Array): Uint8Array => {
   const rem = new Uint8Array(generator.length);
   for (const b of data) {
-    const factor = b ^ rem[0]!;
+    const factor = xor(b, at(rem, 0));
     rem.copyWithin(0, 1);
     rem[rem.length - 1] = 0;
-    for (let i = 0; i < generator.length; i += 1) {
-      rem[i] ^= gfMul(generator[i]!, factor);
+    for (const [i, coef] of generator.entries()) {
+      rem[i] = xor(at(rem, i), gfMul(coef, factor));
     }
   }
   return rem;
-}
+};
 
 /** Split into blocks, compute ECC per block, and interleave both, per the spec. */
-function addEccAndInterleave(
+const addEccAndInterleave = (
   data: Uint8Array,
   version: number,
   ecl: Ecl
-): Uint8Array {
-  const e = ECL_INDEX[ecl];
-  const numBlocks = NUM_BLOCKS[e]![version]!;
-  const eccLen = ECC_CODEWORDS_PER_BLOCK[e]![version]!;
+): Uint8Array => {
+  const blockCount = numBlocks(version, ecl);
+  const eccLen = eccCodewordsPerBlock(version, ecl);
   const rawCodewords = Math.floor(rawDataModules(version) / 8);
-  const numShortBlocks = numBlocks - (rawCodewords % numBlocks);
-  const shortDataLen = Math.floor(rawCodewords / numBlocks) - eccLen;
+  const numShortBlocks = blockCount - (rawCodewords % blockCount);
+  const shortDataLen = Math.floor(rawCodewords / blockCount) - eccLen;
 
   const generator = rsGenerator(eccLen);
   const dataBlocks: Uint8Array[] = [];
   const eccBlocks: Uint8Array[] = [];
   let k = 0;
-  for (let i = 0; i < numBlocks; i += 1) {
+  for (let i = 0; i < blockCount; i += 1) {
     const len = shortDataLen + (i < numShortBlocks ? 0 : 1);
     const block = data.slice(k, k + len);
     k += len;
@@ -257,21 +307,23 @@ function addEccAndInterleave(
   for (let i = 0; i <= shortDataLen; i += 1) {
     for (const block of dataBlocks) {
       if (i < block.length) {
-        out[o++] = block[i]!;
+        out[o] = at(block, i);
+        o += 1;
       }
     }
   }
   for (let i = 0; i < eccLen; i += 1) {
     for (const block of eccBlocks) {
-      out[o++] = block[i]!;
+      out[o] = at(block, i);
+      o += 1;
     }
   }
   return out;
-}
+};
 
 /* ---------------- matrix construction ---------------- */
 
-function alignmentPositions(version: number): number[] {
+const alignmentPositions = (version: number): number[] => {
   if (version === 1) {
     return [];
   }
@@ -284,7 +336,7 @@ function alignmentPositions(version: number): number[] {
     positions.splice(1, 0, pos);
   }
   return positions;
-}
+};
 
 interface Grid {
   size: number;
@@ -292,16 +344,67 @@ interface Grid {
   isFunction: Uint8Array;
 }
 
-function setFunction(g: Grid, x: number, y: number, dark: boolean) {
+const setFunction = (g: Grid, x: number, y: number, dark: boolean) => {
   if (x < 0 || x >= g.size || y < 0 || y >= g.size) {
     return;
   }
   const i = y * g.size + x;
   g.modules[i] = dark ? 1 : 0;
   g.isFunction[i] = 1;
-}
+};
 
-function drawFunctionPatterns(g: Grid, version: number) {
+/** BCH-protected format information, drawn in both of its locations. */
+const drawFormatBits = (g: Grid, ecl: Ecl, mask: number) => {
+  const data = ECL_FORMAT_BITS[ecl] * 8 + mask;
+  // Remainder of data * x^10 divided by the generator 0x537; it stays below 2^10.
+  let rem = data;
+  for (let i = 0; i < 10; i += 1) {
+    rem = xor(rem * 2, Math.floor(rem / 2 ** 9) * 0x5_37);
+  }
+  const bits = xor(data * 2 ** 10 + rem, 0x54_12);
+  const bit = (i: number) => bitOf(bits, i) === 1;
+
+  for (let i = 0; i <= 5; i += 1) {
+    setFunction(g, 8, i, bit(i));
+  }
+  setFunction(g, 8, 7, bit(6));
+  setFunction(g, 8, 8, bit(7));
+  setFunction(g, 7, 8, bit(8));
+  for (let i = 9; i < 15; i += 1) {
+    setFunction(g, 14 - i, 8, bit(i));
+  }
+
+  for (let i = 0; i < 8; i += 1) {
+    setFunction(g, g.size - 1 - i, 8, bit(i));
+  }
+  for (let i = 8; i < 15; i += 1) {
+    setFunction(g, 8, g.size - 15 + i, bit(i));
+  }
+  // Dark module
+  setFunction(g, 8, g.size - 8, true);
+};
+
+/** BCH-protected version information, present from version 7 up. */
+const drawVersionInfo = (g: Grid, version: number) => {
+  if (version < 7) {
+    return;
+  }
+  // Remainder of version * x^12 divided by the generator 0x1F25; it stays below 2^12.
+  let rem = version;
+  for (let i = 0; i < 12; i += 1) {
+    rem = xor(rem * 2, Math.floor(rem / 2 ** 11) * 0x1f_25);
+  }
+  const bits = version * 2 ** 12 + rem;
+  for (let i = 0; i < 18; i += 1) {
+    const dark = bitOf(bits, i) === 1;
+    const a = g.size - 11 + (i % 3);
+    const b = Math.floor(i / 3);
+    setFunction(g, a, b, dark);
+    setFunction(g, b, a, dark);
+  }
+};
+
+const drawFunctionPatterns = (g: Grid, version: number) => {
   // Timing patterns
   for (let i = 0; i < g.size; i += 1) {
     setFunction(g, 6, i, i % 2 === 0);
@@ -323,8 +426,8 @@ function drawFunctionPatterns(g: Grid, version: number) {
   // Alignment patterns, skipping the three finder corners
   const positions = alignmentPositions(version);
   const last = positions.length - 1;
-  for (let i = 0; i < positions.length; i += 1) {
-    for (let j = 0; j < positions.length; j += 1) {
+  for (const [i, px] of positions.entries()) {
+    for (const [j, py] of positions.entries()) {
       if (
         (i === 0 && j === 0) ||
         (i === 0 && j === last) ||
@@ -336,75 +439,28 @@ function drawFunctionPatterns(g: Grid, version: number) {
         for (let dx = -2; dx <= 2; dx += 1) {
           setFunction(
             g,
-            positions[i]! + dx,
-            positions[j]! + dy,
+            px + dx,
+            py + dy,
             Math.max(Math.abs(dx), Math.abs(dy)) !== 1
           );
         }
       }
     }
   }
-  drawFormatBits(g, "M", 0); // placeholder so format modules count as reserved
+  // Placeholder so format modules count as reserved
+  drawFormatBits(g, "M", 0);
   drawVersionInfo(g, version);
-}
-
-/** BCH-protected format information, drawn in both of its locations. */
-function drawFormatBits(g: Grid, ecl: Ecl, mask: number) {
-  const data = (ECL_FORMAT_BITS[ecl] << 3) | mask;
-  let rem = data;
-  for (let i = 0; i < 10; i += 1) {
-    rem = (rem << 1) ^ ((rem >>> 9) * 0x5_37);
-  }
-  const bits = ((data << 10) | rem) ^ 0x54_12;
-  const bit = (i: number) => ((bits >>> i) & 1) === 1;
-
-  for (let i = 0; i <= 5; i += 1) {
-    setFunction(g, 8, i, bit(i));
-  }
-  setFunction(g, 8, 7, bit(6));
-  setFunction(g, 8, 8, bit(7));
-  setFunction(g, 7, 8, bit(8));
-  for (let i = 9; i < 15; i += 1) {
-    setFunction(g, 14 - i, 8, bit(i));
-  }
-
-  for (let i = 0; i < 8; i += 1) {
-    setFunction(g, g.size - 1 - i, 8, bit(i));
-  }
-  for (let i = 8; i < 15; i += 1) {
-    setFunction(g, 8, g.size - 15 + i, bit(i));
-  }
-  setFunction(g, 8, g.size - 8, true); // dark module
-}
-
-/** BCH-protected version information, present from version 7 up. */
-function drawVersionInfo(g: Grid, version: number) {
-  if (version < 7) {
-    return;
-  }
-  let rem = version;
-  for (let i = 0; i < 12; i += 1) {
-    rem = (rem << 1) ^ ((rem >>> 11) * 0x1f_25);
-  }
-  const bits = (version << 12) | rem;
-  for (let i = 0; i < 18; i += 1) {
-    const dark = ((bits >>> i) & 1) === 1;
-    const a = g.size - 11 + (i % 3);
-    const b = Math.floor(i / 3);
-    setFunction(g, a, b, dark);
-    setFunction(g, b, a, dark);
-  }
-}
+};
 
 /** Zigzag placement: column pairs right to left, alternating up and down, skipping column 6. */
-function placeData(g: Grid, codewords: Uint8Array) {
+const placeData = (g: Grid, codewords: Uint8Array) => {
   let bitIndex = 0;
   const totalBits = codewords.length * 8;
   for (let right = g.size - 1; right >= 1; right -= 2) {
     if (right === 6) {
       right = 5;
     }
-    const upward = ((right + 1) & 2) === 0;
+    const upward = (right + 1) % 4 < 2;
     for (let v = 0; v < g.size; v += 1) {
       const y = upward ? g.size - 1 - v : v;
       for (const x of [right, right - 1]) {
@@ -412,15 +468,17 @@ function placeData(g: Grid, codewords: Uint8Array) {
         if (g.isFunction[i] || bitIndex >= totalBits) {
           continue;
         }
-        g.modules[i] =
-          (codewords[bitIndex >>> 3]! >>> (7 - (bitIndex & 7))) & 1;
+        g.modules[i] = bitOf(
+          at(codewords, Math.floor(bitIndex / 8)),
+          7 - (bitIndex % 8)
+        );
         bitIndex += 1;
       }
     }
   }
-}
+};
 
-function maskBit(mask: number, x: number, y: number): boolean {
+const maskBit = (mask: number, x: number, y: number): boolean => {
   switch (mask) {
     case 0: {
       return (x + y) % 2 === 0;
@@ -447,19 +505,19 @@ function maskBit(mask: number, x: number, y: number): boolean {
       return (((x + y) % 2) + ((x * y) % 3)) % 2 === 0;
     }
   }
-}
+};
 
-/** XOR the mask over data modules; self-inverse. */
-function applyMask(g: Grid, mask: number) {
+/** Flip the mask over data modules; self-inverse. */
+const applyMask = (g: Grid, mask: number) => {
   for (let y = 0; y < g.size; y += 1) {
     for (let x = 0; x < g.size; x += 1) {
       const i = y * g.size + x;
       if (!g.isFunction[i] && maskBit(mask, x, y)) {
-        g.modules[i] ^= 1;
+        g.modules[i] = 1 - at(g.modules, i);
       }
     }
   }
-}
+};
 
 /* ---------------- mask evaluation (spec penalty rules N1-N4) ---------------- */
 
@@ -473,8 +531,8 @@ const PENALTY_N4 = 10;
  * `runs` holds the latest run lengths, most recent first; the line's light
  * border counts as extra light run length at both ends.
  */
-function finderLikePatterns(runs: number[]): number {
-  const n = runs[1]!;
+const finderLikePatterns = (runs: number[]): number => {
+  const n = at(runs, 1);
   const core =
     n > 0 &&
     runs[2] === n &&
@@ -484,56 +542,64 @@ function finderLikePatterns(runs: number[]): number {
   if (!core) {
     return 0;
   }
+  const first = at(runs, 0);
+  const seventh = at(runs, 6);
   return (
-    (runs[0]! >= n * 4 && runs[6]! >= n ? 1 : 0) +
-    (runs[6]! >= n * 4 && runs[0]! >= n ? 1 : 0)
+    (first >= n * 4 && seventh >= n ? 1 : 0) +
+    (seventh >= n * 4 && first >= n ? 1 : 0)
   );
-}
+};
 
-function penaltyScore(g: Grid): number {
+/** N1 (same-color runs of 5+) and N3 (finder-like patterns) along one row (axis 0) or column. */
+const linePenalty = (g: Grid, axis: number, a: number): number => {
+  const { size } = g;
+  let score = 0;
+  const pushRun = (runs: number[], length: number) => {
+    // The light border pads the first run
+    const padded = runs[0] === 0 ? length + size : length;
+    runs.pop();
+    runs.unshift(padded);
+  };
+
+  const runs = [0, 0, 0, 0, 0, 0, 0];
+  let runColor = 0;
+  let runLen = 0;
+  for (let b = 0; b < size; b += 1) {
+    const dark = at(g.modules, axis === 0 ? a * size + b : b * size + a);
+    if (dark === runColor) {
+      runLen += 1;
+      if (runLen === 5) {
+        score += PENALTY_N1;
+      } else if (runLen > 5) {
+        score += 1;
+      }
+    } else {
+      pushRun(runs, runLen);
+      if (!runColor) {
+        score += finderLikePatterns(runs) * PENALTY_N3;
+      }
+      runColor = dark;
+      runLen = 1;
+    }
+  }
+  if (runColor) {
+    // close a trailing dark run before the border
+    pushRun(runs, runLen);
+    runLen = 0;
+  }
+  // The light border pads the final run
+  pushRun(runs, runLen + size);
+  return score + finderLikePatterns(runs) * PENALTY_N3;
+};
+
+const penaltyScore = (g: Grid): number => {
   const { size } = g;
   let score = 0;
 
-  const pushRun = (runs: number[], length: number) => {
-    if (runs[0] === 0) {
-      length += size;
-    } // light border pads the first run
-    runs.pop();
-    runs.unshift(length);
-  };
-
-  // N1 (same-color runs of 5+) and N3 (finder-like patterns), along both axes
+  // N1 and N3, along both axes
   for (let axis = 0; axis < 2; axis += 1) {
     for (let a = 0; a < size; a += 1) {
-      const runs = [0, 0, 0, 0, 0, 0, 0];
-      let runColor = 0;
-      let runLen = 0;
-      for (let b = 0; b < size; b += 1) {
-        const dark =
-          axis === 0 ? g.modules[a * size + b]! : g.modules[b * size + a]!;
-        if (dark === runColor) {
-          runLen += 1;
-          if (runLen === 5) {
-            score += PENALTY_N1;
-          } else if (runLen > 5) {
-            score += 1;
-          }
-        } else {
-          pushRun(runs, runLen);
-          if (!runColor) {
-            score += finderLikePatterns(runs) * PENALTY_N3;
-          }
-          runColor = dark;
-          runLen = 1;
-        }
-      }
-      if (runColor) {
-        // close a trailing dark run before the border
-        pushRun(runs, runLen);
-        runLen = 0;
-      }
-      pushRun(runs, runLen + size); // light border pads the final run
-      score += finderLikePatterns(runs) * PENALTY_N3;
+      score += linePenalty(g, axis, a);
     }
   }
 
@@ -560,9 +626,69 @@ function penaltyScore(g: Grid): number {
   score +=
     (Math.ceil(Math.abs(dark * 20 - total * 10) / total) - 1) * PENALTY_N4;
   return score;
-}
+};
 
 /* ---------------- top level ---------------- */
+
+/** Smallest version whose data capacity at `ecl` holds the payload, or 0 when none does. */
+const pickVersion = (mode: Mode, count: number, ecl: Ecl): number => {
+  for (let v = 1; v <= 40; v += 1) {
+    if (
+      4 + charCountBits(mode, v) + payloadBits(mode, count) <=
+      dataCodewords(v, ecl) * 8
+    ) {
+      return v;
+    }
+  }
+  return 0;
+};
+
+/** The data codewords: bit stream, terminator, byte alignment, then alternating pad bytes. */
+const dataCodewordBytes = (
+  text: string,
+  mode: Mode,
+  version: number,
+  ecl: Ecl
+): Uint8Array => {
+  const bits = buildBitStream(text, mode, version);
+  const capacityBits = dataCodewords(version, ecl) * 8;
+  // Terminator
+  appendBits(bits, 0, Math.min(4, capacityBits - bits.length));
+  // Byte alignment
+  appendBits(bits, 0, (8 - (bits.length % 8)) % 8);
+  const data = new Uint8Array(capacityBits / 8);
+  for (const [i, bit] of bits.entries()) {
+    if (bit) {
+      // Each bit position is set once, so adding its weight sets it.
+      const byte = Math.floor(i / 8);
+      data[byte] = at(data, byte) + 2 ** (7 - (i % 8));
+    }
+  }
+  let pad = 0xec;
+  for (let i = bits.length / 8; i < data.length; i += 1) {
+    data[i] = pad;
+    pad = pad === 0xec ? 0x11 : 0xec;
+  }
+  return data;
+};
+
+/** The lowest-penalty mask for a grid whose data is placed but not yet masked. */
+const bestMask = (g: Grid, ecl: Ecl): number => {
+  let mask = -1;
+  let best = Infinity;
+  for (let m = 0; m < 8; m += 1) {
+    applyMask(g, m);
+    drawFormatBits(g, ecl, m);
+    const score = penaltyScore(g);
+    if (score < best) {
+      best = score;
+      mask = m;
+    }
+    // Undo
+    applyMask(g, m);
+  }
+  return mask;
+};
 
 /**
  * Encode `text` at the given error correction level into a finished module
@@ -570,68 +696,29 @@ function penaltyScore(g: Grid): number {
  * `forcedMask` is 0-7) the best-scoring mask. Throws if the payload cannot
  * fit in version 40.
  */
-export function encode(text: string, ecl: Ecl, forcedMask = -1): Encoded {
+export const encode = (text: string, ecl: Ecl, forcedMask = -1): Encoded => {
   const mode = pickMode(text);
   const count =
     mode === "byte" ? new TextEncoder().encode(text).length : text.length;
 
-  let version = 0;
-  for (let v = 1; v <= 40; v += 1) {
-    if (
-      4 + charCountBits(mode, v) + payloadBits(mode, count) <=
-      dataCodewords(v, ecl) * 8
-    ) {
-      version = v;
-      break;
-    }
-  }
+  const version = pickVersion(mode, count, ecl);
   if (version === 0) {
     throw new RangeError(`Data too long for a QR code at level ${ecl}`);
   }
 
-  const bits = buildBitStream(text, mode, version);
-  const capacityBits = dataCodewords(version, ecl) * 8;
-  appendBits(bits, 0, Math.min(4, capacityBits - bits.length)); // terminator
-  appendBits(bits, 0, (8 - (bits.length % 8)) % 8); // byte alignment
-  const data = new Uint8Array(capacityBits / 8);
-  for (let i = 0; i < bits.length; i += 1) {
-    if (bits[i]) {
-      data[i >>> 3] |= 0x80 >>> (i & 7);
-    }
-  }
-  for (
-    let i = bits.length / 8, pad = 0xec;
-    i < data.length;
-    i++, pad ^= 0xec ^ 0x11
-  ) {
-    data[i] = pad;
-  }
-
+  const data = dataCodewordBytes(text, mode, version, ecl);
   const size = version * 4 + 17;
   const g: Grid = {
-    size,
-    modules: new Uint8Array(size * size),
     isFunction: new Uint8Array(size * size),
+    modules: new Uint8Array(size * size),
+    size,
   };
   drawFunctionPatterns(g, version);
   placeData(g, addEccAndInterleave(data, version, ecl));
 
-  let mask = forcedMask;
-  if (mask === -1) {
-    let best = Infinity;
-    for (let m = 0; m < 8; m += 1) {
-      applyMask(g, m);
-      drawFormatBits(g, ecl, m);
-      const score = penaltyScore(g);
-      if (score < best) {
-        best = score;
-        mask = m;
-      }
-      applyMask(g, m); // undo
-    }
-  }
+  const mask = forcedMask === -1 ? bestMask(g, ecl) : forcedMask;
   applyMask(g, mask);
   drawFormatBits(g, ecl, mask);
 
-  return { version, size, mask, mode, matrix: g.modules };
-}
+  return { mask, matrix: g.modules, mode, size, version };
+};
