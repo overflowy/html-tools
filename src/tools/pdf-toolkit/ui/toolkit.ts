@@ -148,12 +148,21 @@ export class Toolkit {
   private generation = 0;
   /** Cancels so far: a worker still starting when one comes is not used. */
   private cancels = 0;
-  private busy = false;
+  /** Work going on, each piece with a token of its own: busy until the last ends, or Cancel ends them all. */
+  private readonly working = new Set<symbol>();
+  /** OCR's piece of work, begun and ended through `progress`. */
+  private progressToken: symbol | null = null;
   /** Files being opened (a password prompt lets the user work meanwhile): their Sources are not in the Page List yet. */
   private opening = 0;
   /** What Cancel stops besides the worker: OCR in the main thread. */
   private readonly cancelHooks = new Set<() => void>();
   private runSeq = 0;
+  /** Changes of the Page List so far: a run's Result stands only if none came while it ran. */
+  private pagesVersion = 0;
+  /** The version of the Page List each Result was made from: only those of the current one can be applied. */
+  private readonly madeFrom = new WeakMap<RunResult, number>();
+  /** What the open panel's parts do when the Page List changes: their Results are gone. */
+  private readonly pagesHooks = new Set<() => void>();
 
   private panel: PanelInstance | null = null;
   private panelDef: PanelDef | null = null;
@@ -183,9 +192,17 @@ export class Toolkit {
       currentChanged: (page) => {
         this.ui.pageNo.value = String(page + 1);
       },
+      // A Result's pages are not the Page List's: only the Workspace's are edited.
       edit: {
-        move: (keys, before) => this.move(keys, before),
+        move: (keys, before) => {
+          if (this.showing === "workspace" && this.editable()) {
+            this.move(keys, before);
+          }
+        },
         remove: (keys) => {
+          if (this.showing !== "workspace" || !this.editable()) {
+            return;
+          }
           const gone = new Set(keys);
           this.commit(
             this.pages.filter((p) => !gone.has(p.key)),
@@ -193,6 +210,9 @@ export class Toolkit {
           );
         },
         rotate: (key) => {
+          if (this.showing !== "workspace" || !this.editable()) {
+            return;
+          }
           this.commit(
             this.pages.map((p) =>
               p.key === key ? { ...p, rotate: (p.rotate + 90) % 360 } : p
@@ -255,14 +275,32 @@ export class Toolkit {
     this.showError("");
   }
 
-  private setBusy(on: boolean, text = "") {
-    this.busy = on;
+  private get busy(): boolean {
+    return this.working.size > 0;
+  }
+
+  private showBusy() {
+    const on = this.busy;
     this.root.classList.toggle("busy", on);
     this.ui.progress.classList.toggle("on", on);
-    if (on) {
-      this.setPhase({ fraction: null, text });
-    } else {
+    if (!on) {
       void this.renderEngines();
+    }
+  }
+
+  /** A piece of work begins: the bar shows `text` until every piece has ended. */
+  private beginBusy(text: string): symbol {
+    const token = Symbol(text);
+    this.working.add(token);
+    this.showBusy();
+    this.setPhase({ fraction: null, text });
+    return token;
+  }
+
+  /** A piece of work ends (once; again, or after Cancel, is nothing). */
+  private endBusy(token: symbol | null) {
+    if (token && this.working.delete(token)) {
+      this.showBusy();
     }
   }
 
@@ -423,7 +461,9 @@ export class Toolkit {
       this.showing = "workspace";
       this.refreshView();
     }
-    this.setBusy(false);
+    this.working.clear();
+    this.progressToken = null;
+    this.showBusy();
     this.showNote("Cancelled.");
   }
 
@@ -499,6 +539,16 @@ export class Toolkit {
     this.ui.status.textContent = `${this.firstName()}${n > 1 ? ` + ${count(n - 1, "file", "files")}` : ""} · ${count(this.pages.length, "page", "pages")}`;
   }
 
+  /** Whether the user may change the Page List now: not while an Operation or OCR runs, whose Result is of the pages as they were. */
+  private editable(): boolean {
+    if (this.busy) {
+      this.showNote(
+        "The pages stay as they are while work runs: wait for it to finish, or Cancel it."
+      );
+    }
+    return !this.busy;
+  }
+
   /** Make `next` the Page List, as one step Undo can take back. */
   private commit(next: PageEntry[], label: string) {
     if (next.length === 0) {
@@ -518,7 +568,7 @@ export class Toolkit {
 
   private undo() {
     const prev = this.past.at(-1);
-    if (!prev || this.busy) {
+    if (!prev || !this.editable()) {
       return;
     }
     this.past = this.past.slice(0, -1);
@@ -529,7 +579,7 @@ export class Toolkit {
 
   private redo() {
     const [next, ...rest] = this.future;
-    if (!next || this.busy) {
+    if (!next || !this.editable()) {
       return;
     }
     this.future = rest;
@@ -573,6 +623,8 @@ export class Toolkit {
   }
 
   private afterPagesChanged() {
+    // Runs still going are of the pages before: what they make is dropped.
+    this.pagesVersion += 1;
     this.releaseSources();
     this.current = null;
     this.hits = [];
@@ -583,6 +635,9 @@ export class Toolkit {
       this.showResult(null);
     } else {
       this.refreshView();
+    }
+    for (const hook of this.pagesHooks) {
+      hook();
     }
     if (this.pages.length > 0 && !this.panel && this.panelDef) {
       this.panel = this.panelDef.mount(this.api, this.panelValues);
@@ -844,9 +899,11 @@ export class Toolkit {
       this.runSeq += 1;
     }
     const mine = this.runSeq;
+    const version = this.pagesVersion;
+    let token: symbol | null = null;
     if (!opts.quiet) {
       this.clearMessages();
-      this.setBusy(true, what);
+      token = this.beginBusy(what);
     }
     try {
       const doc = await this.currentDoc();
@@ -855,15 +912,23 @@ export class Toolkit {
         this.setPhase({ fraction: null, text: what });
       }
       const r = await w.run(op, doc.id, options);
-      if (own && mine !== this.runSeq) {
+      const superseded = own && mine !== this.runSeq;
+      const pagesChanged = version !== this.pagesVersion;
+      if (superseded || pagesChanged) {
         if (r.doc) {
           void quietly(w.call("close", [r.doc.id]));
+        }
+        if (pagesChanged && !superseded && !opts.quiet) {
+          this.showNote(
+            "The pages changed while that ran, so what it made is gone: run it again."
+          );
         }
         return null;
       }
       if (r.doc) {
         this.unapplied.add(r.doc.id);
       }
+      this.madeFrom.set(r, version);
       return r;
     } catch (error) {
       if (message(error) !== CANCELLED) {
@@ -871,9 +936,7 @@ export class Toolkit {
       }
       return null;
     } finally {
-      if (!opts.quiet) {
-        this.setBusy(false);
-      }
+      this.endBusy(token);
     }
   }
 
@@ -885,29 +948,55 @@ export class Toolkit {
   }
 
   /** A Result made the Workspace: one new Source, all its pages. */
-  private apply(r: RunResult, label: string) {
-    if (!r.doc) {
+  private async apply(r: RunResult, label: string) {
+    const { doc } = r;
+    if (!doc || !this.editable()) {
       return;
     }
-    // Made by a worker since thrown away (Cancel, a crash): the next one is handed it with the rest.
-    const held = this.unapplied.delete(r.doc.id);
-    if (!held) {
-      this.worker?.terminate();
-      this.worker = null;
+    const isFresh = () => this.madeFrom.get(r) === this.pagesVersion;
+    if (!isFresh()) {
+      this.showNote(
+        "The pages changed since that was made: run it again to apply it."
+      );
+      return;
+    }
+    const name = `${this.firstName()}.pdf`;
+    let workerId = doc.id;
+    if (!this.unapplied.delete(doc.id)) {
+      // Made by a worker since thrown away (Cancel, a crash): the one running now is handed it.
+      const token = this.beginBusy(`Applying ${label}`);
+      try {
+        const w = await this.ensureWorker();
+        const copy = new Uint8Array(doc.bytes);
+        const info = await w.call("adopt", [copy, name, null], [copy.buffer]);
+        workerId = info.id;
+      } catch (error) {
+        if (message(error) !== CANCELLED) {
+          this.showError(message(error));
+        }
+        return;
+      } finally {
+        this.endBusy(token);
+      }
+      // The pages changed while it was handed over (a file opened once its password came).
+      if (!isFresh()) {
+        void quietly(this.worker?.call("close", [workerId]));
+        return;
+      }
     }
     const key = this.newKey();
     this.sources.set(key, {
-      bytes: r.doc.bytes,
+      bytes: doc.bytes,
       key,
-      name: `${this.firstName()}.pdf`,
+      name,
       original: null,
-      pages: r.doc.pages,
-      workerId: held ? r.doc.id : "",
+      pages: doc.pages,
+      workerId,
     });
     this.result = null;
     this.showing = "workspace";
     this.commit(
-      r.doc.pages.map((_, index) => ({
+      doc.pages.map((_, index) => ({
         index,
         key: this.newKey(),
         rotate: 0,
@@ -948,7 +1037,9 @@ export class Toolkit {
       addFiles: (files) => {
         void this.openFiles(files, true);
       },
-      apply: (r, label) => this.apply(r, label),
+      apply: (r, label) => {
+        void this.apply(r, label);
+      },
       blank: (w, h) => this.blank(w, h),
       body: this.ui.panelBody,
       clearMessages: () => this.clearMessages(),
@@ -973,6 +1064,9 @@ export class Toolkit {
         this.cancelHooks.add(hook);
         return () => this.cancelHooks.delete(hook);
       },
+      onPagesChanged: (hook) => {
+        this.pagesHooks.add(hook);
+      },
       open: (id, handoff) => this.openPanel(id, handoff),
       pageCount: () => this.pages.length,
       pages: () => this.pages,
@@ -995,7 +1089,11 @@ export class Toolkit {
         this.panelMarks = fn;
         this.viewer.refreshMarks();
       },
-      setPages: (next, label) => this.commit(next, label),
+      setPages: (next, label) => {
+        if (this.editable()) {
+          this.commit(next, label);
+        }
+      },
       setTool: (tool, handler) => this.setTool(tool, handler),
       showResult: (r) => this.showResult(r),
       sizes: () => this.pages.map((p) => this.sizeOf(p)),
@@ -1009,15 +1107,17 @@ export class Toolkit {
     };
   }
 
-  /** Progress of work outside the worker (OCR); a fraction of 1 or no text ends it. */
+  /** Progress of work outside the worker (OCR); no text ends it. */
   private progress(text: string, fraction: number | null) {
-    if (!this.busy) {
-      this.setBusy(true, text);
+    if (text === "") {
+      this.endBusy(this.progressToken);
+      this.progressToken = null;
+      return;
+    }
+    if (!(this.progressToken && this.working.has(this.progressToken))) {
+      this.progressToken = this.beginBusy(text);
     }
     this.setPhase({ fraction, text });
-    if (fraction === 1 || text === "") {
-      this.setBusy(false);
-    }
   }
 
   private setTool(tool: DrawTool | null, handler?: (g: Gesture) => void) {
@@ -1063,6 +1163,7 @@ export class Toolkit {
     }
     this.panel?.destroy?.();
     this.panel = null;
+    this.pagesHooks.clear();
     this.takeOver(null);
     this.runSeq += 1;
     this.viewer.setTool(null);
@@ -1155,14 +1256,16 @@ export class Toolkit {
 
   /** Open one PDF, asking for its password as often as it takes; null when skipped. */
   private async openPdfFile(
-    w: PdfWorker,
     file: File,
-    notes: string[]
+    notes: string[],
+    work: { token: symbol }
   ): Promise<string | null> {
     const bytes = new Uint8Array(await file.arrayBuffer());
     let password: string | null = null;
     let wrong = false;
     for (;;) {
+      // The worker of now: the user may have pressed Cancel while asked for the password.
+      const w = await this.ensureWorker();
       const copy = new Uint8Array(bytes);
       const r = await w.call(
         "open",
@@ -1187,7 +1290,8 @@ export class Toolkit {
           r.encrypted ? { bytes, password: password ?? "" } : null
         );
       }
-      this.setBusy(false);
+      // Asked, the user may work meanwhile: this batch is not what keeps them waiting.
+      this.endBusy(work.token);
       password = await this.askPassword(
         file.name,
         wrong || r.status === "wrong-password"
@@ -1196,15 +1300,12 @@ export class Toolkit {
         return null;
       }
       wrong = true;
-      this.setBusy(true, `Opening ${file.name}`);
+      work.token = this.beginBusy(`Opening ${file.name}`);
     }
   }
 
   /** Images, in the order given, made into one Source of a page each. */
-  private async openImages(
-    w: PdfWorker,
-    batch: File[]
-  ): Promise<string | null> {
+  private async openImages(batch: File[]): Promise<string | null> {
     this.setPhase({
       fraction: null,
       text: `Making ${count(batch.length, "image", "images")} into pages`,
@@ -1217,6 +1318,7 @@ export class Toolkit {
       batch.length === 1
         ? `${stem(batch[0]?.name ?? "image")}.pdf`
         : "images.pdf";
+    const w = await this.ensureWorker();
     const r = await w.call(
       "images",
       [data, imageOptions(), name],
@@ -1226,13 +1328,13 @@ export class Toolkit {
   }
 
   private async openConverted(
-    w: PdfWorker,
     file: File,
     notes: string[]
   ): Promise<string | null> {
     const bytes = new Uint8Array(await file.arrayBuffer());
     const ext = file.name.slice(file.name.lastIndexOf(".") + 1).toLowerCase();
     const name = `${stem(file.name)}.pdf`;
+    const w = await this.ensureWorker();
     const r = await w.call("convert", [bytes, ext, name], [bytes.buffer]);
     if (r.status !== "ok") {
       return null;
@@ -1241,14 +1343,21 @@ export class Toolkit {
     return this.addSource(name, r);
   }
 
-  /** Each file opened as a Source, in order; runs of images become one Source. */
-  private async openEach(files: File[], notes: string[]): Promise<string[]> {
-    const w = await this.ensureWorker();
-    const added: string[] = [];
+  /**
+   * Each file opened as a Source, in order, its key put in `added` as soon
+   * as it is: what opened before a failure still joins the Page List. Runs
+   * of images become one Source.
+   */
+  private async openEach(
+    files: File[],
+    notes: string[],
+    added: string[],
+    work: { token: symbol }
+  ) {
     let images: File[] = [];
     const flush = async () => {
       if (images.length) {
-        const key = await this.openImages(w, images);
+        const key = await this.openImages(images);
         images = [];
         if (key) {
           added.push(key);
@@ -1265,9 +1374,9 @@ export class Toolkit {
       this.setPhase({ fraction: null, text: `Opening ${file.name}` });
       let key: string | null = null;
       if (kind === "pdf") {
-        key = await this.openPdfFile(w, file, notes);
+        key = await this.openPdfFile(file, notes, work);
       } else if (kind === "convertible") {
-        key = await this.openConverted(w, file, notes);
+        key = await this.openConverted(file, notes);
       } else {
         notes.push(
           `${file.name} is not a PDF, an image, or an e-book; skipped.`
@@ -1278,7 +1387,6 @@ export class Toolkit {
       }
     }
     await flush();
-    return added;
   }
 
   private async openFiles(files: File[], append: boolean) {
@@ -1286,22 +1394,23 @@ export class Toolkit {
       return;
     }
     this.clearMessages();
-    this.setBusy(
-      true,
-      `Opening ${files.length === 1 ? files[0]?.name : count(files.length, "file", "files")}`
-    );
+    const work = {
+      token: this.beginBusy(
+        `Opening ${files.length === 1 ? files[0]?.name : count(files.length, "file", "files")}`
+      ),
+    };
     const notes: string[] = [];
-    let added: string[] = [];
+    const added: string[] = [];
     this.opening += 1;
     try {
-      added = await this.openEach(files, notes);
+      await this.openEach(files, notes, added, work);
     } catch (error) {
       if (message(error) !== CANCELLED) {
         this.showError(message(error));
       }
     } finally {
       this.opening -= 1;
-      this.setBusy(false);
+      this.endBusy(work.token);
     }
     if (added.length > 0) {
       const entries = added.flatMap((key) =>

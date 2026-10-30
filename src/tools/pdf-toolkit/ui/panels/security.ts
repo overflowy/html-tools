@@ -2,6 +2,7 @@
 // permissions, redaction, sanitizing, finding personal data, and digital
 // signatures, checked and removed.
 
+import { isIdentity } from "../../pdf/assemble";
 import type { Rect } from "../../pdf/geometry";
 import { PII_KINDS, PII_NAMES } from "../../pdf/pii";
 import type { PiiFinding, PiiKind } from "../../pdf/pii";
@@ -716,14 +717,22 @@ const signatures: PanelDef = {
           })
         );
       }
-      if (
-        api.pages().length &&
-        new Set(api.pages().map((p) => p.src)).size > 1
-      ) {
+      const pages = api.pages();
+      const [first] = pages;
+      const source = api.sources().find((s) => s.key === first?.src);
+      const signed = list.length > 0;
+      if (signed && new Set(pages.map((p) => p.src)).size > 1) {
         cards.append(
           el("p", {
             class: "hint warn",
             text: "These pages come from several files: no signature can cover them, and the checks are of the assembled document.",
+          })
+        );
+      } else if (signed && source && !isIdentity(pages, source.pages.length)) {
+        cards.append(
+          el("p", {
+            class: "hint warn",
+            text: "Pages were turned, moved, or removed, so the checks are of the document put together again from them, not of the file as signed: its signatures cannot hold. Undo the changes to check the file itself.",
           })
         );
       }

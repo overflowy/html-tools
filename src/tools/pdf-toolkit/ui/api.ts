@@ -62,7 +62,7 @@ export interface Api {
   ) => Promise<Ran<K> | null>;
   /** Show a Result in the Viewer (null to go back to the Workspace). */
   showResult: (r: RunResult | null) => void;
-  /** Make a Result the Workspace, as one undoable step. */
+  /** Make a Result the Workspace, as one undoable step: one this panel's run made of the Page List as it is. */
   apply: (r: RunResult, label: string) => void;
   download: (blob: Blob, name: string) => void;
   /** One file as it is, several as a zip named `zipName`. */
@@ -70,7 +70,7 @@ export interface Api {
   note: (text: string) => void;
   error: (text: string) => void;
   clearMessages: () => void;
-  /** Long work outside the worker (OCR): shows the shared progress, and Cancel stops it. */
+  /** Long work outside the worker (OCR): shows the shared progress, and Cancel stops it; no text ends it. */
   progress: (text: string, fraction: number | null) => void;
   setTool: (tool: DrawTool | null, onGesture?: (g: Gesture) => void) => void;
   setMarks: (fn: ((page: number) => Mark[]) | null) => void;
@@ -93,6 +93,8 @@ export interface Api {
   newKey: () => string;
   /** Open more files into the Workspace, as the Add files button does. */
   addFiles: (files: File[]) => void;
+  /** Run `hook` whenever the Page List changes, until the panel closes. */
+  onPagesChanged: (hook: () => void) => void;
   /** Run `hook` when the user presses Cancel; returns the way to stop listening. */
   onCancel: (hook: () => void) => () => void;
   /** Put `view` where the pages are shown (Compare's view), or the pages back with null. */

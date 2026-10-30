@@ -224,6 +224,7 @@ const compareView = (api: Api, a: Doc, b: Doc, onClose: () => void) => {
 
   const drawText = async () => {
     gen += 1;
+    const mine = gen;
     observer?.disconnect();
     body.replaceChildren(
       el("p", { class: "sel-info", text: "Reading both texts…" })
@@ -233,6 +234,10 @@ const compareView = (api: Api, a: Doc, b: Doc, onClose: () => void) => {
       await w.call("texts", [a.id]),
       await w.call("texts", [b.id]),
     ];
+    // Another view was chosen while the texts were read.
+    if (mine !== gen) {
+      return;
+    }
     const lines = (pages: string[]) =>
       pages.flatMap((t, p) =>
         t

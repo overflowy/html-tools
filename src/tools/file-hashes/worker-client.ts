@@ -70,7 +70,7 @@ export class HashWorker {
       reject(new Error(CANCELLED));
       return promise;
     }
-    this.queue.push({
+    const waiter: Waiter = {
       fail: reject,
       take: (m) => {
         if (m.type === "progress") {
@@ -83,13 +83,16 @@ export class HashWorker {
         resolve({ digests: m.digests, ms: m.ms });
         return true;
       },
-    });
+    };
+    this.queue.push(waiter);
     const msg: WorkerRequest = { algorithms, source, type: "hash" };
     try {
       // Nothing transferred: a File crosses by reference.
       this.worker.postMessage(msg, []);
     } catch (error) {
-      // As a Promise executor would: a message that cannot be sent rejects.
+      // As a Promise executor would: a message that cannot be sent rejects,
+      // and waits for no answer, which would be the next request's.
+      this.queue = this.queue.filter((w) => w !== waiter);
       reject(error);
     }
     return promise;

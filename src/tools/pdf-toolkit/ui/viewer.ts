@@ -364,15 +364,6 @@ export class Viewer {
     this.cache.clear();
   }
 
-  /** Redraw what is on screen, for new renderings of the same pages (a Result updated in place). */
-  invalidate() {
-    this.cache.clear();
-    for (const s of this.slots) {
-      s.drawn = 0;
-    }
-    this.refreshVisible();
-  }
-
   /** Redraw the overlays only: marks changed. */
   refreshMarks() {
     for (const s of this.slots) {

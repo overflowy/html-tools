@@ -77,12 +77,15 @@ export class ArchiveWorker {
       reject(new Error(CANCELLED));
       return promise;
     }
-    this.queue.push({ fail: reject, take: (m) => take(m, resolve) });
+    const waiter: Waiter = { fail: reject, take: (m) => take(m, resolve) };
+    this.queue.push(waiter);
     try {
       // Nothing transferred: the inputs are Blobs, which cross by reference.
       this.worker.postMessage(msg, []);
     } catch (error) {
-      // As a Promise executor would: a message that cannot be sent rejects.
+      // As a Promise executor would: a message that cannot be sent rejects,
+      // and waits for no answer, which would be the next request's.
+      this.queue = this.queue.filter((w) => w !== waiter);
       reject(error);
     }
     return promise;

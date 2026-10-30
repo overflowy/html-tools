@@ -422,6 +422,11 @@
 .tool-pdf-toolkit .thumb:focus-within .thumb-actions {
   opacity: 1;
 }
+/* The pages stay as they are while work runs, and a Result's are not the Page List's. */
+.tool-pdf-toolkit.busy .thumb-actions,
+.tool-pdf-toolkit.showing-result .thumb-actions {
+  display: none;
+}
 .tool-pdf-toolkit .thumb-actions button {
   background: var(--surface-3);
   border-color: var(--border-strong);

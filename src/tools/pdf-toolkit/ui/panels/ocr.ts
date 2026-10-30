@@ -158,6 +158,7 @@ const ocr: PanelDef = {
       };
       api.clearMessages();
       foot.show(null, "");
+      info.textContent = "";
       try {
         api.progress("Looking at the pages", null);
         const w = await api.worker();
@@ -283,7 +284,16 @@ const ocr: PanelDef = {
           api.progress("", 1);
         }
       },
-      docChanged: () => foot.show(null, ""),
+      docChanged: () => {
+        info.textContent = "";
+        // What it read is of pages no longer there: laid over these, it would be in the wrong places.
+        if (stopRun) {
+          stopRun();
+          api.progress("", 1);
+          info.textContent =
+            "OCR stopped: the pages changed while it read them. Recognize again to read them as they are now.";
+        }
+      },
     };
   },
   name: "OCR: make text searchable",

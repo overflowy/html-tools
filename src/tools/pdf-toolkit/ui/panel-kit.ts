@@ -62,20 +62,22 @@ export const resultFoot = (api: Api, o: FootOptions) => {
     },
     { primary: true, title: "Make this the document you are working on" }
   );
-  dl.disabled = true;
-  apply.disabled = true;
   api.foot.replaceChildren(status, el("span", { class: "spacer" }), dl);
   if (!o.downloadOnly) {
     api.foot.append(apply);
   }
+  const show = (r: RunResult | null, text = "") => {
+    current = r;
+    const has = Boolean(r?.doc ?? r?.files?.length);
+    dl.disabled = !has;
+    apply.disabled = !r?.doc;
+    status.textContent = text;
+  };
+  show(null);
+  // A Result is of the pages it was made from: once they change, there is nothing to Apply.
+  api.onPagesChanged(() => show(null));
   return {
-    show: (r: RunResult | null, text = "") => {
-      current = r;
-      const has = Boolean(r?.doc ?? r?.files?.length);
-      dl.disabled = !has;
-      apply.disabled = !r?.doc;
-      status.textContent = text;
-    },
+    show,
     status: (text: string) => {
       status.textContent = text;
     },
@@ -289,11 +291,10 @@ export const transformPanel = <K extends OpName>(
       },
       docChanged: () => {
         ext.docChanged?.();
+        why = "";
+        run.clear();
         if (spec.live) {
           void run.run();
-        } else {
-          why = "";
-          run.clear();
         }
       },
       selectionChanged: ext.selectionChanged,

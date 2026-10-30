@@ -172,6 +172,21 @@ export const clearCached = async (): Promise<void> => {
   await request(db.transaction(STORE, "readwrite").objectStore(STORE).clear());
 };
 
+/** Drop one Engine from the cache: what was kept turned out unusable, so the next use fetches it again. */
+export const forgetEngine = async (asset: EngineAsset): Promise<void> => {
+  const db = await openDb();
+  if (!db) {
+    return;
+  }
+  try {
+    await request(
+      db.transaction(STORE, "readwrite").objectStore(STORE).delete(keyOf(asset))
+    );
+  } catch {
+    // A private window or a closed database: nothing was kept to drop.
+  }
+};
+
 export const cacheAvailable = (): Promise<boolean> =>
   openDb().then((db) => db !== null);
 

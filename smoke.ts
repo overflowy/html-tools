@@ -7,7 +7,7 @@ import path from "node:path";
 
 import jsQR from "jsqr";
 import { chromium } from "playwright-core";
-import type { Locator } from "playwright-core";
+import type { Locator, Worker as PageWorker } from "playwright-core";
 
 import osvFixtures from "./src/tools/dependency-audit/fixtures/osv.json";
 import { DKIM_SELECTORS } from "./src/tools/dns-lookup/email";
@@ -4870,6 +4870,37 @@ const ptkPreview = () =>
     undefined,
     { timeout: 60_000 }
   );
+/**
+ * Make a change, then wait for the live preview it starts to settle. The
+ * foot says "Updating" for as long as the preview takes, which can be less
+ * than a frame: an observer set up beforehand sees it however briefly.
+ */
+const ptkRepreview = async (change: () => Promise<void>) => {
+  await page.evaluate(() => {
+    const flag = window as unknown as { ptkUpdating?: boolean };
+    const foot = document.querySelector(".tool-pdf-toolkit .panel-foot");
+    flag.ptkUpdating = false;
+    const observer = new MutationObserver(() => {
+      const text = foot?.querySelector(".foot-status")?.textContent ?? "";
+      if (text.startsWith("Updating")) {
+        flag.ptkUpdating = true;
+        observer.disconnect();
+      }
+    });
+    if (foot) {
+      observer.observe(foot, {
+        characterData: true,
+        childList: true,
+        subtree: true,
+      });
+    }
+  });
+  await change();
+  await page.waitForFunction(
+    () => (window as unknown as { ptkUpdating?: boolean }).ptkUpdating === true
+  );
+  await ptkPreview();
+};
 const ptkDownload = async (click: () => Promise<void>) => {
   const [d] = await Promise.all([page.waitForEvent("download"), click()]);
   const file = await d.path();
@@ -5041,18 +5072,9 @@ await page.keyboard.press("Meta+z");
 // A live preview, applied, downloaded.
 await ptkPanel("watermark");
 await ptkPreview();
-await page.locator(`${ptk}.panel-body input[type=text]`).first().fill("SMOKE");
-// The preview of the text typed: it starts once typing settles, then settles itself.
-await page.waitForFunction(
-  () =>
-    (
-      document.querySelector(".tool-pdf-toolkit .foot-status")?.textContent ??
-      ""
-    ).startsWith("Updating"),
-  undefined,
-  { polling: "raf" }
+await ptkRepreview(() =>
+  page.locator(`${ptk}.panel-body input[type=text]`).first().fill("SMOKE")
 );
-await ptkPreview();
 const markedFoot = await ptkFoot();
 await page.locator(`${ptk}.panel-foot button`, { hasText: "Apply" }).click();
 await page.waitForFunction(
@@ -5172,6 +5194,23 @@ check(
   lockedStatus
 );
 
+// Cancel while a password is asked for: the batch goes on in the worker
+// started next, and every file of it reaches the Page List.
+await page.setInputFiles(`${ptk}.open-input`, [
+  ptkFiles.locked,
+  ptkFiles.alpha,
+]);
+await page.waitForSelector(`${ptk}.locked.on`);
+await ptkCancel();
+await page.locator(`${ptk}.unlock-pw`).fill(PTK_PASSWORD);
+await page.locator(`${ptk}.unlock-btn`).click();
+await ptkIdle();
+check(
+  "pdf: Cancel while a password is asked for still opens the whole batch",
+  (await ptkStatus()) === "locked + 1 file · 4 pages",
+  await ptkStatus()
+);
+
 // A signed file on its own: the signature checks out.
 await page.setInputFiles(`${ptk}.open-input`, [ptkFiles.signed]);
 await ptkIdle();
@@ -5184,6 +5223,40 @@ check(
   sigVerdict === "Valid, and the document is unchanged since" &&
     sigCard.includes("Smoke Signer"),
   sigCard
+);
+// Its page turned, the file is put together anew: what is checked is no
+// longer the file as signed, and the panel says so.
+await ptkPanel("organize");
+await page.locator(`${ptk}.view-seg button[data-view=grid]`).click();
+await page
+  .locator(`${ptk}.thumb-actions button[aria-label^="Turn"]`)
+  .first()
+  .evaluate((b) => (b as HTMLButtonElement).click());
+await ptkPanel("signatures");
+await page.waitForSelector(`${ptk}.sig-card`, { timeout: 30_000 });
+check(
+  "pdf: a signed file whose page was turned warns that the check is of a new document",
+  (await page.locator(`${ptk}.sig-cards .hint.warn`).count()) === 1,
+  await textOf(page.locator(`${ptk}.sig-cards`))
+);
+// An unsigned file, turned: there are no signatures to warn about.
+await ptkPanel("organize");
+await page.setInputFiles(`${ptk}.open-input`, [ptkFiles.alpha]);
+await ptkIdle();
+await page
+  .locator(`${ptk}.thumb-actions button[aria-label^="Turn"]`)
+  .first()
+  .evaluate((b) => (b as HTMLButtonElement).click());
+await ptkPanel("signatures");
+await page.waitForFunction(() =>
+  (
+    document.querySelector(".tool-pdf-toolkit .sig-cards")?.textContent ?? ""
+  ).includes("not signed")
+);
+check(
+  "pdf: an unsigned file whose page was turned has no warning about signatures",
+  (await page.locator(`${ptk}.sig-cards .hint.warn`).count()) === 0,
+  await textOf(page.locator(`${ptk}.sig-cards`))
 );
 
 // A signed file with a password: its signature is checked against the file
@@ -5258,6 +5331,83 @@ await ptkPanel("ocr");
       !(await page.locator(".tool-pdf-toolkit.showing-result").count())
   );
 }
+{
+  // A file asked for its password while OCR runs, then skipped: the batch
+  // ends, but OCR still runs, and the bar, Cancel, and the grid say so.
+  await page.setInputFiles(`${ptk}.add-input`, [ptkFiles.locked]);
+  await page.waitForSelector(`${ptk}.locked.on`);
+  await page
+    .locator(`${ptk}.phase`)
+    .evaluate((phase) => phase.replaceChildren());
+  await page
+    .locator(`${ptk}.panel-body button`, { hasText: "Recognize" })
+    .click();
+  await page.waitForFunction(
+    () =>
+      (
+        document.querySelector(".tool-pdf-toolkit .phase")?.textContent ?? ""
+      ).startsWith("Reading page"),
+    undefined,
+    { polling: "raf", timeout: 240_000 }
+  );
+  await page.locator(`${ptk}.unlock-skip`).click();
+  await page.waitForTimeout(300);
+  const stillBusy =
+    (await page.locator(`${ptk}.progress.on`).count()) === 1 &&
+    (await page.locator(".tool-pdf-toolkit.busy").count()) === 1;
+  await ptkCancel();
+  check(
+    "pdf: skipping a password while OCR runs leaves OCR shown as running",
+    stillBusy
+  );
+}
+{
+  // The pages change under OCR (a file opened once its password is given):
+  // the run stops, rather than laying what it read over other pages.
+  const recognize = page.locator(`${ptk}.panel-body button`, {
+    hasText: "Recognize",
+  });
+  await page.setInputFiles(`${ptk}.open-input`, [ptkFiles.locked]);
+  await page.waitForSelector(`${ptk}.locked.on`);
+  await page
+    .locator(`${ptk}.phase`)
+    .evaluate((phase) => phase.replaceChildren());
+  await recognize.click();
+  await page.waitForFunction(
+    () =>
+      (
+        document.querySelector(".tool-pdf-toolkit .phase")?.textContent ?? ""
+      ).startsWith("Reading page"),
+    undefined,
+    { polling: "raf", timeout: 240_000 }
+  );
+  await page.locator(`${ptk}.unlock-pw`).fill(PTK_PASSWORD);
+  await page.locator(`${ptk}.unlock-btn`).click();
+  // Either the note of a stopped run, or (missed) the Result of a finished one.
+  await page
+    .waitForFunction(
+      () =>
+        document
+          .querySelector(".tool-pdf-toolkit")
+          ?.classList.contains("showing-result") ||
+        (
+          document.querySelector(".tool-pdf-toolkit .panel-body .sel-info")
+            ?.textContent ?? ""
+        ).includes("OCR stopped"),
+      undefined,
+      { timeout: 60_000 }
+    )
+    .catch(() => null);
+  await ptkIdle();
+  const said = await textOf(page.locator(`${ptk}.panel-body .sel-info`));
+  check(
+    "pdf: OCR stops when the pages change under it",
+    !(await page.locator(".tool-pdf-toolkit.showing-result").count()) &&
+      said.includes("OCR stopped") &&
+      (await ptkStatus()) === "locked · 1 page",
+    `${await ptkStatus()} / ${said}`
+  );
+}
 await page.setInputFiles(`${ptk}.open-input`, [ptkFiles.scan]);
 await ptkIdle();
 await page
@@ -5279,6 +5429,54 @@ check(
   /quick brown fox/iu.test(pageTexts(ocred.bytes)[0] ?? ""),
   pageTexts(ocred.bytes)[0]
 );
+{
+  // A language's model that Tesseract cannot read: OCR says it could not
+  // start, and the Tesseract worker started for it is ended, not left behind.
+  let modelFetches = 0;
+  await page.route("**/isl.traineddata", (route) => {
+    modelFetches += 1;
+    return route.fulfill({ body: "not a model", status: 200 });
+  });
+  const started: { closed: boolean }[] = [];
+  const onWorker = (w: PageWorker) => {
+    // Tesseract's worker is a blob: URL; the PDF worker a data: URL.
+    if (w.url().startsWith("blob:")) {
+      const seen = { closed: false };
+      started.push(seen);
+      w.on("close", () => {
+        seen.closed = true;
+      });
+    }
+  };
+  page.on("worker", onWorker);
+  const langs = page.locator(`${ptk}.langs`);
+  await langs.getByLabel("Icelandic", { exact: true }).check();
+  await langs.getByLabel("English", { exact: true }).uncheck();
+  const recognizeAndFail = async () => {
+    await page
+      .locator(`${ptk}.panel-body button`, { hasText: "Recognize" })
+      .click();
+    await page.waitForSelector(`${ptk}.error-box.on`, { timeout: 120_000 });
+    await ptkIdle();
+  };
+  await recognizeAndFail();
+  await page.waitForTimeout(1000);
+  page.off("worker", onWorker);
+  const errorText = await textOf(page.locator(`${ptk}.error-box`));
+  check(
+    "pdf: OCR that cannot start ends the Tesseract worker it started",
+    started.length > 0 && started.every((s) => s.closed),
+    `${started.filter((s) => s.closed).length} of ${started.length} closed; ${errorText}`
+  );
+  // The model it could not read is not kept: the next try downloads it again.
+  await recognizeAndFail();
+  await page.unroute("**/isl.traineddata");
+  check(
+    "pdf: a model OCR could not read is fetched again, not taken from the cache",
+    modelFetches === 2,
+    `${modelFetches} fetches`
+  );
+}
 
 // Cancel throws the worker away; the next one gets the Sources back under
 // ids of its own. One file, two previews (each a document in the worker),
@@ -5289,17 +5487,9 @@ await page.goto(`${url}#pdf-toolkit/watermark`);
 await page.setInputFiles(`${ptk}.open-input`, [ptkFiles.alpha]);
 await ptkIdle();
 await ptkPreview();
-await page.locator(`${ptk}.panel-body input[type=text]`).first().fill("AGAIN");
-await page.waitForFunction(
-  () =>
-    (
-      document.querySelector(".tool-pdf-toolkit .foot-status")?.textContent ??
-      ""
-    ).startsWith("Updating"),
-  undefined,
-  { polling: "raf" }
+await ptkRepreview(() =>
+  page.locator(`${ptk}.panel-body input[type=text]`).first().fill("AGAIN")
 );
-await ptkPreview();
 await page.locator(`${ptk}.panel-foot button`, { hasText: "Apply" }).click();
 {
   const before = await ptkThumbImages();
@@ -5342,18 +5532,130 @@ await page.locator(`${ptk}.panel-body button.primary`).last().click();
 await ptkPreview();
 await ptkCancel();
 await ptkDownload(() => page.locator(`${ptk}.download-btn`).click());
-await page.locator(`${ptk}.panel-foot button`, { hasText: "Apply" }).click();
 {
+  // The worker running is handed the Result: none is thrown away and started again.
+  let spawned = 0;
+  const onWorker = () => {
+    spawned += 1;
+  };
+  page.on("worker", onWorker);
+  await page.locator(`${ptk}.panel-foot button`, { hasText: "Apply" }).click();
   const applied = await ptkDownload(() =>
     page.locator(`${ptk}.download-btn`).click()
   );
+  await ptkThumbImages();
+  page.off("worker", onWorker);
   check(
     "pdf: a Result applied after Cancel restarted the worker is the Workspace",
     pageTexts(applied.bytes).length === 3 &&
       pageTexts(applied.bytes).every((t) => t.includes("AGAIN")),
     JSON.stringify(pageTexts(applied.bytes))
   );
+  check(
+    "pdf: applying it starts no worker",
+    spawned === 0,
+    `${spawned} started`
+  );
 }
+
+// While an Operation runs, the pages stay as they are: neither the grid's
+// buttons nor its keys change them, so the Result is of the pages shown.
+await page.locator(`${ptk}.view-seg button[data-view=grid]`).click();
+await ptkPanel("repair");
+await page.evaluate(() => {
+  const root = document.querySelector(".tool-pdf-toolkit");
+  const run = [
+    ...(root?.querySelectorAll<HTMLButtonElement>(
+      ".panel-body button.primary"
+    ) ?? []),
+  ].at(-1);
+  run?.click();
+  root
+    ?.querySelector<HTMLButtonElement>(
+      '.thumb-actions button[aria-label^="Delete"]'
+    )
+    ?.click();
+  root
+    ?.querySelector<HTMLButtonElement>(
+      '.thumb-actions button[aria-label^="Turn"]'
+    )
+    ?.click();
+  root
+    ?.querySelector(".thumb")
+    ?.dispatchEvent(
+      new KeyboardEvent("keydown", { bubbles: true, key: "Delete" })
+    );
+});
+await ptkPreview();
+{
+  const kept = await ptkDownload(() =>
+    page.locator(`${ptk}.download-btn`).click()
+  );
+  check(
+    "pdf: the grid does not change the pages while an Operation runs",
+    pageTexts(kept.bytes).length === 3 &&
+      !openTest(kept.bytes)
+        .loadPage(0)
+        .getObject()
+        .getInheritable("Rotate")
+        .asNumber(),
+    JSON.stringify(pageTexts(kept.bytes))
+  );
+}
+
+// A live preview whose pages changed is gone from the foot at once, not
+// when the next one comes: until then there is nothing to Apply.
+await ptkPanel("organize");
+await page.setInputFiles(`${ptk}.open-input`, [ptkFiles.alpha]);
+await ptkIdle();
+await ptkPanel("watermark");
+await ptkPreview();
+{
+  const applyOffered = await page.evaluate(() => {
+    const root = document.querySelector(".tool-pdf-toolkit");
+    root
+      ?.querySelector<HTMLButtonElement>(
+        ".result-seg button[data-show=workspace]"
+      )
+      ?.click();
+    root
+      ?.querySelector<HTMLButtonElement>(
+        '.thumb-actions button[aria-label^="Delete"]'
+      )
+      ?.click();
+    const apply = [
+      ...(root?.querySelectorAll<HTMLButtonElement>(".panel-foot button") ??
+        []),
+    ].find((b) => b.textContent === "Apply");
+    return apply ? !apply.disabled : null;
+  });
+  await ptkPreview();
+  const foot = await ptkFoot();
+  check(
+    "pdf: a live preview's Apply goes the moment the pages change",
+    applyOffered === false && foot.startsWith("2 pages"),
+    `${applyOffered} / ${foot}`
+  );
+}
+
+// Compare: a view chosen while the text diff is still being read wins.
+await ptkPanel("organize");
+await page.setInputFiles(`${ptk}.open-input`, [ptkFiles.alpha, ptkFiles.beta]);
+await ptkIdle();
+await ptkPanel("compare");
+await page.selectOption(`${ptk}.panel-body select`, { label: "beta.pdf" });
+await page.waitForSelector(".tool-pdf-toolkit .compare .compare-row");
+await page.evaluate(() => {
+  const seg = document.querySelector(".tool-pdf-toolkit .compare .seg");
+  seg?.querySelector<HTMLButtonElement>("button[data-view=text]")?.click();
+  seg?.querySelector<HTMLButtonElement>("button[data-view=side]")?.click();
+});
+await page.waitForTimeout(1500);
+check(
+  "pdf: Compare shows the view chosen last, not a text diff that came after",
+  (await page.locator(".tool-pdf-toolkit .compare .text-diff").count()) === 0 &&
+    (await page.locator(".tool-pdf-toolkit .compare .compare-row").count()) > 0
+);
 
 // A Deep Link opens an Operation with its options.
 await page.goto("about:blank");

@@ -6,6 +6,7 @@
 import { createWorker } from "tesseract.js";
 import type { Worker as TessWorker } from "tesseract.js";
 
+import { forgetEngine } from "./engines";
 import type { EngineAsset } from "./engines";
 import { scriptBlobUrl, scriptDataUrl } from "./script-url";
 
@@ -76,6 +77,31 @@ export const tesseractCore = (): EngineAsset =>
 const patchTesseractWorker = (src: string): string =>
   src.replace('"string"==typeof t?t:t.data', '"string"==typeof t?t:t.code');
 
+/**
+ * `start()`, and every Worker constructed while it ran. tesseract.js spawns
+ * its worker in createWorker's first, synchronous step and keeps it to
+ * itself; when starting fails, createWorker may never settle (a language
+ * that does not load rejects only through errorHandler), so this is the
+ * one way to end that worker.
+ */
+const watchingSpawns = <T>(
+  start: () => T
+): { result: T; spawned: Worker[] } => {
+  const Real = globalThis.Worker;
+  const spawned: Worker[] = [];
+  globalThis.Worker = class extends Real {
+    constructor(...args: ConstructorParameters<typeof Worker>) {
+      super(...args);
+      spawned.push(this);
+    }
+  };
+  try {
+    return { result: start(), spawned };
+  } finally {
+    globalThis.Worker = Real;
+  }
+};
+
 export interface TesseractFiles {
   /** The tesseract.js worker script. */
   workerSrc: string;
@@ -105,21 +131,31 @@ export const startTesseract = async (
     TesseractCore = (m = {}) => core({ printErr: (s) => console.warn("tesseract: " + s), ...m });`
   );
   const failure = Promise.withResolvers<never>();
+  const { result: starting, spawned } = watchingSpawns(() =>
+    createWorker(files.models as unknown as string[], 1, {
+      cacheMethod: "none",
+      errorHandler: (e: unknown) =>
+        failure.reject(
+          new Error(
+            `OCR could not start: ${e instanceof Error ? e.message : String(e)}`
+          )
+        ),
+      workerBlobURL: false,
+      workerPath: bootUrl,
+    })
+  );
   try {
-    return await Promise.race([
-      createWorker(files.models as unknown as string[], 1, {
-        cacheMethod: "none",
-        errorHandler: (e: unknown) =>
-          failure.reject(
-            new Error(
-              `OCR could not start: ${e instanceof Error ? e.message : String(e)}`
-            )
-          ),
-        workerBlobURL: false,
-        workerPath: bootUrl,
-      }),
-      failure.promise,
-    ]);
+    return await Promise.race([starting, failure.promise]);
+  } catch (error) {
+    for (const w of spawned) {
+      w.terminate();
+    }
+    // A model Tesseract could not read (a download cut short, a proxy's
+    // error page) would fail the same way every time from the cache.
+    await Promise.all(
+      files.models.map(({ code }) => forgetEngine(languageAsset(code)))
+    );
+    throw error;
   } finally {
     URL.revokeObjectURL(bootUrl);
   }
