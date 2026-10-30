@@ -25,3 +25,8 @@ declare module "@react-symbols/icons/folders/*" {
   const markup: string;
   export default markup;
 }
+/** Recorded sounds are imported one file at a time, as a data: URL (build.ts plugin). */
+declare module "*.mp3" {
+  const url: string;
+  export default url;
+}

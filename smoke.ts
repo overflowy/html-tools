@@ -54,7 +54,7 @@ function check(label: string, ok: boolean, detail = "") {
 
 await page.goto(url);
 const names = await page.locator(".tool-list button").allTextContents();
-check("sidebar lists all tools", names.length === 13, names.join(", "));
+check("sidebar lists all tools", names.length === 14, names.join(", "));
 
 // base64 tool: paste a tiny valid png via direct input.
 await page.goto(url + "#base64-to-image");
@@ -1090,6 +1090,166 @@ check("uuid clicking the value copies it", (await copiedVia(".tool-uuid-generato
 check("uuid value says so", (await uuidValue()) === "Copied");
 await page.waitForFunction((u: string) => document.querySelector(".tool-uuid-generator .value")!.textContent === u, secondUuid);
 check("uuid value comes back after the flash", true);
+
+// Dual N-Back: an in-page player watches the board and listens in on Web
+// Audio (each decoded buffer is tagged with the byte length of its file, so
+// the four operation words are told apart by their files' sizes), then
+// answers perfectly, never, or for Arithmetic types the result. Sessions are
+// short through the Deep Link: 5 + N² trials of a second each.
+const dnb = ".tool-dual-n-back ";
+const dnbOps: Record<number, string> = {};
+for (const op of ["add", "subtract", "multiply", "divide"]) dnbOps[Bun.file(`src/tools/dual-n-back/sounds/operations/${op}.mp3`).size] = op;
+check("dual n-back: the operation recordings differ in size, so the test can tell them apart", Object.keys(dnbOps).length === 4);
+type DnbStyle = "perfect" | "silent";
+const dnbPlay = (style: DnbStyle) => page.evaluate(([how, ops]) => {
+  const w = window as unknown as { dnbHeard: number[]; dnbPlayer?: MutationObserver; dnbTapped?: boolean };
+  w.dnbHeard = [];
+  w.dnbPlayer?.disconnect();
+  if (!w.dnbTapped) {
+    w.dnbTapped = true;
+    type Tagged = AudioBuffer & { dnbLen?: number };
+    const decode = BaseAudioContext.prototype.decodeAudioData;
+    BaseAudioContext.prototype.decodeAudioData = function (this: BaseAudioContext, data: ArrayBuffer) {
+      const len = data.byteLength;
+      return decode.call(this, data).then((buf: Tagged) => ((buf.dnbLen = len), buf));
+    } as typeof decode;
+    const start = AudioBufferSourceNode.prototype.start;
+    AudioBufferSourceNode.prototype.start = function (this: AudioBufferSourceNode, ...args: Parameters<typeof start>) {
+      w.dnbHeard.push((this.buffer as Tagged | null)?.dnbLen ?? 0);
+      return start.apply(this, args);
+    };
+  }
+  const host = document.querySelector(".tool-dual-n-back")!;
+  const n = Number(/(\d+)-Back/.exec(host.querySelector(".stage-title")!.textContent!)![1]);
+  const arithmetic = host.querySelector(".answer:not([hidden])") !== null;
+  const cells: number[] = [];
+  const sounds: number[] = [];
+  const numbers: number[] = [];
+  let heard = 0;
+  const key = (k: string) => document.dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true }));
+  const apply: Record<string, (a: number, b: number) => number> = { add: (a, b) => a + b, subtract: (a, b) => a - b, multiply: (a, b) => a * b, divide: (a, b) => a / b };
+  // A sound starts a moment after its trial is drawn, once its buffer is in hand; the player answers after both.
+  const answer = (cell: number, text: string) => {
+    const t = cells.length;
+    cells.push(cell);
+    const played = w.dnbHeard.slice(heard);
+    heard = w.dnbHeard.length;
+    if (arithmetic) {
+      numbers.push(Number(text));
+      if (how === "perfect" && t >= n) for (const c of String(apply[ops[played[0]!]!]!(numbers[t - n]!, numbers[t]!))) key(c);
+      return;
+    }
+    sounds.push(played[0] ?? 0);
+    if (how !== "perfect" || t < n) return;
+    if (cells[t] === cells[t - n]) key("a");
+    if (sounds[t] === sounds[t - n]) key("l");
+  };
+  w.dnbPlayer = new MutationObserver((records) => {
+    const stim = records.flatMap((r) => [...r.addedNodes]).find((x) => x instanceof HTMLElement && x.classList.contains("stim")) as HTMLElement | undefined;
+    if (stim) setTimeout(answer, 50, Number(stim.parentElement!.dataset.cell), stim.textContent ?? "");
+  });
+  w.dnbPlayer.observe(host.querySelector(".board")!, { childList: true, subtree: true });
+}, [style, dnbOps] as [DnbStyle, Record<number, string>]);
+const dnbResult = async () => {
+  await page.waitForSelector(dnb + ".overlay.result", { timeout: 60000 });
+  await page.evaluate(() => (window as unknown as { dnbPlayer?: MutationObserver }).dnbPlayer?.disconnect());
+  return (await page.locator(dnb + ".overlay").textContent()) ?? "";
+};
+
+await page.goto(url + "#dual-n-back/trials=5&secs=1");
+await page.waitForSelector(dnb + ".overlay.idle");
+check("dual n-back starts at Dual 2-back with 9 trials",
+  (await page.locator(dnb + ".stage-title").textContent()) === "Dual 2-Back" && (await page.locator(dnb + ".stage-meta").textContent())!.startsWith("9 trials"),
+  (await page.locator(dnb + ".stage-title").textContent()) + " | " + (await page.locator(dnb + ".stage-meta").textContent()));
+await dnbPlay("perfect");
+await page.keyboard.press("Space");
+await page.waitForFunction(() => document.querySelector(".tool-dual-n-back")!.classList.contains("running"));
+check("dual n-back: Space starts, and the setup is out of reach while it runs",
+  await page.evaluate(() => (document.querySelector(".tool-dual-n-back .setup") as HTMLElement).inert));
+await page.keyboard.press("p");
+await page.waitForSelector(dnb + ".overlay.paused");
+await page.waitForTimeout(1200);
+const pausedLeft = await page.locator(dnb + ".stage-meta").textContent();
+await page.keyboard.press("p");
+await page.waitForSelector(dnb + ".overlay.paused", { state: "hidden" });
+check("dual n-back: P pauses the clock and resumes it", pausedLeft === "9 trials" || pausedLeft === "9 left", pausedLeft ?? "");
+const perfect = await dnbResult();
+check("dual n-back: a perfect session scores 100% and raises N", perfect.includes("100%") && perfect.includes("N-Back raised to 3") && /Position\d+–0/.test(perfect), perfect);
+check("dual n-back: the next session is 3-back, and the level shows it",
+  (await page.locator(dnb + ".stage-title").textContent()) === "Dual 3-Back" && (await page.locator(dnb + ".level-n").textContent()) === "3-back");
+check("dual n-back: today lists the session", (await page.locator(dnb + ".today-list li").count()) === 1 && (await page.locator(dnb + ".today-list li.up").count()) === 1);
+check("dual n-back: the session is kept across a reload", await page.evaluate(() => {
+  const h = JSON.parse(localStorage.getItem("html-tools:dual-n-back:history") ?? "[]");
+  return h.length === 1 && h[0].score === 100 && h[0].level.n === 3 && h[0].tallies.position1.misses === 0;
+}));
+
+// Manual: the player's N, never a level change, and a player who never
+// presses scores nothing.
+await page.goto(url + "#dual-n-back/manual=1&n=1&trials=5&secs=1");
+await page.waitForFunction(() => document.querySelector(".tool-dual-n-back .stage-title")!.textContent === "Dual 1-Back · Manual");
+await dnbPlay("silent");
+await page.locator(dnb + ".start-btn").click();
+const silent = await dnbResult();
+check("dual n-back: a manual session that never answers scores 0% and leaves the level", silent.includes("0%") && !silent.includes("N-Back"), silent);
+await page.locator(dnb + ".level-seg button", { hasText: "Automatic" }).click();
+check("dual n-back: back on Automatic, the level is still 3",
+  (await page.locator(dnb + ".level-n").textContent()) === "3-back" && (await page.evaluate(() => location.hash)) === "#dual-n-back/trials=5&secs=1");
+
+// Arithmetic: typed answers, from the number on the board and the spoken operation.
+await page.goto(url + "#dual-n-back/mode=m&manual=1&n=1&trials=5&secs=1&ops=asm");
+await page.waitForFunction(() => document.querySelector(".tool-dual-n-back .stage-title")!.textContent === "Arithmetic 1-Back · Manual");
+await dnbPlay("perfect");
+await page.keyboard.press("Space");
+const arith = await dnbResult();
+check("dual n-back: arithmetic answered right scores 100%", arith.includes("100%"), arith);
+
+// Self-paced: a trial waits for Enter; Stop discards the Session.
+await page.goto(url + "#dual-n-back/mode=pa-t&manual=1&n=1&trials=5");
+await page.waitForFunction(() => document.querySelector(".tool-dual-n-back .stage-title")!.textContent === "Self-paced Dual 1-Back · Manual");
+await page.keyboard.press("Space");
+await page.waitForSelector(dnb + ".stim");
+await page.waitForTimeout(3500);
+const waited = await page.locator(dnb + ".stage-meta").textContent();
+await page.keyboard.press("Enter");
+await page.waitForFunction(() => document.querySelector(".tool-dual-n-back .stage-meta")!.textContent === "5 left");
+check("dual n-back: self-paced waits for Enter", waited === "6 left" && (await page.locator(dnb + ".stim").count()) === 1, waited ?? "");
+await page.keyboard.press("Escape");
+await page.waitForSelector(dnb + ".overlay.idle");
+check("dual n-back: Stop discards the session", await page.evaluate(() => JSON.parse(localStorage.getItem("html-tools:dual-n-back:history")!).length === 3));
+
+// The mode toggles settle on a playable Mode and reach the Deep Link.
+await page.goto(url + "#dual-n-back/trials=5&secs=1");
+await page.locator(dnb + ".chip", { hasText: "Arithmetic" }).click();
+check("dual n-back: Arithmetic turns Sound off", (await page.locator(dnb + '.chip[data-toggle="sound"]').getAttribute("aria-pressed")) === "false" &&
+  (await page.evaluate(() => location.hash)).includes("mode=pm"));
+await page.locator(dnb + ".multi-seg button", { hasText: "3" }).click();
+check("dual n-back: three objects turn Arithmetic off and add a button per object",
+  (await page.evaluate(() => location.hash)).includes("mode=p-3") && (await page.locator(dnb + ".resp").count()) === 3);
+
+// History: the chart, the table, export, clearing, and importing the export back.
+await page.goto(url + "#dual-n-back/trials=5&secs=1");
+await page.locator(dnb + ".view-seg button", { hasText: "History" }).click();
+await page.waitForSelector(dnb + ".chart svg");
+check("dual n-back history: the automatic session is charted, and both Dual sessions are listed",
+  (await page.locator(dnb + ".chart .dot").count()) === 2 && (await page.locator(dnb + ".sessions tbody tr").count()) === 2,
+  (await page.locator(dnb + ".chart .dot").count()) + " dots, " + (await page.locator(dnb + ".sessions tbody tr").count()) + " rows");
+const [dnbExport] = await Promise.all([page.waitForEvent("download"), page.locator(dnb + ".export-btn").click()]);
+const exported = JSON.parse(await new Response(await dnbExport.createReadStream() as unknown as ReadableStream).text());
+check("dual n-back history: export holds every session", exported.format === "html-tools/dual-n-back" && exported.sessions.length === 3, dnbExport.suggestedFilename());
+const exportFile = { name: "export.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(exported)) };
+await page.locator(dnb + ".import-input").setInputFiles(exportFile);
+await page.waitForSelector(dnb + ".history-note.ok");
+check("dual n-back history: importing what is already here adds nothing",
+  (await page.locator(dnb + ".history-note").textContent()) === "0 sessions added from export.json, 3 already here.", (await page.locator(dnb + ".history-note").textContent()) ?? "");
+await page.locator(dnb + ".clear-btn").click();
+await page.locator(dnb + ".confirm-ok").click();
+check("dual n-back history: clearing deletes every session and resets the level",
+  (await page.evaluate(() => localStorage.getItem("html-tools:dual-n-back:history"))) === "[]" && (await page.locator(dnb + ".level-n").textContent()) === "2-back");
+await page.locator(dnb + ".import-input").setInputFiles(exportFile);
+await page.waitForFunction(() => document.querySelector(".tool-dual-n-back .history-note")!.textContent!.startsWith("3 sessions added"));
+check("dual n-back history: the export brings every session and the level back",
+  (await page.locator(dnb + ".sessions tbody tr").count()) === 2 && (await page.locator(dnb + ".level-n").textContent()) === "3-back");
+await page.locator(dnb + ".view-seg button", { hasText: "Train" }).click();
 
 // Markdown Editor: the welcome Draft on a first visit, Preview with Contents
 // open, then edits that reach the preview, the stats, the draft, and the Deep

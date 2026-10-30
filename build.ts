@@ -74,7 +74,19 @@ const reactSymbols: Bun.BunPlugin = {
   },
 };
 
-const plugins = [lucide, reactSymbols];
+// Recorded sounds go in as data: URLs, one import per file so only the ones
+// used are bundled, and the artifact stays one file.
+const audio: Bun.BunPlugin = {
+  name: "audio files",
+  setup(build) {
+    build.onLoad({ filter: /\.mp3$/ }, async (args) => {
+      const b64 = Buffer.from(await Bun.file(args.path).arrayBuffer()).toString("base64");
+      return { contents: "export default " + JSON.stringify("data:audio/mpeg;base64," + b64) + ";", loader: "js" };
+    });
+  },
+};
+
+const plugins = [lucide, reactSymbols, audio];
 
 const define: Record<string, string> = {};
 for (const w of WORKERS) {

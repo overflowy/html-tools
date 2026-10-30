@@ -8,6 +8,7 @@ A collection of browser utilities built into one self-contained `index.html`. Op
 - **Dependency Audit**: check a lockfile (npm, yarn, pnpm, bun, uv) against OSV.dev
 - **DNS Lookup**: DNS over HTTPS, subdomains, email auth checks, whois over RDAP
 - **Document to Markdown**: Word, Excel, PowerPoint, PDF and more, with OCR for scans
+- **Dual N-Back**: the n-back task with position, color, shape, sound, and arithmetic, automatic levels, and a history
 - **Image Metadata**: inspect EXIF and friends, download a stripped copy
 - **JSON/JSONC Key Sorter**: sort keys, keep comments
 - **LZString Save Decoder**: decode and encode incremental-game saves
@@ -49,4 +50,4 @@ uv run --with fonttools --with brotli python scripts/build-mona-sans.py "MonaSan
 
 ## License
 
-MIT, except the fonts in `src/shell/fonts/`, which are under the SIL Open Font License 1.1 (license files alongside).
+MIT, except the fonts in `src/shell/fonts/`, which are under the SIL Open Font License 1.1 (license files alongside), and the sounds in `src/tools/dual-n-back/sounds/`, which are under the GNU GPL v2 (`NOTICE.md` alongside).

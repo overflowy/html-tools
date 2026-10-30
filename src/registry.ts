@@ -3,6 +3,7 @@ import type { Tool } from "./shell/types";
 import base64ToImage from "./tools/base64-to-image";
 import dependencyAudit from "./tools/dependency-audit";
 import dnsLookup from "./tools/dns-lookup";
+import dualNBack from "./tools/dual-n-back";
 import docToMarkdown from "./tools/doc-to-markdown";
 import imageMetadata from "./tools/image-metadata";
 import jsoncSorter from "./tools/jsonc-sorter";
@@ -14,4 +15,4 @@ import speechToText from "./tools/speech-to-text";
 import uuidGenerator from "./tools/uuid-generator";
 import whoami from "./tools/whoami";
 
-export const tools: Tool[] = [base64ToImage, dependencyAudit, dnsLookup, docToMarkdown, imageMetadata, jsoncSorter, markdownEditor, pythonIde, qrGenerator, saveDecoder, speechToText, uuidGenerator, whoami];
+export const tools: Tool[] = [base64ToImage, dependencyAudit, dnsLookup, docToMarkdown, dualNBack, imageMetadata, jsoncSorter, markdownEditor, pythonIde, qrGenerator, saveDecoder, speechToText, uuidGenerator, whoami];
